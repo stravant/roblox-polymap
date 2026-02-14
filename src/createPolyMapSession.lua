@@ -111,6 +111,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local mIsDraggingHandle = false
 	local mDragRecording: string? = nil
 	local mSavedVertexPositions: { [number]: Vector3 } = {}
+	local mInfluencedVertices: { [number]: { position: Vector3, factor: number } } = {}
 	local mDragCentroid: Vector3? = nil
 
 	local VERTEX_CLICK_RADIUS = 3.0 -- world-space radius to find vertex
@@ -441,12 +442,58 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	end
 	draggerContext.DragUpdatedSignal = Signal.new()
 
+	local function computeFalloff(t: number): number
+		local falloff = currentSettings.InfluenceFalloff
+		if falloff == "Linear" then
+			return 1 - t
+		elseif falloff == "Smooth" then
+			return (1 + math.cos(t * math.pi)) / 2
+		elseif falloff == "Sharp" then
+			return (1 - t) ^ 2
+		end
+		return 1 - t
+	end
+
 	local function saveVertexPositions()
 		mSavedVertexPositions = {}
+		mInfluencedVertices = {}
+
 		for vid in mSelectedVertices do
 			local v = mMesh.getVertex(vid)
 			if v then
 				mSavedVertexPositions[vid] = v.position
+			end
+		end
+
+		-- Compute influenced (unselected) vertices within InfluenceRadius
+		local radius = currentSettings.InfluenceRadius
+		if radius <= 0 then
+			return
+		end
+
+		for vid, vertex in mMesh.getVertices() do
+			if mSelectedVertices[vid] then
+				continue
+			end
+
+			-- Find minimum distance to any selected vertex
+			local minDist = math.huge
+			for _, origPos in mSavedVertexPositions do
+				local dist = (vertex.position - origPos).Magnitude
+				if dist < minDist then
+					minDist = dist
+				end
+			end
+
+			if minDist < radius then
+				local t = minDist / radius
+				local factor = computeFalloff(t)
+				if factor > 0.001 then
+					mInfluencedVertices[vid] = {
+						position = vertex.position,
+						factor = factor,
+					}
+				end
 			end
 		end
 	end
@@ -472,8 +519,14 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	end
 
 	local function applyMove(globalTransform: CFrame)
+		local delta = globalTransform.Position
 		for vid, origPos in mSavedVertexPositions do
-			local newPos = origPos + globalTransform.Position
+			local newPos = origPos + delta
+			mMesh.moveVertex(vid, newPos, currentSettings.Thickness, getTriangleProps())
+		end
+		-- Apply weighted displacement to influenced vertices
+		for vid, info in mInfluencedVertices do
+			local newPos = info.position + delta * info.factor
 			mMesh.moveVertex(vid, newPos, currentSettings.Thickness, getTriangleProps())
 		end
 		changeSignal:Fire()
@@ -502,6 +555,15 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			local offset = origPos - mDragCentroid
 			local rotatedOffset = localRotation:VectorToWorldSpace(offset)
 			local newPos = mDragCentroid + rotatedOffset
+			mMesh.moveVertex(vid, newPos, currentSettings.Thickness, getTriangleProps())
+		end
+		-- Apply weighted rotation to influenced vertices
+		for vid, info in mInfluencedVertices do
+			local offset = info.position - mDragCentroid
+			local rotatedOffset = localRotation:VectorToWorldSpace(offset)
+			local fullNewPos = mDragCentroid + rotatedOffset
+			-- Lerp between original and fully-rotated position by influence factor
+			local newPos = info.position:Lerp(fullNewPos, info.factor)
 			mMesh.moveVertex(vid, newPos, currentSettings.Thickness, getTriangleProps())
 		end
 		changeSignal:Fire()
