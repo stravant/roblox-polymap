@@ -97,8 +97,9 @@ return function(t: TestTypes.TestContext)
 	end)
 
 	t.test("single wedge part returns exactly 3 vertices", function()
-		-- Create a simple WedgePart manually
-		local wedge = Instance.new("WedgePart")
+		-- Create a simple wedge part manually
+		local wedge = Instance.new("Part")
+		wedge.Shape = Enum.PartType.Wedge
 		wedge.Size = Vector3.new(0.2, 3, 4)
 		wedge.CFrame = CFrame.new(5, 5, 5)
 		wedge.Anchored = true

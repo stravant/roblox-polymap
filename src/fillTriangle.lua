@@ -6,7 +6,7 @@ export type TriangleProps = {
 	Transparency: number?,
 }
 
--- Fill a single triangle with 1-2 thin WedgeParts.
+-- Fill a single triangle with 1-2 thin wedge Parts.
 -- Normal is derived from vertex winding order (a, b, c counterclockwise).
 -- Returns the created parts.
 local function fillTriangle(
@@ -14,7 +14,7 @@ local function fillTriangle(
 	thickness: number,
 	parent: Instance,
 	props: TriangleProps?
-): { WedgePart }
+): { BasePart }
 	--[[       edg1
 		A ------|------>B  --.
 		'\      |      /      \
@@ -90,7 +90,7 @@ local function fillTriangle(
 
 	local depth = thickness
 
-	local createdParts: { WedgePart } = {}
+	local createdParts: { BasePart } = {}
 
 	-- Apply properties
 	local color = if props and props.Color then props.Color else Color3.fromRGB(163, 162, 165)
@@ -99,7 +99,8 @@ local function fillTriangle(
 
 	-- Make parts
 	if len1 > 0.001 then
-		local part1 = Instance.new("WedgePart")
+		local part1 = Instance.new("Part")
+		part1.Shape = Enum.PartType.Wedge
 		part1.TopSurface = Enum.SurfaceType.Smooth
 		part1.BottomSurface = Enum.SurfaceType.Smooth
 		part1.Anchored = true
@@ -112,7 +113,8 @@ local function fillTriangle(
 		table.insert(createdParts, part1)
 	end
 	if len2 > 0.001 then
-		local part2 = Instance.new("WedgePart")
+		local part2 = Instance.new("Part")
+		part2.Shape = Enum.PartType.Wedge
 		part2.TopSurface = Enum.SurfaceType.Smooth
 		part2.BottomSurface = Enum.SurfaceType.Smooth
 		part2.Anchored = true

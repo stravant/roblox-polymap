@@ -4,7 +4,7 @@ local TestTypes = require("./TestTypes")
 local fillTriangle = require("./fillTriangle")
 
 return function(t: TestTypes.TestContext)
-	t.test("creates 1-2 WedgeParts for a basic triangle", function()
+	t.test("creates 1-2 wedge parts for a basic triangle", function()
 		local folder = Instance.new("Folder")
 		folder.Parent = workspace
 
@@ -17,7 +17,8 @@ return function(t: TestTypes.TestContext)
 		t.expect(#parts <= 2).toBeTruthy()
 
 		for _, part in parts do
-			t.expect(part:IsA("WedgePart")).toBeTruthy()
+			t.expect(part:IsA("Part")).toBeTruthy()
+			t.expect((part :: Part).Shape == Enum.PartType.Wedge).toBeTruthy()
 			t.expect(part.Anchored).toBe(true)
 			-- Thickness is the smallest dimension
 			local minSize = math.min(part.Size.X, part.Size.Y, part.Size.Z)

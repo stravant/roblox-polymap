@@ -350,7 +350,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 	local function handlePaintClick(worldPos: Vector3)
 		local result = mouseRaycast()
-		if result and result.Instance:IsA("WedgePart") then
+		if result and result.Instance:IsA("BasePart") then
 			local recording = ChangeHistoryService:TryBeginRecording("PolyMap Paint")
 
 			local c = currentSettings.PaintColor

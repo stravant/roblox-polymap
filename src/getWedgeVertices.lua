@@ -1,8 +1,8 @@
 --!strict
 
--- Extract the 3 triangle vertices from a thin WedgePart.
+-- Extract the 3 triangle vertices from a thin wedge-shaped Part.
 --
--- Standard Roblox WedgePart geometry in local space (YZ cross-section):
+-- Standard Roblox wedge geometry in local space (YZ cross-section):
 --   The wedge slopes from bottom-back to top-front.
 --   Right-angle vertex at (-Y/2, -Z/2) in local YZ
 --   Top vertex at (Y/2, -Z/2) -- actually this is the slope top
@@ -13,13 +13,13 @@
 --
 -- The thin axis is identified as the smallest Size component.
 -- The triangle vertices are computed in the plane perpendicular to the thin axis.
-local function getWedgeVertices(wedge: WedgePart): (Vector3, Vector3, Vector3)
+local function getWedgeVertices(wedge: BasePart): (Vector3, Vector3, Vector3)
 	local size = wedge.Size
 	local cf = wedge.CFrame
 
 	-- The standard wedge cross-section vertices in local space (X is thin axis):
 	-- These are the 3 unique vertices of the triangular profile.
-	-- Roblox WedgePart: right angle at bottom, slope goes from bottom-back up to top-front
+	-- Roblox wedge: right angle at bottom, slope goes from bottom-back up to top-front
 	local halfX = size.X / 2
 	local halfY = size.Y / 2
 	local halfZ = size.Z / 2
@@ -38,7 +38,7 @@ local function getWedgeVertices(wedge: WedgePart): (Vector3, Vector3, Vector3)
 		minVal = size.Z
 	end
 
-	-- The standard WedgePart has 3 vertices on each triangular face.
+	-- The standard wedge shape has 3 vertices on each triangular face.
 	-- In the default orientation (thin axis = X), the triangular face
 	-- vertices in local space are:
 	--   v1 = (0, -halfY,  halfZ)  -- bottom-front (right angle)

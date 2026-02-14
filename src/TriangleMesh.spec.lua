@@ -214,7 +214,7 @@ return function(t: TestTypes.TestContext)
 		folder:Destroy()
 	end)
 
-	t.test("scanWorkspace finds thin WedgeParts", function()
+	t.test("scanWorkspace finds thin wedge parts", function()
 		local mesh = createTriangleMesh()
 		local folder = Instance.new("Folder")
 		folder.Name = "PolyMapTestScan"

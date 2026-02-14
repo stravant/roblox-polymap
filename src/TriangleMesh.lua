@@ -462,9 +462,9 @@ local function createTriangleMesh(): TriangleMesh
 		local scanRoot = root or workspace
 		local wedgeParts: { BasePart } = {}
 
-		-- Find all thin WedgeParts
-		for _, desc in workspace:QueryDescendants("BasePart") :: {BasePart} do
-			if desc:IsA("WedgePart") or (desc:IsA("Part") and desc.Shape == Enum.PartType.Wedge) then
+		-- Find all thin wedge-shaped parts
+		for _, desc in scanRoot:GetDescendants() do
+			if desc:IsA("WedgePart") or (desc:IsA("Part") and (desc :: Part).Shape == Enum.PartType.Wedge) then
 				local size = desc.Size
 				local minSize = math.min(size.X, size.Y, size.Z)
 				if minSize < THIN_THRESHOLD then

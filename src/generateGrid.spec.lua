@@ -19,10 +19,10 @@ return function(t: TestTypes.TestContext)
 		})
 
 		-- 3x2 grid = 6 cells, 2 triangles per cell = 12 triangles
-		-- Each triangle = 1-2 WedgeParts
+		-- Each triangle = 1-2 wedge parts
 		local wedgeCount = 0
 		for _, child in folder:GetChildren() do
-			if child:IsA("WedgePart") then
+			if child:IsA("Part") then
 				wedgeCount += 1
 			end
 		end
@@ -49,7 +49,7 @@ return function(t: TestTypes.TestContext)
 		-- 3x2 triangular grid = 6 cells, 2 triangles per cell = 12 triangles
 		local wedgeCount = 0
 		for _, child in folder:GetChildren() do
-			if child:IsA("WedgePart") then
+			if child:IsA("Part") then
 				wedgeCount += 1
 			end
 		end
@@ -81,7 +81,7 @@ return function(t: TestTypes.TestContext)
 		local foundColor = false
 		local foundMaterial = false
 		for _, child in folder:GetChildren() do
-			if child:IsA("WedgePart") then
+			if child:IsA("Part") then
 				if (child.Color - color).Magnitude < 0.1 then
 					foundColor = true
 				end
@@ -110,7 +110,7 @@ return function(t: TestTypes.TestContext)
 			Parent = folder,
 		})
 
-		-- Collect all unique vertex positions from WedgeParts
+		-- Collect all unique vertex positions from wedge parts
 		local positions: { Vector3 } = {}
 		local function addUnique(pos: Vector3)
 			for _, p in positions do
@@ -122,7 +122,7 @@ return function(t: TestTypes.TestContext)
 		end
 
 		for _, child in folder:GetChildren() do
-			if child:IsA("WedgePart") then
+			if child:IsA("Part") then
 				-- Extract corners from wedge parts (approximate)
 				local cf = child.CFrame
 				local size = child.Size
