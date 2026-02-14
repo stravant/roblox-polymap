@@ -84,6 +84,11 @@ local function fillTriangle(
 	local len2 = abm - len1
 	local width = (ca + ab.Unit * len1).Magnitude
 
+	-- Degenerate: zero-area triangle (e.g., collinear points)
+	if width < 0.001 then
+		return {}
+	end
+
 	-- Calculate "base" CFrame to position parts by
 	local normal = ab:Cross(bc).Unit
 	local maincf = CFrame.fromMatrix(a, normal:Cross(-ab.Unit), normal, -ab.Unit)

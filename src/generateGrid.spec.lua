@@ -81,8 +81,9 @@ return function(t: TestTypes.TestContext)
 		local foundColor = false
 		local foundMaterial = false
 		for _, child in folder:GetChildren() do
-			if child:IsA("Part") then
-				if (child.Color - color).Magnitude < 0.1 then
+			if child:IsA("BasePart") then
+				local c = child.Color
+				if math.abs(c.R - color.R) < 0.1 and math.abs(c.G - color.G) < 0.1 and math.abs(c.B - color.B) < 0.1 then
 					foundColor = true
 				end
 				if child.Material == Enum.Material.Grass then
