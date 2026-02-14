@@ -1,10 +1,19 @@
 --!strict
 
+local CoreGui = game:GetService("CoreGui")
 local ChangeHistoryService = game:GetService("ChangeHistoryService")
 local UserInputService = game:GetService("UserInputService")
 
 local Packages = script.Parent.Parent.Packages
+local DraggerFramework = require(Packages.DraggerFramework)
+local DraggerSchemaCore = require(Packages.DraggerSchemaCore)
+local Roact = require(Packages.Roact)
 local Signal = require(Packages.Signal)
+
+local DraggerContext_PluginImpl = (require :: any)(DraggerFramework.Implementation.DraggerContext_PluginImpl)
+local DraggerToolComponent = (require :: any)(DraggerFramework.DraggerTools.DraggerToolComponent)
+local MoveHandles = require("./Dragger/MoveHandles")
+local RotateHandles = require("./Dragger/RotateHandles")
 
 local Settings = require("./Settings")
 local createTriangleMesh = require("./TriangleMesh")
@@ -23,16 +32,57 @@ local function mouseRaycast(): RaycastResult?
 	return workspace:Raycast(ray.Origin, ray.Direction * 10000, params)
 end
 
-local function worldToScreen(point: Vector3): Vector3?
-	local camera = workspace.CurrentCamera
-	if not camera then
+local function createCFrameDraggerSchema(isEmptyFunc, getBoundingBoxFunc)
+	local schema = table.clone(DraggerSchemaCore)
+	schema.getMouseTarget = function()
 		return nil
 	end
-	local screenPoint, onScreen = camera:WorldToScreenPoint(point)
-	if onScreen then
-		return screenPoint
+	schema.addUndoWaypoint = function()
+		-- Noop: we manage undo recording ourselves
 	end
-	return nil
+	schema.SelectionInfo = {
+		new = function(_context, _selection)
+			return {
+				isEmpty = function(_self)
+					return isEmptyFunc()
+				end,
+				getBoundingBox = function(_self)
+					return getBoundingBoxFunc()
+				end,
+				getAllAttachments = function(_self)
+					return {}
+				end,
+				getObjectsToTransform = function(_self)
+					return {}, {}, {}
+				end,
+				getBasisObject = function(_self)
+					return nil
+				end,
+				getOriginalCFrameMap = function(_self)
+					return {}
+				end,
+				getTransformedCopy = function(_self, _globalTransform)
+					return _self
+				end,
+			}
+		end,
+	} :: any
+	return schema
+end
+
+local function createFixedSelection()
+	local selectionChangedSignal = Signal.new()
+	return {
+		Get = function()
+			return { workspace.Terrain }
+		end,
+		Set = function(_newSelection, _hint)
+			task.defer(function()
+				selectionChangedSignal:Fire()
+			end)
+		end,
+		SelectionChanged = selectionChangedSignal,
+	}
 end
 
 local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.PolyMapSettings)
@@ -56,6 +106,12 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 	-- Input connections
 	local mIsOverUI = false
+
+	-- Dragger state
+	local mIsDraggingHandle = false
+	local mDragRecording: string? = nil
+	local mSavedVertexPositions: { [number]: Vector3 } = {}
+	local mDragCentroid: Vector3? = nil
 
 	local VERTEX_CLICK_RADIUS = 3.0 -- world-space radius to find vertex
 
@@ -115,7 +171,6 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	end
 
 	local function findNearestVertex(worldPos: Vector3): number?
-		-- Use screen-space distance for better UX
 		local camera = workspace.CurrentCamera
 		if not camera then
 			return mMesh.findVertexNear(worldPos, VERTEX_CLICK_RADIUS)
@@ -123,7 +178,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 		local mouseScreen = camera:WorldToScreenPoint(worldPos)
 		local bestId: number? = nil
-		local bestScreenDist = 20 -- max pixel radius
+		local bestScreenDist = 20
 
 		for id, vertex in mMesh.getVertices() do
 			local screenPos, onScreen = camera:WorldToScreenPoint(vertex.position)
@@ -149,7 +204,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 		local mouseScreen = camera:WorldToScreenPoint(worldPos)
 		local bestKey: string? = nil
-		local bestDist = 15 -- max pixel radius for edge selection
+		local bestDist = 15
 
 		for key, edge in mMesh.getEdges() do
 			local v1 = mMesh.getVertex(edge.v1)
@@ -160,17 +215,12 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			local s2, on2 = camera:WorldToScreenPoint(v2.position)
 			if not on1 or not on2 then continue end
 
-			-- Point-to-line-segment distance in screen space
-			local ax, ay = s1.X - mouseScreen.X, s1.Y - mouseScreen.Y
 			local bx, by = s2.X - s1.X, s2.Y - s1.Y
 			local lenSq = bx * bx + by * by
 			if lenSq < 0.001 then continue end
-			local t = math.clamp((ax * bx + ay * by) / lenSq, 0, 1)
-			-- Negate since ax/ay is from mouse to s1, but we want projection along s1->s2
-			-- Actually: ax = s1-mouse, bx = s2-s1. We want dot((mouse-s1), (s2-s1)) / |s2-s1|^2
 			local px = mouseScreen.X - s1.X
 			local py = mouseScreen.Y - s1.Y
-			t = math.clamp((px * bx + py * by) / lenSq, 0, 1)
+			local t = math.clamp((px * bx + py * by) / lenSq, 0, 1)
 			local closestX = s1.X + t * bx
 			local closestY = s1.Y + t * by
 			local dist = math.sqrt((mouseScreen.X - closestX) ^ 2 + (mouseScreen.Y - closestY) ^ 2)
@@ -185,7 +235,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	end
 
 	local function updateHover()
-		if mIsOverUI then
+		if mIsOverUI or mIsDraggingHandle then
 			if mHoverVertexId ~= nil or mHoverEdgeKey ~= nil then
 				mHoverVertexId = nil
 				mHoverEdgeKey = nil
@@ -206,10 +256,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			end
 			if mode == "Add" then
 				if mAddBoundaryEdge then
-					-- In second click of add mode, hover vertex for placement
 					newHoverVertex = findNearestVertex(result.Position)
 				else
-					-- In first click, hover edges
 					newHoverEdge = findNearestEdge(result.Position)
 				end
 			end
@@ -229,18 +277,15 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local vid = findNearestVertex(worldPos)
 		if vid then
 			if isShiftHeld() then
-				-- Toggle selection
 				if mSelectedVertices[vid] then
 					mSelectedVertices[vid] = nil
 				else
 					mSelectedVertices[vid] = true
 				end
 			else
-				-- Replace selection
 				mSelectedVertices = { [vid] = true }
 			end
 		else
-			-- Click on nothing -> clear selection
 			if not isShiftHeld() then
 				mSelectedVertices = {}
 			end
@@ -250,7 +295,6 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 	local function handleAddClick(worldPos: Vector3)
 		if not mAddBoundaryEdge then
-			-- First click: select a boundary edge
 			local edgeKey = findNearestEdge(worldPos)
 			if edgeKey then
 				local edge = mMesh.getEdges()[edgeKey]
@@ -260,7 +304,6 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				end
 			end
 		else
-			-- Second click: place vertex and create triangle
 			local recording = ChangeHistoryService:TryBeginRecording("PolyMap Add Triangle")
 
 			local v1 = mMesh.getVertex(mAddBoundaryEdge.v1)
@@ -288,13 +331,11 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			if vertex then
 				local recording = ChangeHistoryService:TryBeginRecording("PolyMap Delete")
 
-				-- Remove all adjacent triangles
 				local triIds = table.clone(vertex.triangles)
 				for _, triId in triIds do
 					mMesh.removeTriangle(triId)
 				end
 
-				-- Remove from selection
 				mSelectedVertices[vid] = nil
 
 				if recording then
@@ -325,7 +366,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	end
 
 	local function handleClick()
-		if mIsOverUI then
+		if mIsOverUI or mIsDraggingHandle then
 			return
 		end
 
@@ -384,7 +425,157 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		changeSignal:Fire()
 	end
 
+	----------------------------------------------------------------------
+	-- DraggerFramework integration
+	----------------------------------------------------------------------
+
+	local fixedSelection = createFixedSelection()
+
+	local draggerContext = DraggerContext_PluginImpl.new(
+		plugin,
+		game,
+		settings(),
+		fixedSelection
+	)
+	draggerContext.SetDraggingFunction = function(_isDragging: boolean)
+	end
+	draggerContext.DragUpdatedSignal = Signal.new()
+
+	local function saveVertexPositions()
+		mSavedVertexPositions = {}
+		for vid in mSelectedVertices do
+			local v = mMesh.getVertex(vid)
+			if v then
+				mSavedVertexPositions[vid] = v.position
+			end
+		end
+	end
+
+	local schema = createCFrameDraggerSchema(
+		function(): boolean
+			return getSelectedVertexCount() == 0
+		end,
+		function(): (CFrame, Vector3, Vector3)
+			local centroid = getSelectionCentroid()
+			if centroid then
+				return CFrame.new(centroid), Vector3.zero, Vector3.zero
+			end
+			return CFrame.identity, Vector3.zero, Vector3.zero
+		end
+	)
+
+	-- Move handle callbacks
+	local function startMove()
+		mIsDraggingHandle = true
+		saveVertexPositions()
+		mDragRecording = ChangeHistoryService:TryBeginRecording("PolyMap Move")
+	end
+
+	local function applyMove(globalTransform: CFrame)
+		for vid, origPos in mSavedVertexPositions do
+			local newPos = origPos + globalTransform.Position
+			mMesh.moveVertex(vid, newPos, currentSettings.Thickness, getTriangleProps())
+		end
+		changeSignal:Fire()
+	end
+
+	local function endMove()
+		if mDragRecording then
+			ChangeHistoryService:FinishRecording(mDragRecording, Enum.FinishRecordingOperation.Commit)
+			mDragRecording = nil
+		end
+		mIsDraggingHandle = false
+		changeSignal:Fire()
+	end
+
+	-- Rotate handle callbacks
+	local function startRotate()
+		mIsDraggingHandle = true
+		saveVertexPositions()
+		mDragCentroid = getSelectionCentroid()
+		mDragRecording = ChangeHistoryService:TryBeginRecording("PolyMap Rotate")
+	end
+
+	local function applyRotate(localRotation: CFrame)
+		if not mDragCentroid then return end
+		for vid, origPos in mSavedVertexPositions do
+			local offset = origPos - mDragCentroid
+			local rotatedOffset = localRotation:VectorToWorldSpace(offset)
+			local newPos = mDragCentroid + rotatedOffset
+			mMesh.moveVertex(vid, newPos, currentSettings.Thickness, getTriangleProps())
+		end
+		changeSignal:Fire()
+	end
+
+	local function endRotate()
+		if mDragRecording then
+			ChangeHistoryService:FinishRecording(mDragRecording, Enum.FinishRecordingOperation.Commit)
+			mDragRecording = nil
+		end
+		mIsDraggingHandle = false
+		mDragCentroid = nil
+		changeSignal:Fire()
+	end
+
+	local moveHandles = MoveHandles.new(draggerContext, {
+		GetBoundingBox = function()
+			local centroid = getSelectionCentroid()
+			if centroid then
+				return CFrame.new(centroid), Vector3.zero, Vector3.zero
+			end
+			return CFrame.identity, Vector3.zero, Vector3.zero
+		end,
+		StartTransform = startMove,
+		ApplyTransform = applyMove,
+		EndTransform = endMove,
+		Visible = function()
+			return currentSettings.Mode == "Move" and getSelectedVertexCount() > 0
+		end,
+	})
+
+	local rotateHandles = RotateHandles.new(draggerContext, {
+		GetBoundingBox = function()
+			local centroid = getSelectionCentroid()
+			if centroid then
+				return CFrame.new(centroid), Vector3.zero, Vector3.zero
+			end
+			return CFrame.identity, Vector3.zero, Vector3.zero
+		end,
+		StartTransform = startRotate,
+		ApplyTransform = applyRotate,
+		EndTransform = endRotate,
+		Visible = function()
+			return currentSettings.Mode == "Rotate" and getSelectedVertexCount() > 0
+		end,
+	})
+
+	local rootElement = Roact.createElement(DraggerToolComponent, {
+		Mouse = plugin:GetMouse(),
+		DraggerContext = draggerContext,
+		DraggerSchema = schema,
+		DraggerSettings = {
+			AllowDragSelect = false,
+			AnalyticsName = "PolyMap",
+			HandlesList = {
+				rotateHandles,
+				moveHandles,
+			},
+		},
+	})
+
+	local draggerHandle = Roact.mount(rootElement)
+
+	-- Trigger dragger updates when session state changes
+	changeSignal:Connect(function()
+		task.defer(function()
+			fixedSelection.SelectionChanged:Fire()
+		end)
+	end)
+
+	----------------------------------------------------------------------
 	-- Input connections
+	----------------------------------------------------------------------
+
 	local inputChangedCn = UserInputService.InputChanged:Connect(function(input: InputObject, gameProcessed: boolean)
 		if input.UserInputType == Enum.UserInputType.MouseMovement then
 			mIsOverUI = gameProcessed
@@ -398,7 +589,6 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			if input.UserInputType == Enum.UserInputType.MouseButton1 and not gameProcessed then
 				local mode = currentSettings.Mode
 				if mode == "Select" then
-					-- Start potential marquee
 					local mousePos = UserInputService:GetMouseLocation()
 					mMarqueeStart = mousePos
 					mMarqueeEnd = nil
@@ -422,7 +612,6 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		while true do
 			updateHover()
 
-			-- Update marquee end position
 			if mMarqueeStart then
 				local mousePos = UserInputService:GetMouseLocation()
 				local dist = (mousePos - mMarqueeStart).Magnitude
@@ -436,6 +625,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	end)
 
 	local function teardown()
+		Roact.unmount(draggerHandle)
 		inputChangedCn:Disconnect()
 		if inputBeganCn then
 			inputBeganCn:Disconnect()
@@ -447,10 +637,13 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		task.cancel(cursorTargetTask)
 	end
 
+	----------------------------------------------------------------------
 	-- Public API
+	----------------------------------------------------------------------
+
 	session.ChangeSignal = changeSignal
 	session.Update = function()
-		-- Settings may have changed, nothing to do currently
+		fixedSelection.SelectionChanged:Fire()
 	end
 	session.Destroy = function()
 		teardown()
