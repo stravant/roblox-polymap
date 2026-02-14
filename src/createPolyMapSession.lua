@@ -18,6 +18,7 @@ local RotateHandles = require("./Dragger/RotateHandles")
 local Settings = require("./Settings")
 local createTriangleMesh = require("./TriangleMesh")
 local fillTriangle = require("./fillTriangle")
+local generateGrid = require("./generateGrid")
 
 local function mouseRaycast(): RaycastResult?
 	local mouseLocation = UserInputService:GetMouseLocation()
@@ -756,6 +757,43 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	session.ClearSelection = function()
 		mSelectedVertices = {}
 		changeSignal:Fire()
+	end
+	session.GenerateGrid = function()
+		local camera = workspace.CurrentCamera
+		local origin = CFrame.identity
+		if camera then
+			-- Place grid in front of camera, on the ground plane
+			local look = camera.CFrame.LookVector
+			local flatLook = Vector3.new(look.X, 0, look.Z)
+			if flatLook.Magnitude > 0.01 then
+				flatLook = flatLook.Unit
+			else
+				flatLook = Vector3.zAxis
+			end
+			local pos = camera.CFrame.Position + flatLook * 20
+			pos = Vector3.new(pos.X, 0, pos.Z) -- project onto ground
+			origin = CFrame.lookAlong(pos, flatLook)
+		end
+
+		local recording = ChangeHistoryService:TryBeginRecording("PolyMap Generate Grid")
+
+		generateGrid({
+			GridType = currentSettings.GridType,
+			Width = currentSettings.GridWidth,
+			Height = currentSettings.GridHeight,
+			Spacing = currentSettings.GridSpacing,
+			Origin = origin,
+			Thickness = currentSettings.Thickness,
+			Parent = workspace,
+			Props = getTriangleProps(),
+		})
+
+		if recording then
+			ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+		end
+
+		-- Re-scan to pick up the new triangles
+		scanMesh()
 	end
 	session.MoveSelectedVertices = function(delta: Vector3)
 		if getSelectedVertexCount() == 0 then
