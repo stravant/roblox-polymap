@@ -803,12 +803,14 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 		local recording = ChangeHistoryService:TryBeginRecording("PolyMap Move")
 
+		local moves: { [number]: Vector3 } = {}
 		for vid in mSelectedVertices do
 			local v = mMesh.getVertex(vid)
 			if v then
-				mMesh.moveVertex(vid, v.position + delta, currentSettings.Thickness, getTriangleProps())
+				moves[vid] = v.position + delta
 			end
 		end
+		mMesh.moveVertices(moves, currentSettings.Thickness, getTriangleProps())
 
 		if recording then
 			ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)

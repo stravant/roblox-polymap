@@ -15,7 +15,7 @@ export type Vertex = {
 export type Triangle = {
 	id: number,
 	vertices: { number }, -- 3 vertex ids
-	parts: { WedgePart }, -- 1-2 wedge parts
+	parts: { BasePart }, -- 1-2 wedge parts
 	normal: Vector3,
 }
 
@@ -148,7 +148,7 @@ local function createTriangleMesh(): TriangleMesh
 		return cross.Unit
 	end
 
-	local function registerTriangle(vertexIds: { number }, parts: { WedgePart }): number
+	local function registerTriangle(vertexIds: { number }, parts: { BasePart }): number
 		local triangleId = mNextTriangleId
 		mNextTriangleId += 1
 
@@ -460,11 +460,11 @@ local function createTriangleMesh(): TriangleMesh
 		mesh.clear()
 
 		local scanRoot = root or workspace
-		local wedgeParts: { WedgePart } = {}
+		local wedgeParts: { BasePart } = {}
 
 		-- Find all thin WedgeParts
-		for _, desc in scanRoot:GetDescendants() do
-			if desc:IsA("WedgePart") then
+		for _, desc in workspace:QueryDescendants("BasePart") :: {BasePart} do
+			if desc:IsA("WedgePart") or (desc:IsA("Part") and desc.Shape == Enum.PartType.Wedge) then
 				local size = desc.Size
 				local minSize = math.min(size.X, size.Y, size.Z)
 				if minSize < THIN_THRESHOLD then
@@ -475,7 +475,7 @@ local function createTriangleMesh(): TriangleMesh
 
 		-- Group wedge parts into triangles by finding pairs that share 2 vertices
 		-- and are coplanar (part of the same logical triangle from fillTriangle)
-		local paired: { [WedgePart]: boolean } = {}
+		local paired: { [BasePart]: boolean } = {}
 
 		for i, wedge1 in wedgeParts do
 			if paired[wedge1] then continue end
@@ -534,23 +534,48 @@ local function createTriangleMesh(): TriangleMesh
 					local planeDist = math.abs(toOther:Dot(normal1))
 
 					if planeDist < SNAP_EPSILON * 10 then
-						-- These are a pair! The logical triangle has 3 unique vertices.
-						-- Use the shared edge + both unique vertices to determine the 3 corners.
-						local allCorners = { sharedVerts[1], sharedVerts[2], uniqueFrom1[1] }
-						-- Check if uniqueFrom2 is actually one of the 3 corners too
-						-- (it should be since both wedges tile the same triangle)
+						-- Coplanar wedges sharing 2 vertices could be:
+						-- (a) Two halves of the same fillTriangle (split point on line U1-U2)
+						-- (b) Two separate triangles that share an edge
+						-- For case (a), one shared vertex is the split point D that lies
+						-- on the segment between U1 and U2. The triangle corners are
+						-- U1, U2, and the other shared vertex.
+						local u1 = uniqueFrom1[1]
+						local u2 = uniqueFrom2[1]
+						local edgeDir = u2 - u1
+						local edgeLen = edgeDir.Magnitude
+						local splitVertex: Vector3? = nil
+						local cornerVertex: Vector3? = nil
 
-						local vid1 = findOrCreateVertex(allCorners[1])
-						local vid2 = findOrCreateVertex(allCorners[2])
-						local vid3 = findOrCreateVertex(allCorners[3])
-
-						if vid1 ~= vid2 and vid2 ~= vid3 and vid1 ~= vid3 then
-							registerTriangle({ vid1, vid2, vid3 }, { wedge1, wedge2 })
-							paired[wedge1] = true
-							paired[wedge2] = true
-							foundPartner = true
-							break
+						if edgeLen > 0.001 then
+							local edgeUnit = edgeDir / edgeLen
+							for _, sv in sharedVerts do
+								local toSv = sv - u1
+								local proj = toSv:Dot(edgeUnit)
+								local perpDist = (toSv - edgeUnit * proj).Magnitude
+								if perpDist < SNAP_EPSILON * 4 and proj > SNAP_EPSILON and proj < edgeLen - SNAP_EPSILON then
+									splitVertex = sv
+								else
+									cornerVertex = sv
+								end
+							end
 						end
+
+						if splitVertex and cornerVertex then
+							-- Case (a): fillTriangle pair. Corners are U1, U2, cornerVertex.
+							local vid1 = findOrCreateVertex(u1)
+							local vid2 = findOrCreateVertex(u2)
+							local vid3 = findOrCreateVertex(cornerVertex)
+
+							if vid1 ~= vid2 and vid2 ~= vid3 and vid1 ~= vid3 then
+								registerTriangle({ vid1, vid2, vid3 }, { wedge1, wedge2 })
+								paired[wedge1] = true
+								paired[wedge2] = true
+								foundPartner = true
+								break
+							end
+						end
+						-- Case (b): separate triangles sharing an edge, don't pair
 					end
 				end
 			end
