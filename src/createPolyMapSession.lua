@@ -313,7 +313,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			if v1 and v2 then
 				mMesh.addTriangle(
 					v1.position, v2.position, worldPos,
-					currentSettings.Thickness, workspace, getTriangleProps()
+					currentSettings.Thickness, workspace.Terrain, getTriangleProps()
 				)
 			end
 
@@ -784,7 +784,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			Spacing = currentSettings.GridSpacing,
 			Origin = origin,
 			Thickness = currentSettings.Thickness,
-			Parent = workspace,
+			Parent = workspace.Terrain,
 			Props = getTriangleProps(),
 		})
 
