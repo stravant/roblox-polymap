@@ -628,11 +628,15 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 	local draggerHandle = Roact.mount(rootElement)
 
-	-- Trigger dragger updates when session state changes
+	-- Trigger dragger updates when session state changes (but not during
+	-- drags, where the dragger framework already manages its own updates
+	-- and re-entrancy would cause an infinite loop)
 	changeSignal:Connect(function()
-		task.defer(function()
-			fixedSelection.SelectionChanged:Fire()
-		end)
+		if not mIsDraggingHandle then
+			task.defer(function()
+				fixedSelection.SelectionChanged:Fire()
+			end)
+		end
 	end)
 
 	----------------------------------------------------------------------
