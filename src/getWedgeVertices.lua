@@ -47,26 +47,30 @@ local function getWedgeVertices(wedge: BasePart): (Vector3, Vector3, Vector3)
 	--
 	-- When the thin axis is Y or Z, we need to remap accordingly.
 
+	-- Read _polyTopSign to extract from the correct face (the one at the vertex plane).
+	-- When missing (manually placed parts), falls back to center extraction (sign=0).
+	local topSign = wedge:GetAttribute("_polyTopSign") or 0
+
 	local v1, v2, v3: Vector3
 
 	if minAxis == "X" then
 		-- Thin along X, triangle in YZ plane
-		v1 = cf:PointToWorldSpace(Vector3.new(0, -halfY,  halfZ))
-		v2 = cf:PointToWorldSpace(Vector3.new(0,  halfY,  halfZ))
-		v3 = cf:PointToWorldSpace(Vector3.new(0, -halfY, -halfZ))
+		local xOffset = halfX * topSign
+		v1 = cf:PointToWorldSpace(Vector3.new(xOffset, -halfY,  halfZ))
+		v2 = cf:PointToWorldSpace(Vector3.new(xOffset,  halfY,  halfZ))
+		v3 = cf:PointToWorldSpace(Vector3.new(xOffset, -halfY, -halfZ))
 	elseif minAxis == "Y" then
 		-- Thin along Y, triangle in XZ plane
-		-- The wedge shape would be rotated so that Y is thin.
-		-- However, fillTriangle always creates wedges with the thin axis as X (Size.X = thickness).
-		-- This case shouldn't normally occur with fillTriangle output, but handle it for robustness.
-		v1 = cf:PointToWorldSpace(Vector3.new(-halfX, 0,  halfZ))
-		v2 = cf:PointToWorldSpace(Vector3.new( halfX, 0,  halfZ))
-		v3 = cf:PointToWorldSpace(Vector3.new(-halfX, 0, -halfZ))
+		local yOffset = halfY * topSign
+		v1 = cf:PointToWorldSpace(Vector3.new(-halfX, yOffset,  halfZ))
+		v2 = cf:PointToWorldSpace(Vector3.new( halfX, yOffset,  halfZ))
+		v3 = cf:PointToWorldSpace(Vector3.new(-halfX, yOffset, -halfZ))
 	else
 		-- Thin along Z
-		v1 = cf:PointToWorldSpace(Vector3.new(-halfX, -halfY, 0))
-		v2 = cf:PointToWorldSpace(Vector3.new(-halfX,  halfY, 0))
-		v3 = cf:PointToWorldSpace(Vector3.new( halfX, -halfY, 0))
+		local zOffset = halfZ * topSign
+		v1 = cf:PointToWorldSpace(Vector3.new(-halfX, -halfY, zOffset))
+		v2 = cf:PointToWorldSpace(Vector3.new(-halfX,  halfY, zOffset))
+		v3 = cf:PointToWorldSpace(Vector3.new( halfX, -halfY, zOffset))
 	end
 
 	return v1, v2, v3

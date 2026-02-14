@@ -32,10 +32,9 @@ local function verticesSetsMatch(set1: { Vector3 }, set2: { Vector3 }, epsilon: 
 end
 
 return function(t: TestTypes.TestContext)
-	-- Round-trip epsilon is larger (0.15) because getWedgeVertices extracts at the
-	-- center of the thin axis, while fillTriangle offsets parts by half-thickness
-	-- from the triangle plane.
-	local ROUND_TRIP_EPSILON = 0.15
+	-- With _polyTopSign attribute, getWedgeVertices extracts from the correct face
+	-- so the round-trip is accurate to floating-point precision.
+	local ROUND_TRIP_EPSILON = 0.05
 
 	t.test("round-trip: fillTriangle -> getWedgeVertices recovers original vertices", function()
 		local folder = Instance.new("Folder")

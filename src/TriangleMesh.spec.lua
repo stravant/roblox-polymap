@@ -245,6 +245,35 @@ return function(t: TestTypes.TestContext)
 		folder:Destroy()
 	end)
 
+	t.test("removeTriangle parents out parts instead of destroying", function()
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		local triId = mesh.addTriangle(
+			Vector3.new(0, 0, 0),
+			Vector3.new(4, 0, 0),
+			Vector3.new(2, 3, 0),
+			0.2, folder
+		)
+		assert(triId)
+
+		local tri = mesh.getTriangle(triId)
+		assert(tri)
+		local parts = table.clone(tri.parts)
+
+		mesh.removeTriangle(triId)
+
+		-- Parts should still be re-parentable (not destroyed)
+		for _, part in parts do
+			t.expect(part.Parent).toBe(nil)
+			part.Parent = folder
+			t.expect(part.Parent).toBe(folder)
+		end
+
+		folder:Destroy()
+	end)
+
 	t.test("moveVertex updates vertex position and recreates parts", function()
 		local mesh = createTriangleMesh()
 		local folder = Instance.new("Folder")
@@ -274,6 +303,45 @@ return function(t: TestTypes.TestContext)
 			triCount += 1
 		end
 		t.expect(triCount).toBe(1)
+
+		folder:Destroy()
+	end)
+
+	t.test("moveVertex reuses the same Part instances", function()
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		local triId = mesh.addTriangle(
+			Vector3.new(0, 0, 0),
+			Vector3.new(4, 0, 0),
+			Vector3.new(2, 3, 0),
+			0.2, folder
+		)
+		assert(triId)
+
+		-- Save references to parts before moving
+		local triBefore = mesh.getTriangle(triId)
+		assert(triBefore)
+		local partsBefore = table.clone(triBefore.parts)
+
+		local vid = mesh.findVertexNear(Vector3.new(2, 3, 0), 0.1)
+		assert(vid)
+
+		mesh.moveVertex(vid, Vector3.new(2, 5, 0), 0.2)
+
+		-- Triangle should still exist with same ID (edit-in-place)
+		local triAfter = mesh.getTriangle(triId)
+		t.expect(triAfter).toBeTruthy()
+		assert(triAfter)
+
+		-- Same number of parts
+		t.expect(#triAfter.parts).toBe(#partsBefore)
+
+		-- Same Part instances (reused, not recreated)
+		for i, part in triAfter.parts do
+			t.expect(part).toBe(partsBefore[i])
+		end
 
 		folder:Destroy()
 	end)
