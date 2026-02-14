@@ -521,15 +521,14 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 	local function applyMove(globalTransform: CFrame)
 		local delta = globalTransform.Position
+		local moves: { [number]: Vector3 } = {}
 		for vid, origPos in mSavedVertexPositions do
-			local newPos = origPos + delta
-			mMesh.moveVertex(vid, newPos, currentSettings.Thickness, getTriangleProps())
+			moves[vid] = origPos + delta
 		end
-		-- Apply weighted displacement to influenced vertices
 		for vid, info in mInfluencedVertices do
-			local newPos = info.position + delta * info.factor
-			mMesh.moveVertex(vid, newPos, currentSettings.Thickness, getTriangleProps())
+			moves[vid] = info.position + delta * info.factor
 		end
+		mMesh.moveVertices(moves, currentSettings.Thickness, getTriangleProps())
 		changeSignal:Fire()
 	end
 
@@ -552,21 +551,19 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 	local function applyRotate(localRotation: CFrame)
 		if not mDragCentroid then return end
+		local moves: { [number]: Vector3 } = {}
 		for vid, origPos in mSavedVertexPositions do
 			local offset = origPos - mDragCentroid
 			local rotatedOffset = localRotation:VectorToWorldSpace(offset)
-			local newPos = mDragCentroid + rotatedOffset
-			mMesh.moveVertex(vid, newPos, currentSettings.Thickness, getTriangleProps())
+			moves[vid] = mDragCentroid + rotatedOffset
 		end
-		-- Apply weighted rotation to influenced vertices
 		for vid, info in mInfluencedVertices do
 			local offset = info.position - mDragCentroid
 			local rotatedOffset = localRotation:VectorToWorldSpace(offset)
 			local fullNewPos = mDragCentroid + rotatedOffset
-			-- Lerp between original and fully-rotated position by influence factor
-			local newPos = info.position:Lerp(fullNewPos, info.factor)
-			mMesh.moveVertex(vid, newPos, currentSettings.Thickness, getTriangleProps())
+			moves[vid] = info.position:Lerp(fullNewPos, info.factor)
 		end
+		mMesh.moveVertices(moves, currentSettings.Thickness, getTriangleProps())
 		changeSignal:Fire()
 	end
 

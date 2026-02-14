@@ -43,6 +43,7 @@ export type TriangleMesh = {
 	addTriangle: (v1Pos: Vector3, v2Pos: Vector3, v3Pos: Vector3, thickness: number, parent: Instance, props: fillTriangle.TriangleProps?) -> number?,
 	removeTriangle: (triangleId: number) -> (),
 	moveVertex: (vertexId: number, newPosition: Vector3, thickness: number, props: fillTriangle.TriangleProps?) -> (),
+	moveVertices: (moves: { [number]: Vector3 }, thickness: number, props: fillTriangle.TriangleProps?) -> (),
 
 	-- Scanning
 	scanWorkspace: (root: Instance?) -> (),
@@ -376,6 +377,79 @@ local function createTriangleMesh(): TriangleMesh
 		for _, data in triData do
 			for _, vid in data.vids do
 				if vid ~= vertexId then
+					cleanupVertex(vid)
+				end
+			end
+		end
+	end
+
+	mesh.moveVertices = function(moves: { [number]: Vector3 }, thickness: number, props: fillTriangle.TriangleProps?)
+		-- Collect ALL unique affected triangles across all moved vertices
+		local affectedTriIds: { [number]: boolean } = {}
+		for vid in moves do
+			local vertex = mVertices[vid]
+			if vertex then
+				for _, triId in vertex.triangles do
+					affectedTriIds[triId] = true
+				end
+			end
+		end
+
+		-- Save triangle data before destroying
+		local triData: { { vids: { number }, parent: Instance } } = {}
+		for triId in affectedTriIds do
+			local tri = mTriangles[triId]
+			if tri then
+				local parent = tri.parts[1].Parent or workspace
+				table.insert(triData, {
+					vids = { tri.vertices[1], tri.vertices[2], tri.vertices[3] },
+					parent = parent,
+				})
+
+				for _, part in tri.parts do
+					part:Destroy()
+				end
+
+				unregisterTriangle(triId)
+			end
+		end
+
+		-- Update ALL vertex positions at once
+		for vid, newPosition in moves do
+			local vertex = mVertices[vid]
+			if vertex then
+				local oldKey = positionKey(vertex.position)
+				mPositionToVertex[oldKey] = nil
+				vertex.position = snapPosition(newPosition, SNAP_EPSILON)
+				local newKey = positionKey(vertex.position)
+				mPositionToVertex[newKey] = vid
+			end
+		end
+
+		-- Recreate all triangles with updated positions
+		for _, data in triData do
+			local positions = {}
+			for _, vid in data.vids do
+				local v = mVertices[vid]
+				if v then
+					table.insert(positions, v.position)
+				end
+			end
+
+			if #positions == 3 then
+				local parts = fillTriangle(positions[1], positions[2], positions[3], thickness, data.parent, props)
+				if #parts > 0 then
+					registerTriangle(data.vids, parts)
+				end
+			end
+		end
+
+		-- Clean up orphaned vertices (not moved ones)
+		local cleanedUp: { [number]: boolean } = {}
+		for _, data in triData do
+			for _, vid in data.vids do
+				if not moves[vid] and not cleanedUp[vid] then
+					cleanedUp[vid] = true
 					cleanupVertex(vid)
 				end
 			end
