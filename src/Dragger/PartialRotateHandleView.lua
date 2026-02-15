@@ -67,7 +67,7 @@ function RotateHandleView:render()
 	local orientedHandleCFrame = self.props.HandleCFrame * CFrame.Angles(self.props.StartAngle or 0, math.pi / 2, math.pi / 2)
 	local handleACFrame = orientedHandleCFrame * handleAOffset
 	local halfThickness = 0.5 * thickness
-	children.OnTopHandleA = Roact.createElement("CylinderHandleAdornment", {
+	children.HandleA = Roact.createElement("CylinderHandleAdornment", {
 		Adornee = Workspace.Terrain,
 		CFrame = handleACFrame,
 		Height = thickness,
@@ -75,19 +75,6 @@ function RotateHandleView:render()
 		InnerRadius = radius - halfThickness,
 		Color3 = self.props.Color,
 		AlwaysOnTop = true,
-		Transparency = HANDLE_DIM_TRANSPARENCY,
-		ZIndex = 0,
-		AdornCullingMode = CULLING_MODE,
-		Angle = handleAAngle,
-	})
-	children.BrightHandleA = Roact.createElement("CylinderHandleAdornment", {
-		Adornee = Workspace.Terrain,
-		CFrame = handleACFrame,
-		Height = thickness,
-		Radius = radius + halfThickness,
-		InnerRadius = radius - halfThickness,
-		Color3 = self.props.Color,
-		AlwaysOnTop = false,
 		ZIndex = 0,
 		AdornCullingMode = CULLING_MODE,
 		Angle = handleAAngle,
@@ -108,7 +95,7 @@ function RotateHandleView:render()
 	if not self.props.StartAngle then
 		local handleBOffset = CFrame.Angles(0, 0, math.pi + START_XY_RAD - self.props.AngleOffset)
 		local handleBAngle = XY_ANGLE
-		children.OnTopHandleB = Roact.createElement("CylinderHandleAdornment", {
+		children.HandleB = Roact.createElement("CylinderHandleAdornment", {
 			Adornee = Workspace.Terrain,
 			CFrame = orientedHandleCFrame * handleBOffset,
 			Height = thickness,
@@ -116,19 +103,6 @@ function RotateHandleView:render()
 			InnerRadius = radius - halfThickness,
 			Color3 = self.props.Color,
 			AlwaysOnTop = true,
-			Transparency = HANDLE_DIM_TRANSPARENCY,
-			ZIndex = 0,
-			AdornCullingMode = CULLING_MODE,
-			Angle = handleBAngle,
-		})
-		children.BrightHandleB = Roact.createElement("CylinderHandleAdornment", {
-			Adornee = Workspace.Terrain,
-			CFrame = orientedHandleCFrame * handleBOffset,
-			Height = thickness,
-			Radius = radius + halfThickness,
-			InnerRadius = radius - halfThickness,
-			Color3 = self.props.Color,
-			AlwaysOnTop = false,
 			ZIndex = 0,
 			AdornCullingMode = CULLING_MODE,
 			Angle = handleBAngle,

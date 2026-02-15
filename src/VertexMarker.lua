@@ -19,7 +19,7 @@ local function VertexMarker(props: {
 		Radius = props.Radius,
 		Color3 = props.Color,
 		Transparency = 0,
-		Shading = Enum.AdornShading.XRay,
+		AlwaysOnTop = true,
 	})
 end
 

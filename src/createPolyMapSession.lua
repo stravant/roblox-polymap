@@ -2,6 +2,7 @@
 
 local CoreGui = game:GetService("CoreGui")
 local ChangeHistoryService = game:GetService("ChangeHistoryService")
+local Selection = game:GetService("Selection")
 local UserInputService = game:GetService("UserInputService")
 
 local Packages = script.Parent.Parent.Packages
@@ -115,6 +116,36 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local mSavedVertexPositions: { [number]: Vector3 } = {}
 	local mInfluencedVertices: { [number]: { position: Vector3, factor: number } } = {}
 	local mDragCentroid: Vector3? = nil
+
+	-- Undo/redo: save selected vertex positions so selection survives rescan
+	local mUndoSelections: { { Vector3 } } = {}
+	local mRedoSelections: { { Vector3 } } = {}
+
+	local function captureSelectionPositions(): { Vector3 }
+		local positions: { Vector3 } = {}
+		for vid in mSelectedVertices do
+			local v = mMesh.getVertex(vid)
+			if v then
+				table.insert(positions, v.position)
+			end
+		end
+		return positions
+	end
+
+	local function restoreSelectionFromPositions(positions: { Vector3 })
+		mSelectedVertices = {}
+		for _, pos in positions do
+			local vid = mMesh.findVertexNear(pos, 0.1)
+			if vid then
+				mSelectedVertices[vid] = true
+			end
+		end
+	end
+
+	local function pushUndoSnapshot()
+		table.insert(mUndoSelections, captureSelectionPositions())
+		mRedoSelections = {}
+	end
 
 	local VERTEX_CLICK_RADIUS = 3.0 -- world-space radius to find vertex
 
@@ -313,6 +344,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				end
 			end
 		else
+			pushUndoSnapshot()
 			local recording = ChangeHistoryService:TryBeginRecording("PolyMap Add Triangle")
 
 			local v1 = mMesh.getVertex(mAddBoundaryEdge.v1)
@@ -339,6 +371,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		if vid then
 			local vertex = mMesh.getVertex(vid)
 			if vertex then
+				pushUndoSnapshot()
 				local recording = ChangeHistoryService:TryBeginRecording("PolyMap Delete")
 
 				local triIds = table.clone(vertex.triangles)
@@ -544,6 +577,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	-- Move handle callbacks
 	local function startMove()
 		mIsDraggingHandle = true
+		mMarqueeStart = nil
+		mMarqueeEnd = nil
+		pushUndoSnapshot()
 		saveVertexPositions()
 		mDragRecording = ChangeHistoryService:TryBeginRecording("PolyMap Move")
 	end
@@ -573,6 +609,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	-- Rotate handle callbacks
 	local function startRotate()
 		mIsDraggingHandle = true
+		mMarqueeStart = nil
+		mMarqueeEnd = nil
+		pushUndoSnapshot()
 		saveVertexPositions()
 		mDragCentroid = getSelectionCentroid()
 		mDragRecording = ChangeHistoryService:TryBeginRecording("PolyMap Rotate")
@@ -703,7 +742,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		while true do
 			updateHover()
 
-			if mMarqueeStart then
+			if mMarqueeStart and not mIsDraggingHandle then
 				local mousePos = UserInputService:GetMouseLocation()
 				local dist = (mousePos - mMarqueeStart).Magnitude
 				if dist > 5 then
@@ -717,9 +756,56 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 	end)
 
+	local function handleUndo(waypointName: string)
+		if not string.find(waypointName, "PolyMap") then
+			return
+		end
+		-- Save current selection positions for redo
+		table.insert(mRedoSelections, captureSelectionPositions())
+		-- Rescan mesh from the reverted parts
+		mMesh.refreshFromParts()
+		-- Restore selection from saved positions
+		if #mUndoSelections > 0 then
+			restoreSelectionFromPositions(table.remove(mUndoSelections))
+		else
+			mSelectedVertices = {}
+		end
+		mHoverVertexId = nil
+		mHoverEdgeKey = nil
+		mAddBoundaryEdge = nil
+		Selection:Set({})
+		changeSignal:Fire()
+	end
+
+	local function handleRedo(waypointName: string)
+		if not string.find(waypointName, "PolyMap") then
+			return
+		end
+		-- Save current selection positions for undo
+		table.insert(mUndoSelections, captureSelectionPositions())
+		-- Rescan mesh from the re-applied parts
+		mMesh.refreshFromParts()
+		-- Restore selection from saved positions
+		if #mRedoSelections > 0 then
+			restoreSelectionFromPositions(table.remove(mRedoSelections))
+		else
+			mSelectedVertices = {}
+		end
+		mHoverVertexId = nil
+		mHoverEdgeKey = nil
+		mAddBoundaryEdge = nil
+		Selection:Set({})
+		changeSignal:Fire()
+	end
+
+	local undoCn = ChangeHistoryService.OnUndo:Connect(handleUndo)
+	local redoCn = ChangeHistoryService.OnRedo:Connect(handleRedo)
+
 	local function teardown()
 		Roact.unmount(draggerHandle)
 		inputChangedCn:Disconnect()
+		undoCn:Disconnect()
+		redoCn:Disconnect()
 		if inputBeganCn then
 			inputBeganCn:Disconnect()
 		end
@@ -810,6 +896,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			end
 		end
 
+		pushUndoSnapshot()
 		local recording = ChangeHistoryService:TryBeginRecording("PolyMap Generate Grid")
 
 		generateGrid({
@@ -838,6 +925,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			return
 		end
 
+		pushUndoSnapshot()
 		local recording = ChangeHistoryService:TryBeginRecording("PolyMap Move")
 
 		local moves: { [number]: Vector3 } = {}

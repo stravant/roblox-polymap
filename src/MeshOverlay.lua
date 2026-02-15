@@ -89,7 +89,13 @@ local function MeshOverlay(props: {
 		ref = wireRef,
 	})
 
-	-- Render selected vertex markers
+	-- Render selected vertex markers (scale down when many are selected)
+	local selectedCount = 0
+	for _ in selectedVertices do
+		selectedCount += 1
+	end
+	local selectionScale = math.max(0.4, 1 / math.sqrt(math.max(1, selectedCount)))
+
 	for id in selectedVertices do
 		local vertex = mesh.getVertex(id)
 		if vertex then
@@ -97,7 +103,7 @@ local function MeshOverlay(props: {
 			children["V_" .. tostring(id)] = e(VertexMarker, {
 				Position = vertex.position,
 				Color = SELECTED_VERTEX_COLOR,
-				Radius = scale * SELECTED_VERTEX_RADIUS,
+				Radius = scale * SELECTED_VERTEX_RADIUS * selectionScale,
 				ZIndexOffset = 5,
 			})
 		end

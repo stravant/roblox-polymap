@@ -54,6 +54,8 @@ local function getStatusText(mode: string, session: createPolyMapSession.PolyMap
 		return "Click a vertex to delete all its adjacent triangles."
 	elseif mode == "Paint" then
 		return "Click on triangles to apply color and material."
+	elseif mode == "Generate" then
+		return "Configure grid settings and click Generate."
 	end
 	return ""
 end
@@ -61,6 +63,7 @@ end
 local function ModePanel(props: {
 	Settings: Settings.PolyMapSettings,
 	UpdatedSettings: () -> (),
+	Session: createPolyMapSession.PolyMapSession?,
 	LayoutOrder: number?,
 })
 	local current = props.Settings.Mode
@@ -146,50 +149,51 @@ local function ModePanel(props: {
 					props.UpdatedSettings()
 				end,
 			}),
+			Generate = e(ChipForToggle, {
+				Text = "Generate",
+				IsCurrent = current == "Generate",
+				LayoutOrder = 4,
+				OnClick = function()
+					props.Settings.Mode = "Generate"
+					props.UpdatedSettings()
+				end,
+			}),
 		}),
+		Status = props.Settings.HaveHelp and (function()
+			local text = getStatusText(current, props.Session)
+			if text == "" then
+				return nil
+			end
+			return e("TextLabel", {
+				Size = UDim2.fromScale(1, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
+				BackgroundTransparency = 0,
+				BackgroundColor3 = Colors.GREY,
+				BorderSizePixel = 0,
+				Font = Enum.Font.SourceSans,
+				TextSize = 18,
+				TextColor3 = Colors.WHITE,
+				RichText = true,
+				Text = `<i>{text}</i>`,
+				TextWrapped = true,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextYAlignment = Enum.TextYAlignment.Top,
+				LayoutOrder = 3,
+			}, {
+				Padding = e("UIPadding", {
+					PaddingTop = UDim.new(0, 2),
+					PaddingBottom = UDim.new(0, 2),
+					PaddingLeft = UDim.new(0, 4),
+					PaddingRight = UDim.new(0, 4),
+				}),
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(0, 4),
+				}),
+			})
+		end)(),
 	})
 end
 
-local function StatusBar(props: {
-	Session: createPolyMapSession.PolyMapSession?,
-	Mode: string,
-	HaveHelp: boolean,
-	LayoutOrder: number?,
-})
-	if not props.HaveHelp then
-		return nil
-	end
-	local text = getStatusText(props.Mode, props.Session)
-	if text == "" then
-		return nil
-	end
-	return e("TextLabel", {
-		Size = UDim2.fromScale(1, 0),
-		AutomaticSize = Enum.AutomaticSize.Y,
-		BackgroundTransparency = 0,
-		BackgroundColor3 = Colors.GREY,
-		BorderSizePixel = 0,
-		Font = Enum.Font.SourceSans,
-		TextSize = 18,
-		TextColor3 = Colors.WHITE,
-		RichText = true,
-		Text = `<i>{text}</i>`,
-		TextWrapped = true,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		TextYAlignment = Enum.TextYAlignment.Top,
-		LayoutOrder = props.LayoutOrder,
-	}, {
-		Padding = e("UIPadding", {
-			PaddingTop = UDim.new(0, 2),
-			PaddingBottom = UDim.new(0, 2),
-			PaddingLeft = UDim.new(0, 4),
-			PaddingRight = UDim.new(0, 4),
-		}),
-		Corner = e("UICorner", {
-			CornerRadius = UDim.new(0, 4),
-		}),
-	})
-end
 
 local function GridPanel(props: {
 	Settings: Settings.PolyMapSettings,
@@ -522,30 +526,19 @@ local function PaintPanel(props: {
 	})
 end
 
-local function ActionsPanel(props: {
+local function SelectionActionsPanel(props: {
 	Session: createPolyMapSession.PolyMapSession?,
-	Mode: string,
 	LayoutOrder: number?,
 })
 	local session = props.Session
-	local showSelection = props.Mode == "Select" or props.Mode == "Move" or props.Mode == "Rotate"
 	local nextOrder = createNextOrder()
 
-	return e("Frame", {
-		Size = UDim2.fromScale(1, 0),
-		BackgroundTransparency = 1,
+	return e(SubPanel, {
+		Title = "Selection",
 		LayoutOrder = props.LayoutOrder,
-		AutomaticSize = Enum.AutomaticSize.Y,
+		Padding = UDim.new(0, 4),
 	}, {
-		Padding = e("UIPadding", {
-			PaddingLeft = UDim.new(0, 12),
-			PaddingRight = UDim.new(0, 12),
-		}),
-		ListLayout = e("UIListLayout", {
-			SortOrder = Enum.SortOrder.LayoutOrder,
-			Padding = UDim.new(0, 4),
-		}),
-		SelectAll = showSelection and e(OperationButton, {
+		SelectAll = e(OperationButton, {
 			Text = "Select All",
 			Color = Colors.GREY,
 			Disabled = session == nil,
@@ -557,7 +550,7 @@ local function ActionsPanel(props: {
 				end
 			end,
 		}),
-		ClearSelection = showSelection and e(OperationButton, {
+		ClearSelection = e(OperationButton, {
 			Text = "Clear Selection",
 			Color = Colors.GREY,
 			Disabled = session == nil,
@@ -630,8 +623,10 @@ local function PolyMapGui(props: {
 	local session = props.Session
 	local mode = currentSettings.Mode
 	local nextOrder = createNextOrder()
+	local showSelection = mode == "Select" or mode == "Move" or mode == "Rotate"
 	local showInfluence = mode == "Move" or mode == "Rotate"
 	local showPaint = mode == "Paint"
+	local showGrid = mode == "Generate"
 
 	return e(PluginGui, {
 		Config = POLYMAP_CONFIG,
@@ -654,15 +649,10 @@ local function PolyMapGui(props: {
 			ModePanel = e(ModePanel, {
 				Settings = currentSettings,
 				UpdatedSettings = props.UpdatedSettings,
-				LayoutOrder = nextOrder(),
-			}),
-			StatusBar = e(StatusBar, {
 				Session = session,
-				Mode = mode,
-				HaveHelp = currentSettings.HaveHelp,
 				LayoutOrder = nextOrder(),
 			}),
-			GridPanel = e(GridPanel, {
+			GridPanel = showGrid and e(GridPanel, {
 				Settings = currentSettings,
 				UpdatedSettings = props.UpdatedSettings,
 				Session = session,
@@ -683,9 +673,8 @@ local function PolyMapGui(props: {
 				UpdatedSettings = props.UpdatedSettings,
 				LayoutOrder = nextOrder(),
 			}),
-			ActionsPanel = e(ActionsPanel, {
+			SelectionActionsPanel = mode == "Select" and e(SelectionActionsPanel, {
 				Session = session,
-				Mode = mode,
 				LayoutOrder = nextOrder(),
 			}),
 			CloseButton = e(CloseButton, {

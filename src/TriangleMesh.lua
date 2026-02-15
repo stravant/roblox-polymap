@@ -61,6 +61,7 @@ export type TriangleMesh = {
 	discoverRegion: (center: Vector3, radius: number) -> (),
 	getPartTriangle: (part: BasePart) -> number?,
 	scanWorkspace: (root: Instance?) -> (),
+	refreshFromParts: () -> (),
 	clear: () -> (),
 }
 
@@ -594,6 +595,22 @@ local function createTriangleMesh(): TriangleMesh
 		for _, candidate in candidates do
 			if not mPartToTriangle[candidate] and isThinWedge(candidate) then
 				mesh.discoverPart(candidate)
+			end
+		end
+	end
+
+	mesh.refreshFromParts = function()
+		local aliveParts: { BasePart } = {}
+		for part in mPartToTriangle do
+			if part.Parent then
+				table.insert(aliveParts, part)
+			end
+		end
+
+		mesh.clear()
+		for _, part in aliveParts do
+			if not mPartToTriangle[part] then
+				mesh.discoverPart(part)
 			end
 		end
 	end

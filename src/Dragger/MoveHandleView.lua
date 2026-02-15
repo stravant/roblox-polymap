@@ -53,32 +53,8 @@ function MoveHandleView:render()
 	length -= scale * 0.3
 
 	local children = {}
-	if not self.props.Hovered then
-		children.Shaft = Roact.createElement("CylinderHandleAdornment", {
-			Adornee = Workspace.Terrain,
-			ZIndex = 0,
-			Radius = radius,
-			Height = length,
-			CFrame = self.props.Axis * CFrame.new(0, 0, -(offset + length * 0.5)),
-			Color3 = self.props.Color,
-			AlwaysOnTop = false,
-			AdornCullingMode = CULLING_MODE,
-		})
-		if not self.props.Thin then
-			children.Head = Roact.createElement("ConeHandleAdornment", {
-				Adornee = Workspace.Terrain,
-				ZIndex = 0,
-				Radius = TIP_RADIUS_MULTIPLIER * radius,
-				Height = tipLength,
-				CFrame = cone2AtCFrame,
-				Color3 = self.props.Color,
-				AlwaysOnTop = false,
-				AdornCullingMode = CULLING_MODE,
-			})
-		end
-	end
 
-	children.DimmedShaft = Roact.createElement("CylinderHandleAdornment", {
+	children.Shaft = Roact.createElement("CylinderHandleAdornment", {
 		Adornee = Workspace.Terrain,
 		ZIndex = 0,
 		Radius = radius,
@@ -86,7 +62,6 @@ function MoveHandleView:render()
 		CFrame = self.props.Axis * CFrame.new(0, 0, -(offset + length * 0.5)),
 		Color3 = self.props.Color,
 		AlwaysOnTop = true,
-		Transparency = self.props.Hovered and 0.0 or HANDLE_DIM_TRANSPARENCY,
 		AdornCullingMode = CULLING_MODE,
 	})
 	if not self.props.Thin then
@@ -98,7 +73,6 @@ function MoveHandleView:render()
 			CFrame = cone2AtCFrame,
 			Color3 = self.props.Color,
 			AlwaysOnTop = true,
-			Transparency = self.props.Hovered and 0.0 or HANDLE_DIM_TRANSPARENCY,
 			AdornCullingMode = CULLING_MODE,
 		})
 	end
