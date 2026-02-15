@@ -97,7 +97,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local mSelectedVertices: { [number]: boolean } = {}
 	local mHoverVertexId: number? = nil
 	local mHoverEdgeKey: string? = nil
-	local mHoverTriangleId: number? = nil
+	local mHoverTriangleIds: { number } = {}
 
 	-- Add mode state
 	local mAddBoundaryEdge: { v1: number, v2: number }? = nil
@@ -116,6 +116,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local mSavedVertexPositions: { [number]: Vector3 } = {}
 	local mInfluencedVertices: { [number]: { position: Vector3, factor: number } } = {}
 	local mDragCentroid: Vector3? = nil
+
+	-- Delete/Paint drag state
+	local mStrokeDragging = false
+	local mStrokeRecording: string? = nil
 
 	-- Undo/redo: save selected vertex positions so selection survives rescan
 	local mUndoSelections: { { Vector3 } } = {}
@@ -269,10 +273,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 	local function updateHover()
 		if mIsOverUI or mIsDraggingHandle then
-			if mHoverVertexId ~= nil or mHoverEdgeKey ~= nil then
+			if mHoverVertexId ~= nil or mHoverEdgeKey ~= nil or #mHoverTriangleIds > 0 then
 				mHoverVertexId = nil
 				mHoverEdgeKey = nil
-				mHoverTriangleId = nil
+				mHoverTriangleIds = {}
 				changeSignal:Fire()
 			end
 			return
@@ -281,6 +285,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local result = mouseRaycast()
 		local newHoverVertex: number? = nil
 		local newHoverEdge: string? = nil
+		local newHoverTriangles: { number } = {}
 
 		if result then
 			-- Discover the part under the cursor (O(1) for already-tracked parts)
@@ -289,8 +294,41 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			end
 
 			local mode = currentSettings.Mode
-			if mode == "Select" or mode == "Move" or mode == "Rotate" or mode == "Delete" then
+			if mode == "Select" or mode == "Move" or mode == "Rotate" then
 				newHoverVertex = findNearestVertex(result.Position)
+			end
+			if mode == "Delete" then
+				if currentSettings.DeleteTarget == "Vertex" then
+					newHoverVertex = findNearestVertex(result.Position)
+				else
+					-- Face mode: hover the triangle(s) that would be affected
+					if result.Instance:IsA("BasePart") then
+						local triId = mMesh.getPartTriangle(result.Instance :: BasePart)
+						if triId then
+							local radius = currentSettings.DeleteRadius
+							if radius > 0 then
+								mMesh.discoverRegion(result.Position, radius + 5)
+								newHoverTriangles = mMesh.findTrianglesInRadius(result.Position, radius)
+							else
+								newHoverTriangles = { triId }
+							end
+						end
+					end
+				end
+			end
+			if mode == "Paint" then
+				if result.Instance:IsA("BasePart") then
+					local triId = mMesh.getPartTriangle(result.Instance :: BasePart)
+					if triId then
+						local radius = currentSettings.PaintRadius
+						if radius > 0 then
+							mMesh.discoverRegion(result.Position, radius + 5)
+							newHoverTriangles = mMesh.findTrianglesInRadius(result.Position, radius)
+						else
+							newHoverTriangles = { triId }
+						end
+					end
+				end
 			end
 			if mode == "Add" then
 				if mAddBoundaryEdge then
@@ -299,14 +337,23 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					newHoverEdge = findNearestEdge(result.Position)
 				end
 			end
-			if mode == "Paint" then
-				-- TODO: hover triangle
+		end
+
+		-- Check if hover state actually changed
+		local trianglesChanged = #newHoverTriangles ~= #mHoverTriangleIds
+		if not trianglesChanged then
+			for i, id in newHoverTriangles do
+				if mHoverTriangleIds[i] ~= id then
+					trianglesChanged = true
+					break
+				end
 			end
 		end
 
-		if newHoverVertex ~= mHoverVertexId or newHoverEdge ~= mHoverEdgeKey then
+		if newHoverVertex ~= mHoverVertexId or newHoverEdge ~= mHoverEdgeKey or trianglesChanged then
 			mHoverVertexId = newHoverVertex
 			mHoverEdgeKey = newHoverEdge
+			mHoverTriangleIds = newHoverTriangles
 			changeSignal:Fire()
 		end
 	end
@@ -365,47 +412,104 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 	end
 
-	local function handleDeleteClick(worldPos: Vector3)
-		mMesh.discoverRegion(worldPos, 15)
-		local vid = findNearestVertex(worldPos)
-		if vid then
-			local vertex = mMesh.getVertex(vid)
-			if vertex then
-				pushUndoSnapshot()
-				local recording = ChangeHistoryService:TryBeginRecording("PolyMap Delete")
+	local function applyDeleteAtCursor()
+		local result = mouseRaycast()
+		if not result then return end
 
-				local triIds = table.clone(vertex.triangles)
-				for _, triId in triIds do
-					mMesh.removeTriangle(triId)
+		if currentSettings.DeleteTarget == "Vertex" then
+			mMesh.discoverRegion(result.Position, 15)
+			local vid = findNearestVertex(result.Position)
+			if vid then
+				local vertex = mMesh.getVertex(vid)
+				if vertex then
+					local triIds = table.clone(vertex.triangles)
+					for _, triId in triIds do
+						mMesh.removeTriangle(triId)
+					end
+					mSelectedVertices[vid] = nil
+					changeSignal:Fire()
 				end
-
-				mSelectedVertices[vid] = nil
-
-				if recording then
-					ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+			end
+		else
+			-- Face mode
+			if result.Instance:IsA("BasePart") then
+				local triId = mMesh.getPartTriangle(result.Instance :: BasePart)
+				if triId then
+					local radius = currentSettings.DeleteRadius
+					local toRemove: { number }
+					if radius > 0 then
+						mMesh.discoverRegion(result.Position, radius + 5)
+						toRemove = mMesh.findTrianglesInRadius(result.Position, radius)
+					else
+						toRemove = { triId }
+					end
+					for _, removeId in toRemove do
+						mMesh.removeTriangle(removeId)
+					end
+					changeSignal:Fire()
 				end
-				changeSignal:Fire()
 			end
 		end
 	end
 
-	local function handlePaintClick(worldPos: Vector3)
+	local function applyPaintAtCursor()
 		local result = mouseRaycast()
 		if result and result.Instance:IsA("BasePart") then
-			local recording = ChangeHistoryService:TryBeginRecording("PolyMap Paint")
-
 			local c = currentSettings.PaintColor
-			result.Instance.Color = Color3.new(c[1], c[2], c[3])
+			local color = Color3.new(c[1], c[2], c[3])
 			local mat = (Enum.Material :: any)[currentSettings.PaintMaterial]
-			if mat then
-				result.Instance.Material = mat
+
+			-- Collect all parts to paint
+			local partsToPaint: { BasePart } = { result.Instance :: BasePart }
+			local radius = currentSettings.PaintRadius
+			if radius > 0 then
+				mMesh.discoverRegion(result.Position, radius + 5)
+				for _, nearTriId in mMesh.findTrianglesInRadius(result.Position, radius) do
+					local tri = mMesh.getTriangle(nearTriId)
+					if tri then
+						for _, part in tri.parts do
+							table.insert(partsToPaint, part)
+						end
+					end
+				end
 			end
 
-			if recording then
-				ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+			for _, part in partsToPaint do
+				part.Color = color
+				if mat then
+					part.Material = mat
+				end
 			end
 			changeSignal:Fire()
 		end
+	end
+
+	local function startStroke()
+		local mode = currentSettings.Mode
+		if mode == "Delete" then
+			pushUndoSnapshot()
+			mStrokeRecording = ChangeHistoryService:TryBeginRecording("PolyMap Delete")
+		elseif mode == "Paint" then
+			mStrokeRecording = ChangeHistoryService:TryBeginRecording("PolyMap Paint")
+		end
+		mStrokeDragging = true
+	end
+
+	local function applyStrokeAtCursor()
+		local mode = currentSettings.Mode
+		if mode == "Delete" then
+			applyDeleteAtCursor()
+		elseif mode == "Paint" then
+			applyPaintAtCursor()
+		end
+	end
+
+	local function endStroke()
+		if mStrokeRecording then
+			ChangeHistoryService:FinishRecording(mStrokeRecording, Enum.FinishRecordingOperation.Commit)
+			mStrokeRecording = nil
+		end
+		mStrokeDragging = false
 	end
 
 	local function handleClick()
@@ -415,7 +519,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 		local result = mouseRaycast()
 		if not result then
-			if currentSettings.Mode == "Select" and not isShiftHeld() then
+			local mode = currentSettings.Mode
+			if (mode == "Select" or mode == "Move" or mode == "Rotate") and not isShiftHeld() then
 				mSelectedVertices = {}
 				changeSignal:Fire()
 			end
@@ -431,10 +536,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			handleSelectClick(result.Position)
 		elseif mode == "Add" then
 			handleAddClick(result.Position)
-		elseif mode == "Delete" then
-			handleDeleteClick(result.Position)
-		elseif mode == "Paint" then
-			handlePaintClick(result.Position)
+		elseif mode == "Delete" or mode == "Paint" then
+			startStroke()
+			applyStrokeAtCursor()
 		end
 	end
 
@@ -734,6 +838,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			if input.UserInputType == Enum.UserInputType.MouseButton1 then
 				mMarqueeStart = nil
 				mMarqueeEnd = nil
+				if mStrokeDragging then
+					endStroke()
+				end
 			end
 		end)
 	end)
@@ -742,7 +849,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		while true do
 			updateHover()
 
-			if mMarqueeStart and not mIsDraggingHandle then
+			if mStrokeDragging then
+				applyStrokeAtCursor()
+			elseif mMarqueeStart and not mIsDraggingHandle then
 				local mousePos = UserInputService:GetMouseLocation()
 				local dist = (mousePos - mMarqueeStart).Magnitude
 				if dist > 5 then
@@ -802,6 +911,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local redoCn = ChangeHistoryService.OnRedo:Connect(handleRedo)
 
 	local function teardown()
+		if mStrokeDragging then
+			endStroke()
+		end
 		Roact.unmount(draggerHandle)
 		inputChangedCn:Disconnect()
 		undoCn:Disconnect()
@@ -849,6 +961,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	end
 	session.GetHoverEdgeKey = function(): string?
 		return mHoverEdgeKey
+	end
+	session.GetHoverTriangleIds = function(): { number }
+		return mHoverTriangleIds
 	end
 	session.GetMode = function(): string
 		return currentSettings.Mode

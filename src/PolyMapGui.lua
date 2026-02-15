@@ -25,7 +25,7 @@ local function createNextOrder()
 	end
 end
 
-local function getStatusText(mode: string, session: createPolyMapSession.PolyMapSession?): string
+local function getStatusText(mode: string, settings: Settings.PolyMapSettings, session: createPolyMapSession.PolyMapSession?): string
 	if not session then
 		return ""
 	end
@@ -51,7 +51,10 @@ local function getStatusText(mode: string, session: createPolyMapSession.PolyMap
 		end
 		return "Click a boundary edge to start adding a triangle."
 	elseif mode == "Delete" then
-		return "Click a vertex to delete all its adjacent triangles."
+		if settings.DeleteTarget == "Vertex" then
+			return "Click a vertex to delete all its adjacent triangles."
+		end
+		return "Click a triangle to delete it."
 	elseif mode == "Paint" then
 		return "Click on triangles to apply color and material."
 	elseif mode == "Generate" then
@@ -160,7 +163,7 @@ local function ModePanel(props: {
 			}),
 		}),
 		Status = props.Settings.HaveHelp and (function()
-			local text = getStatusText(current, props.Session)
+			local text = getStatusText(current, props.Settings, props.Session)
 			if text == "" then
 				return nil
 			end
@@ -403,6 +406,20 @@ local function PaintPanel(props: {
 		LayoutOrder = props.LayoutOrder,
 		Padding = UDim.new(0, 4),
 	}, {
+		PaintRadius = e(NumberInput, {
+			Label = "Radius",
+			Value = props.Settings.PaintRadius,
+			Unit = " studs",
+			LayoutOrder = nextOrder(),
+			ValueEntered = function(newValue: number)
+				if newValue >= 0 then
+					props.Settings.PaintRadius = newValue
+					props.UpdatedSettings()
+					return newValue
+				end
+				return nil
+			end,
+		}),
 		ColorPreview = e("Frame", {
 			Size = UDim2.new(1, 0, 0, 20),
 			BackgroundColor3 = currentColor,
@@ -526,6 +543,64 @@ local function PaintPanel(props: {
 	})
 end
 
+local function DeletePanel(props: {
+	Settings: Settings.PolyMapSettings,
+	UpdatedSettings: () -> (),
+	LayoutOrder: number?,
+})
+	local current = props.Settings.DeleteTarget
+	return e(SubPanel, {
+		Title = "Delete",
+		LayoutOrder = props.LayoutOrder,
+		Padding = UDim.new(0, 4),
+	}, {
+		Row = e("Frame", {
+			Size = UDim2.fromScale(1, 0),
+			AutomaticSize = Enum.AutomaticSize.Y,
+			BackgroundTransparency = 1,
+			LayoutOrder = 1,
+		}, {
+			ListLayout = e("UIListLayout", {
+				FillDirection = Enum.FillDirection.Horizontal,
+				SortOrder = Enum.SortOrder.LayoutOrder,
+				Padding = UDim.new(0, 4),
+			}),
+			Face = e(ChipForToggle, {
+				Text = "Face",
+				IsCurrent = current == "Face",
+				LayoutOrder = 1,
+				OnClick = function()
+					props.Settings.DeleteTarget = "Face"
+					props.UpdatedSettings()
+				end,
+			}),
+			Vertex = e(ChipForToggle, {
+				Text = "Vertex",
+				IsCurrent = current == "Vertex",
+				LayoutOrder = 2,
+				OnClick = function()
+					props.Settings.DeleteTarget = "Vertex"
+					props.UpdatedSettings()
+				end,
+			}),
+		}),
+		Radius = e(NumberInput, {
+			Label = "Radius",
+			Value = props.Settings.DeleteRadius,
+			Unit = " studs",
+			LayoutOrder = 2,
+			ValueEntered = function(newValue: number)
+				if newValue >= 0 then
+					props.Settings.DeleteRadius = newValue
+					props.UpdatedSettings()
+					return newValue
+				end
+				return nil
+			end,
+		}),
+	})
+end
+
 local function SelectionActionsPanel(props: {
 	Session: createPolyMapSession.PolyMapSession?,
 	LayoutOrder: number?,
@@ -625,6 +700,7 @@ local function PolyMapGui(props: {
 	local nextOrder = createNextOrder()
 	local showSelection = mode == "Select" or mode == "Move" or mode == "Rotate"
 	local showInfluence = mode == "Move" or mode == "Rotate"
+	local showDelete = mode == "Delete"
 	local showPaint = mode == "Paint"
 	local showGrid = mode == "Generate"
 
@@ -642,6 +718,7 @@ local function PolyMapGui(props: {
 			Mesh = session.GetMesh(),
 			SelectedVertices = session.GetSelectedVertices(),
 			HoverVertexId = session.GetHoverVertexId(),
+			HoverTriangleIds = session.GetHoverTriangleIds(),
 			MarqueeStart = session.GetMarquee(),
 			MarqueeEnd = select(2, session.GetMarquee()),
 		}),
@@ -664,6 +741,11 @@ local function PolyMapGui(props: {
 				LayoutOrder = nextOrder(),
 			}),
 			InfluencePanel = showInfluence and e(InfluencePanel, {
+				Settings = currentSettings,
+				UpdatedSettings = props.UpdatedSettings,
+				LayoutOrder = nextOrder(),
+			}),
+			DeletePanel = showDelete and e(DeletePanel, {
 				Settings = currentSettings,
 				UpdatedSettings = props.UpdatedSettings,
 				LayoutOrder = nextOrder(),

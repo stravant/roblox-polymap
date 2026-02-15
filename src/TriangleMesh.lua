@@ -56,6 +56,10 @@ export type TriangleMesh = {
 	moveVertex: (vertexId: number, newPosition: Vector3, thickness: number, props: fillTriangle.TriangleProps?) -> (),
 	moveVertices: (moves: { [number]: Vector3 }, thickness: number, props: fillTriangle.TriangleProps?) -> (),
 
+	-- Queries (topology)
+	getAdjacentTriangles: (triangleId: number) -> { number },
+	findTrianglesInRadius: (center: Vector3, radius: number) -> { number },
+
 	-- Discovery / Scanning
 	discoverPart: (part: BasePart) -> number?,
 	discoverRegion: (center: Vector3, radius: number) -> (),
@@ -280,6 +284,49 @@ local function createTriangleMesh(): TriangleMesh
 		local result: { number } = {}
 		for vid in neighbors do
 			table.insert(result, vid)
+		end
+		return result
+	end
+
+	mesh.getAdjacentTriangles = function(triangleId: number): { number }
+		local tri = mTriangles[triangleId]
+		if not tri then
+			return {}
+		end
+		local adjacent: { [number]: boolean } = {}
+		local verts = tri.vertices
+		-- Check all 3 edges of the triangle
+		for i = 1, 3 do
+			local v1 = verts[i]
+			local v2 = verts[if i == 3 then 1 else i + 1]
+			local key = edgeKey(v1, v2)
+			local edge = mEdges[key]
+			if edge then
+				for _, otherTriId in edge.triangles do
+					if otherTriId ~= triangleId then
+						adjacent[otherTriId] = true
+					end
+				end
+			end
+		end
+		local result: { number } = {}
+		for triId in adjacent do
+			table.insert(result, triId)
+		end
+		return result
+	end
+
+	mesh.findTrianglesInRadius = function(center: Vector3, radius: number): { number }
+		local result: { number } = {}
+		for triId, tri in mTriangles do
+			-- Check if any vertex of the triangle is within the radius
+			for _, vid in tri.vertices do
+				local v = mVertices[vid]
+				if v and (v.position - center).Magnitude <= radius then
+					table.insert(result, triId)
+					break
+				end
+			end
 		end
 		return result
 	end

@@ -8,6 +8,7 @@ local React = require(Packages.React)
 local ReactRoblox = require(Packages.ReactRoblox)
 
 local VertexMarker = require("./VertexMarker")
+local TriangleHighlight = require("./TriangleHighlight")
 local TriangleMesh = require("./TriangleMesh")
 
 local e = React.createElement
@@ -27,12 +28,14 @@ local HOVER_VERTEX_RADIUS = 2.0
 local EDGE_COLOR = Color3.fromRGB(255, 0, 255)
 local SELECTED_VERTEX_COLOR = Color3.fromRGB(255, 100, 50)
 local HOVER_VERTEX_COLOR = Color3.fromRGB(100, 150, 255)
+local HOVER_TRIANGLE_COLOR = Color3.fromRGB(255, 100, 50)
 local MARQUEE_BORDER_COLOR = Color3.fromRGB(100, 150, 255)
 
 local function MeshOverlay(props: {
 	Mesh: TriangleMesh.TriangleMesh?,
 	SelectedVertices: { [number]: boolean }?,
 	HoverVertexId: number?,
+	HoverTriangleIds: { number }?,
 	MarqueeStart: Vector2?,
 	MarqueeEnd: Vector2?,
 })
@@ -41,6 +44,7 @@ local function MeshOverlay(props: {
 
 	-- Collect the set of "active" vertex IDs (selected + hovered)
 	local selectedVertices = props.SelectedVertices or {}
+	local hoverTriangleIds = props.HoverTriangleIds or {}
 	local activeVertices: { [number]: boolean } = {}
 	for id in selectedVertices do
 		activeVertices[id] = true
@@ -119,6 +123,19 @@ local function MeshOverlay(props: {
 				Color = HOVER_VERTEX_COLOR,
 				Radius = scale * HOVER_VERTEX_RADIUS,
 				ZIndexOffset = 4,
+			})
+		end
+	end
+
+	-- Render hovered triangle face highlights
+	for _, triId in hoverTriangleIds do
+		local tri = mesh.getTriangle(triId)
+		if tri then
+			children["T_" .. tostring(triId)] = e(TriangleHighlight, {
+				Parts = tri.parts,
+				Color = HOVER_TRIANGLE_COLOR,
+				Transparency = 0.5,
+				ZIndexOffset = 2,
 			})
 		end
 	end

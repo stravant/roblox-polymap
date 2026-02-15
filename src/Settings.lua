@@ -7,6 +7,9 @@ local PluginGuiTypes = require("./PluginGui/Types")
 
 export type PolyMapSettings = PluginGuiTypes.PluginGuiSettings & {
 	Mode: string,
+	DeleteTarget: string,
+	DeleteRadius: number,
+	PaintRadius: number,
 	Thickness: number,
 	InfluenceRadius: number,
 	InfluenceFalloff: string,
@@ -34,6 +37,9 @@ local function loadSettings(plugin: Plugin): PolyMapSettings
 		DoneTutorial = if raw.DoneTutorial ~= nil then raw.DoneTutorial else false,
 
 		Mode = raw.Mode or "Select",
+		DeleteTarget = raw.DeleteTarget or "Face",
+		DeleteRadius = raw.DeleteRadius or 0,
+		PaintRadius = raw.PaintRadius or 0,
 		Thickness = raw.Thickness or 0.2,
 		InfluenceRadius = raw.InfluenceRadius or 10,
 		InfluenceFalloff = raw.InfluenceFalloff or "Smooth",
@@ -57,6 +63,9 @@ local function saveSettings(plugin: Plugin, settings: PolyMapSettings)
 		DoneTutorial = settings.DoneTutorial,
 
 		Mode = settings.Mode,
+		DeleteTarget = settings.DeleteTarget,
+		DeleteRadius = settings.DeleteRadius,
+		PaintRadius = settings.PaintRadius,
 		Thickness = settings.Thickness,
 		InfluenceRadius = settings.InfluenceRadius,
 		InfluenceFalloff = settings.InfluenceFalloff,
