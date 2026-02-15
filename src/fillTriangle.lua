@@ -40,6 +40,13 @@ local function fillTriangle(
 		return {}
 	end
 
+	-- Ensure thickness extends downward: flip winding if normal points down
+	if ab:Cross(bc).Y < 0 then
+		b, c = c, b
+		ab, bc, ca = b - a, c - b, a - c
+		abm, bcm, cam = ab.Magnitude, bc.Magnitude, ca.Magnitude
+	end
+
 	local e1, e2, e3 = ca:Dot(ab) / (abm * abm), ab:Dot(bc) / (bcm * bcm), bc:Dot(ca) / (cam * cam)
 	local edg1 = math.abs(0.5 + e1)
 	local edg2 = math.abs(0.5 + e2)
