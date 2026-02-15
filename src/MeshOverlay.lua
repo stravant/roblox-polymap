@@ -28,7 +28,6 @@ local EDGE_COLOR = Color3.fromRGB(255, 0, 255)
 local SELECTED_VERTEX_COLOR = Color3.fromRGB(255, 100, 50)
 local HOVER_VERTEX_COLOR = Color3.fromRGB(100, 150, 255)
 local MARQUEE_BORDER_COLOR = Color3.fromRGB(100, 150, 255)
-local MARQUEE_FILL_COLOR = Color3.fromRGB(100, 150, 255)
 
 local function MeshOverlay(props: {
 	Mesh: TriangleMesh.TriangleMesh?,
@@ -130,11 +129,10 @@ local function MeshOverlay(props: {
 			IgnoreGuiInset = true,
 			DisplayOrder = 100,
 		}, {
-			Fill = e("Frame", {
+			Outline = e("Frame", {
 				Position = UDim2.fromOffset(minX, minY),
 				Size = UDim2.fromOffset(maxX - minX, maxY - minY),
-				BackgroundColor3 = MARQUEE_FILL_COLOR,
-				BackgroundTransparency = 0.8,
+				BackgroundTransparency = 1,
 				BorderSizePixel = 0,
 			}, {
 				Border = e("UIStroke", {

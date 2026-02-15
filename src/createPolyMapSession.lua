@@ -618,7 +618,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		ApplyTransform = applyMove,
 		EndTransform = endMove,
 		Visible = function()
-			return currentSettings.Mode == "Move" and getSelectedVertexCount() > 0
+			return currentSettings.Mode == "Move" and getSelectedVertexCount() > 0 and not mMarqueeEnd
 		end,
 	})
 
@@ -634,7 +634,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		ApplyTransform = applyRotate,
 		EndTransform = endRotate,
 		Visible = function()
-			return currentSettings.Mode == "Rotate" and getSelectedVertexCount() > 0
+			return currentSettings.Mode == "Rotate" and getSelectedVertexCount() > 0 and not mMarqueeEnd
 		end,
 	})
 
