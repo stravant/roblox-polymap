@@ -643,6 +643,11 @@ local function PolyMapGui(props: {
 			Panelized = props.Panelized,
 		},
 	}, {
+		Overlay = session and e(MeshOverlay, {
+			Mesh = session.GetMesh(),
+			SelectedVertices = session.GetSelectedVertices(),
+			HoverVertexId = session.GetHoverVertexId(),
+		}),
 		Content = e(React.Fragment, nil, {
 			ModePanel = e(ModePanel, {
 				Settings = currentSettings,
