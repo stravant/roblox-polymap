@@ -27,11 +27,15 @@ local HOVER_VERTEX_RADIUS = 2.0
 local EDGE_COLOR = Color3.fromRGB(255, 0, 255)
 local SELECTED_VERTEX_COLOR = Color3.fromRGB(255, 100, 50)
 local HOVER_VERTEX_COLOR = Color3.fromRGB(100, 150, 255)
+local MARQUEE_BORDER_COLOR = Color3.fromRGB(100, 150, 255)
+local MARQUEE_FILL_COLOR = Color3.fromRGB(100, 150, 255)
 
 local function MeshOverlay(props: {
 	Mesh: TriangleMesh.TriangleMesh?,
 	SelectedVertices: { [number]: boolean }?,
 	HoverVertexId: number?,
+	MarqueeStart: Vector2?,
+	MarqueeEnd: Vector2?,
 })
 	local mesh = props.Mesh
 	local wireRef = React.useRef(nil :: any)
@@ -112,6 +116,33 @@ local function MeshOverlay(props: {
 				ZIndexOffset = 4,
 			})
 		end
+	end
+
+	-- Marquee selection rectangle
+	if props.MarqueeStart and props.MarqueeEnd then
+		local minX = math.min(props.MarqueeStart.X, props.MarqueeEnd.X)
+		local minY = math.min(props.MarqueeStart.Y, props.MarqueeEnd.Y)
+		local maxX = math.max(props.MarqueeStart.X, props.MarqueeEnd.X)
+		local maxY = math.max(props.MarqueeStart.Y, props.MarqueeEnd.Y)
+
+		children.MarqueeGui = e("ScreenGui", {
+			Name = "$PolyMapMarquee",
+			IgnoreGuiInset = true,
+			DisplayOrder = 100,
+		}, {
+			Fill = e("Frame", {
+				Position = UDim2.fromOffset(minX, minY),
+				Size = UDim2.fromOffset(maxX - minX, maxY - minY),
+				BackgroundColor3 = MARQUEE_FILL_COLOR,
+				BackgroundTransparency = 0.8,
+				BorderSizePixel = 0,
+			}, {
+				Border = e("UIStroke", {
+					Color = MARQUEE_BORDER_COLOR,
+					Thickness = 1,
+				}),
+			}),
+		})
 	end
 
 	return ReactRoblox.createPortal(e("Folder", {

@@ -647,6 +647,8 @@ local function PolyMapGui(props: {
 			Mesh = session.GetMesh(),
 			SelectedVertices = session.GetSelectedVertices(),
 			HoverVertexId = session.GetHoverVertexId(),
+			MarqueeStart = session.GetMarquee(),
+			MarqueeEnd = select(2, session.GetMarquee()),
 		}),
 		Content = e(React.Fragment, nil, {
 			ModePanel = e(ModePanel, {
