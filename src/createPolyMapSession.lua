@@ -120,6 +120,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	-- Delete/Paint drag state
 	local mStrokeDragging = false
 	local mStrokeRecording: string? = nil
+	local mStrokePlanePoint: Vector3? = nil
+	local mStrokePlaneNormal: Vector3? = nil
 
 	-- Undo/redo: save selected vertex positions so selection survives rescan
 	local mUndoSelections: { { Vector3 } } = {}
@@ -207,6 +209,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return sum / #ids
 	end
 
+	local VERTEX_SCREEN_RADIUS = 30 -- max screen-space pixels to find a vertex
+
 	local function findNearestVertex(worldPos: Vector3): number?
 		local camera = workspace.CurrentCamera
 		if not camera then
@@ -215,7 +219,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 		local mouseScreen = camera:WorldToScreenPoint(worldPos)
 		local bestId: number? = nil
-		local bestScreenDist = math.huge
+		local bestScreenDist = VERTEX_SCREEN_RADIUS
 
 		for id, vertex in mMesh.getVertices() do
 			local screenPos, onScreen = camera:WorldToScreenPoint(vertex.position)
@@ -287,54 +291,67 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local newHoverEdge: string? = nil
 		local newHoverTriangles: { number } = {}
 
-		if result then
-			-- Discover the part under the cursor (O(1) for already-tracked parts)
-			if result.Instance:IsA("BasePart") then
-				mMesh.discoverPart(result.Instance)
-			end
-
-			local mode = currentSettings.Mode
-			if mode == "Select" or mode == "Move" or mode == "Rotate" then
-				newHoverVertex = findNearestVertex(result.Position)
-			end
-			if mode == "Delete" then
-				if currentSettings.DeleteTarget == "Vertex" then
-					newHoverVertex = findNearestVertex(result.Position)
-				else
-					-- Face mode: hover the triangle(s) that would be affected
-					if result.Instance:IsA("BasePart") then
-						local triId = mMesh.getPartTriangle(result.Instance :: BasePart)
-						if triId then
-							local radius = currentSettings.DeleteRadius
-							if radius > 0 then
-								mMesh.discoverRegion(result.Position, radius + 5)
-								newHoverTriangles = mMesh.findTrianglesInRadius(result.Position, radius)
-							else
-								newHoverTriangles = { triId }
-							end
-						end
+		-- Compute world position: use raycast hit, or stroke plane fallback during drag
+		local worldPos: Vector3? = if result then result.Position else nil
+		if not worldPos and mStrokeDragging and mStrokePlanePoint and mStrokePlaneNormal then
+			local camera = workspace.CurrentCamera
+			if camera then
+				local mouseLocation = UserInputService:GetMouseLocation()
+				local ray = camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
+				local denom = ray.Direction:Dot(mStrokePlaneNormal)
+				if math.abs(denom) > 0.0001 then
+					local t = (mStrokePlanePoint - ray.Origin):Dot(mStrokePlaneNormal) / denom
+					if t > 0 then
+						worldPos = ray.Origin + ray.Direction * t
 					end
 				end
 			end
-			if mode == "Paint" then
-				if result.Instance:IsA("BasePart") then
-					local triId = mMesh.getPartTriangle(result.Instance :: BasePart)
-					if triId then
-						local radius = currentSettings.PaintRadius
-						if radius > 0 then
-							mMesh.discoverRegion(result.Position, radius + 5)
-							newHoverTriangles = mMesh.findTrianglesInRadius(result.Position, radius)
-						else
+		end
+
+		if result and result.Instance:IsA("BasePart") then
+			-- Discover the part under the cursor (O(1) for already-tracked parts)
+			mMesh.discoverPart(result.Instance)
+		end
+
+		if worldPos then
+			local mode = currentSettings.Mode
+			if mode == "Select" or mode == "Move" or mode == "Rotate" then
+				newHoverVertex = findNearestVertex(worldPos)
+			end
+			if mode == "Delete" then
+				if currentSettings.DeleteTarget == "Vertex" then
+					newHoverVertex = findNearestVertex(worldPos)
+				else
+					-- Face mode: hover the triangle(s) that would be affected
+					local radius = currentSettings.DeleteRadius
+					if radius > 0 then
+						mMesh.discoverRegion(worldPos, radius + 5)
+						newHoverTriangles = mMesh.findTrianglesInRadius(worldPos, radius)
+					elseif result and result.Instance:IsA("BasePart") then
+						local triId = mMesh.getPartTriangle(result.Instance :: BasePart)
+						if triId then
 							newHoverTriangles = { triId }
 						end
 					end
 				end
 			end
+			if mode == "Paint" then
+				local radius = currentSettings.PaintRadius
+				if radius > 0 then
+					mMesh.discoverRegion(worldPos, radius + 5)
+					newHoverTriangles = mMesh.findTrianglesInRadius(worldPos, radius)
+				elseif result and result.Instance:IsA("BasePart") then
+					local triId = mMesh.getPartTriangle(result.Instance :: BasePart)
+					if triId then
+						newHoverTriangles = { triId }
+					end
+				end
+			end
 			if mode == "Add" then
 				if mAddBoundaryEdge then
-					newHoverVertex = findNearestVertex(result.Position)
+					newHoverVertex = findNearestVertex(worldPos)
 				else
-					newHoverEdge = findNearestEdge(result.Position)
+					newHoverEdge = findNearestEdge(worldPos)
 				end
 			end
 		end
@@ -412,13 +429,48 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 	end
 
+	-- Get world position for stroke operations. Uses raycast when it hits,
+	-- falls back to projecting onto the last-hit plane when geometry is gone.
+	local function getStrokeWorldPos(): Vector3?
+		local result = mouseRaycast()
+		if result then
+			mStrokePlanePoint = result.Position
+			mStrokePlaneNormal = result.Normal
+			return result.Position
+		end
+		-- Raycast missed — project onto the remembered stroke plane
+		if mStrokePlanePoint and mStrokePlaneNormal then
+			local camera = workspace.CurrentCamera
+			if camera then
+				local mouseLocation = UserInputService:GetMouseLocation()
+				local ray = camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
+				local denom = ray.Direction:Dot(mStrokePlaneNormal)
+				if math.abs(denom) > 0.0001 then
+					local t = (mStrokePlanePoint - ray.Origin):Dot(mStrokePlaneNormal) / denom
+					if t > 0 then
+						return ray.Origin + ray.Direction * t
+					end
+				end
+			end
+		end
+		return nil
+	end
+
 	local function applyDeleteAtCursor()
 		local result = mouseRaycast()
-		if not result then return end
+		local worldPos: Vector3?
+		if result then
+			mStrokePlanePoint = result.Position
+			mStrokePlaneNormal = result.Normal
+			worldPos = result.Position
+		else
+			worldPos = getStrokeWorldPos()
+		end
+		if not worldPos then return end
 
 		if currentSettings.DeleteTarget == "Vertex" then
-			mMesh.discoverRegion(result.Position, 15)
-			local vid = findNearestVertex(result.Position)
+			mMesh.discoverRegion(worldPos, 15)
+			local vid = findNearestVertex(worldPos)
 			if vid then
 				local vertex = mMesh.getVertex(vid)
 				if vertex then
@@ -432,22 +484,25 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			end
 		else
 			-- Face mode
-			if result.Instance:IsA("BasePart") then
-				local triId = mMesh.getPartTriangle(result.Instance :: BasePart)
-				if triId then
-					local radius = currentSettings.DeleteRadius
-					local toRemove: { number }
-					if radius > 0 then
-						mMesh.discoverRegion(result.Position, radius + 5)
-						toRemove = mMesh.findTrianglesInRadius(result.Position, radius)
-					else
-						toRemove = { triId }
-					end
-					for _, removeId in toRemove do
-						mMesh.removeTriangle(removeId)
-					end
-					changeSignal:Fire()
+			local radius = currentSettings.DeleteRadius
+			local toRemove: { number }
+			if radius > 0 then
+				mMesh.discoverRegion(worldPos, radius + 5)
+				toRemove = mMesh.findTrianglesInRadius(worldPos, radius)
+			else
+				-- Zero radius: use exact part mapping (no plane fallback)
+				if result and result.Instance:IsA("BasePart") then
+					local triId = mMesh.getPartTriangle(result.Instance :: BasePart)
+					toRemove = if triId then { triId } else {}
+				else
+					toRemove = {}
 				end
+			end
+			for _, removeId in toRemove do
+				mMesh.removeTriangle(removeId)
+			end
+			if #toRemove > 0 then
+				changeSignal:Fire()
 			end
 		end
 	end
@@ -510,6 +565,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			mStrokeRecording = nil
 		end
 		mStrokeDragging = false
+		mStrokePlanePoint = nil
+		mStrokePlaneNormal = nil
 	end
 
 	local function handleClick()
@@ -962,8 +1019,59 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	session.GetHoverEdgeKey = function(): string?
 		return mHoverEdgeKey
 	end
-	session.GetHoverTriangleIds = function(): { number }
-		return mHoverTriangleIds
+	session.GetOutlineTriangleIds = function(): { number }
+		local mode = currentSettings.Mode
+		if mode == "Delete" or mode == "Paint" then
+			return mHoverTriangleIds
+		end
+		if mode == "Select" or mode == "Move" or mode == "Rotate" then
+			-- Collect selected vertex positions
+			local selectedPositions: { Vector3 } = {}
+			for vid in mSelectedVertices do
+				local v = mMesh.getVertex(vid)
+				if v then
+					table.insert(selectedPositions, v.position)
+				end
+			end
+
+			-- Include triangles from influenced vertices within the radius
+			local radius = currentSettings.InfluenceRadius
+			local affectedVids: { [number]: boolean } = {}
+			for vid in mSelectedVertices do
+				affectedVids[vid] = true
+			end
+			if mHoverVertexId then
+				affectedVids[mHoverVertexId] = true
+			end
+			if radius > 0 and #selectedPositions > 0 and (mode == "Move" or mode == "Rotate") then
+				for vid, vertex in mMesh.getVertices() do
+					if not affectedVids[vid] then
+						for _, selPos in selectedPositions do
+							if (vertex.position - selPos).Magnitude < radius then
+								affectedVids[vid] = true
+								break
+							end
+						end
+					end
+				end
+			end
+
+			local triSet: { [number]: boolean } = {}
+			for vid in affectedVids do
+				local v = mMesh.getVertex(vid)
+				if v then
+					for _, triId in v.triangles do
+						triSet[triId] = true
+					end
+				end
+			end
+			local result: { number } = {}
+			for triId in triSet do
+				table.insert(result, triId)
+			end
+			return result
+		end
+		return {}
 	end
 	session.GetMode = function(): string
 		return currentSettings.Mode

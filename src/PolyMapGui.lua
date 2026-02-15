@@ -718,7 +718,7 @@ local function PolyMapGui(props: {
 			Mesh = session.GetMesh(),
 			SelectedVertices = session.GetSelectedVertices(),
 			HoverVertexId = session.GetHoverVertexId(),
-			HoverTriangleIds = session.GetHoverTriangleIds(),
+			OutlineTriangleIds = session.GetOutlineTriangleIds(),
 			MarqueeStart = session.GetMarquee(),
 			MarqueeEnd = select(2, session.GetMarquee()),
 		}),

@@ -8,7 +8,6 @@ local React = require(Packages.React)
 local ReactRoblox = require(Packages.ReactRoblox)
 
 local VertexMarker = require("./VertexMarker")
-local TriangleHighlight = require("./TriangleHighlight")
 local TriangleMesh = require("./TriangleMesh")
 
 local e = React.createElement
@@ -25,45 +24,54 @@ end
 local SELECTED_VERTEX_RADIUS = 2.5
 local HOVER_VERTEX_RADIUS = 2.0
 
-local EDGE_COLOR = Color3.fromRGB(255, 0, 255)
 local SELECTED_VERTEX_COLOR = Color3.fromRGB(255, 100, 50)
 local HOVER_VERTEX_COLOR = Color3.fromRGB(100, 150, 255)
-local HOVER_TRIANGLE_COLOR = Color3.fromRGB(255, 100, 50)
+local OUTLINE_COLOR = Color3.fromRGB(255, 200, 50)
 local MARQUEE_BORDER_COLOR = Color3.fromRGB(100, 150, 255)
 
 local function MeshOverlay(props: {
 	Mesh: TriangleMesh.TriangleMesh?,
 	SelectedVertices: { [number]: boolean }?,
 	HoverVertexId: number?,
-	HoverTriangleIds: { number }?,
+	OutlineTriangleIds: { number }?,
 	MarqueeStart: Vector2?,
 	MarqueeEnd: Vector2?,
 })
 	local mesh = props.Mesh
-	local wireRef = React.useRef(nil :: any)
+	local outlineRef = React.useRef(nil :: any)
 
-	-- Collect the set of "active" vertex IDs (selected + hovered)
 	local selectedVertices = props.SelectedVertices or {}
-	local hoverTriangleIds = props.HoverTriangleIds or {}
-	local activeVertices: { [number]: boolean } = {}
-	for id in selectedVertices do
-		activeVertices[id] = true
-	end
-	if props.HoverVertexId then
-		activeVertices[props.HoverVertexId] = true
-	end
 
-	-- Draw edges connected to active vertices
+	-- Draw outline around outlined triangle set (boundary edges only)
+	local outlineTriangleIds = props.OutlineTriangleIds or {}
 	React.useEffect(function()
-		local wire = wireRef.current :: WireframeHandleAdornment?
+		local wire = outlineRef.current :: WireframeHandleAdornment?
 		if not wire or not mesh then
 			return
 		end
 		wire:Clear()
 
+		if #outlineTriangleIds == 0 then
+			return
+		end
+
+		-- Build set of triangle IDs for fast lookup
+		local triSet: { [number]: boolean } = {}
+		for _, triId in outlineTriangleIds do
+			triSet[triId] = true
+		end
+
+		-- An edge is on the boundary if exactly one of its triangles is in the set
 		local edges = mesh.getEdges()
 		for _, edge in edges do
-			if activeVertices[edge.v1] or activeVertices[edge.v2] then
+			local insideCount = 0
+			for _, triId in edge.triangles do
+				if triSet[triId] then
+					insideCount += 1
+				end
+			end
+			-- Boundary: one side in set, or edge only has one triangle total and it's in set
+			if insideCount > 0 and insideCount < #edge.triangles or (#edge.triangles == 1 and insideCount == 1) then
 				local v1 = mesh.getVertex(edge.v1)
 				local v2 = mesh.getVertex(edge.v2)
 				if v1 and v2 then
@@ -85,12 +93,12 @@ local function MeshOverlay(props: {
 
 	local children: { [string]: any } = {}
 
-	-- Wireframe adornment for edges touching active vertices
-	children.Wireframe = e("WireframeHandleAdornment", {
+	-- Wireframe adornment for outline of active triangle set
+	children.OutlineWireframe = e("WireframeHandleAdornment", {
 		Adornee = workspace.Terrain,
-		Color3 = EDGE_COLOR,
+		Color3 = OUTLINE_COLOR,
 		AlwaysOnTop = true,
-		ref = wireRef,
+		ref = outlineRef,
 	})
 
 	-- Render selected vertex markers (scale down when many are selected)
@@ -123,19 +131,6 @@ local function MeshOverlay(props: {
 				Color = HOVER_VERTEX_COLOR,
 				Radius = scale * HOVER_VERTEX_RADIUS,
 				ZIndexOffset = 4,
-			})
-		end
-	end
-
-	-- Render hovered triangle face highlights
-	for _, triId in hoverTriangleIds do
-		local tri = mesh.getTriangle(triId)
-		if tri then
-			children["T_" .. tostring(triId)] = e(TriangleHighlight, {
-				Parts = tri.parts,
-				Color = HOVER_TRIANGLE_COLOR,
-				Transparency = 0.5,
-				ZIndexOffset = 2,
 			})
 		end
 	end
