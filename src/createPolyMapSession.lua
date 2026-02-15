@@ -104,6 +104,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	-- Marquee state
 	local mMarqueeStart: Vector2? = nil
 	local mMarqueeEnd: Vector2? = nil
+	local mPreMarqueeSelection: { [number]: boolean } = {}
 
 	-- Input connections
 	local mIsOverUI = false
@@ -179,7 +180,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 		local mouseScreen = camera:WorldToScreenPoint(worldPos)
 		local bestId: number? = nil
-		local bestScreenDist = 20
+		local bestScreenDist = math.huge
 
 		for id, vertex in mMesh.getVertices() do
 			local screenPos, onScreen = camera:WorldToScreenPoint(vertex.position)
@@ -436,9 +437,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local minY = math.min(mMarqueeStart.Y, mMarqueeEnd.Y)
 		local maxY = math.max(mMarqueeStart.Y, mMarqueeEnd.Y)
 
-		if not isShiftHeld() then
-			mSelectedVertices = {}
-		end
+		-- Start from the pre-marquee selection (handles shift correctly)
+		mSelectedVertices = table.clone(mPreMarqueeSelection)
 
 		for id, vertex in mMesh.getVertices() do
 			local screenPos, onScreen = camera:WorldToScreenPoint(vertex.position)
@@ -685,6 +685,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					local mousePos = UserInputService:GetMouseLocation()
 					mMarqueeStart = mousePos
 					mMarqueeEnd = nil
+					mPreMarqueeSelection = if isShiftHeld() then table.clone(mSelectedVertices) else {}
 				end
 				handleClick()
 			end
@@ -692,9 +693,6 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 		inputEndedCn = UserInputService.InputEnded:Connect(function(input: InputObject, _gameProcessed: boolean)
 			if input.UserInputType == Enum.UserInputType.MouseButton1 then
-				if mMarqueeStart and mMarqueeEnd then
-					handleMarqueeSelect()
-				end
 				mMarqueeStart = nil
 				mMarqueeEnd = nil
 			end
@@ -710,6 +708,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				local dist = (mousePos - mMarqueeStart).Magnitude
 				if dist > 5 then
 					mMarqueeEnd = mousePos
+					-- Live marquee selection
+					handleMarqueeSelect()
 				end
 			end
 
