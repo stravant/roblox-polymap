@@ -681,7 +681,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		inputBeganCn = UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
 			if input.UserInputType == Enum.UserInputType.MouseButton1 and not gameProcessed then
 				local mode = currentSettings.Mode
-				if mode == "Select" then
+				if mode == "Select" or mode == "Move" or mode == "Rotate" then
 					local mousePos = UserInputService:GetMouseLocation()
 					mMarqueeStart = mousePos
 					mMarqueeEnd = nil
