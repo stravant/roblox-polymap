@@ -802,7 +802,12 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			end
 			local pos = camera.CFrame.Position + flatLook * 20
 			pos = Vector3.new(pos.X, 0, pos.Z) -- project onto ground
-			origin = CFrame.lookAlong(pos, flatLook)
+			if currentSettings.GridType == "Square" then
+				-- Align to world axes so grid edges are axis-aligned
+				origin = CFrame.new(pos)
+			else
+				origin = CFrame.lookAlong(pos, flatLook)
+			end
 		end
 
 		local recording = ChangeHistoryService:TryBeginRecording("PolyMap Generate Grid")
