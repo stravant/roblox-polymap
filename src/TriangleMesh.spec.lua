@@ -345,4 +345,119 @@ return function(t: TestTypes.TestContext)
 
 		folder:Destroy()
 	end)
+
+	t.test("discoverPart pairs fillTriangle wedges", function()
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		-- Create a triangle via fillTriangle (produces 1-2 wedge parts)
+		local a = Vector3.new(20, 10, 0)
+		local b = Vector3.new(24, 10, 0)
+		local c = Vector3.new(22, 13, 0)
+		local parts = fillTriangle(a, b, c, 0.2, folder)
+		t.expect(#parts > 0).toBeTruthy()
+
+		-- Discover one of the parts
+		local triId = mesh.discoverPart(parts[1])
+		t.expect(triId).toBeTruthy()
+
+		-- Should have 1 triangle with 3 vertices
+		local triCount = 0
+		for _ in mesh.getTriangles() do
+			triCount += 1
+		end
+		t.expect(triCount).toBe(1)
+
+		local vertCount = 0
+		for _ in mesh.getVertices() do
+			vertCount += 1
+		end
+		t.expect(vertCount).toBe(3)
+
+		-- Both parts should be tracked
+		for _, part in parts do
+			t.expect(mesh.getPartTriangle(part)).toBeTruthy()
+		end
+
+		folder:Destroy()
+	end)
+
+	t.test("discoverPart returns cached ID on repeat call", function()
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		local parts = fillTriangle(
+			Vector3.new(30, 10, 0),
+			Vector3.new(34, 10, 0),
+			Vector3.new(32, 13, 0),
+			0.2, folder
+		)
+
+		local triId1 = mesh.discoverPart(parts[1])
+		local triId2 = mesh.discoverPart(parts[1])
+		t.expect(triId1).toBe(triId2)
+
+		folder:Destroy()
+	end)
+
+	t.test("discoverRegion discovers multiple triangles", function()
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		-- Create two separate triangles near each other
+		fillTriangle(
+			Vector3.new(40, 10, 0),
+			Vector3.new(44, 10, 0),
+			Vector3.new(42, 13, 0),
+			0.2, folder
+		)
+		fillTriangle(
+			Vector3.new(40, 10, 0),
+			Vector3.new(44, 10, 0),
+			Vector3.new(42, 7, 0),
+			0.2, folder
+		)
+
+		-- Discover the region covering both
+		mesh.discoverRegion(Vector3.new(42, 10, 0), 20)
+
+		local triCount = 0
+		for _ in mesh.getTriangles() do
+			triCount += 1
+		end
+		t.expect(triCount).toBe(2)
+
+		folder:Destroy()
+	end)
+
+	t.test("getPartTriangle returns correct mapping", function()
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		local parts = fillTriangle(
+			Vector3.new(50, 10, 0),
+			Vector3.new(54, 10, 0),
+			Vector3.new(52, 13, 0),
+			0.2, folder
+		)
+
+		local triId = mesh.discoverPart(parts[1])
+		t.expect(triId).toBeTruthy()
+
+		-- Each part should map to the same triangle
+		for _, part in parts do
+			t.expect(mesh.getPartTriangle(part)).toBe(triId)
+		end
+
+		-- A random new part should not be tracked
+		local randomPart = Instance.new("Part")
+		randomPart.Parent = folder
+		t.expect(mesh.getPartTriangle(randomPart) == nil).toBeTruthy()
+
+		folder:Destroy()
+	end)
 end

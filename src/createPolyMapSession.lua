@@ -134,8 +134,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		changeSignal:Fire()
 	end
 
-	-- Initial scan
-	scanMesh()
+	-- No initial scan — mesh starts empty, discovery happens on demand
 
 	local function isShiftHeld(): boolean
 		return UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
@@ -252,6 +251,11 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local newHoverEdge: string? = nil
 
 		if result then
+			-- Discover the part under the cursor (O(1) for already-tracked parts)
+			if result.Instance:IsA("BasePart") then
+				mMesh.discoverPart(result.Instance)
+			end
+
 			local mode = currentSettings.Mode
 			if mode == "Select" or mode == "Move" or mode == "Rotate" or mode == "Delete" then
 				newHoverVertex = findNearestVertex(result.Position)
@@ -276,6 +280,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	end
 
 	local function handleSelectClick(worldPos: Vector3)
+		mMesh.discoverRegion(worldPos, 15)
 		local vid = findNearestVertex(worldPos)
 		if vid then
 			if isShiftHeld() then
@@ -296,6 +301,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	end
 
 	local function handleAddClick(worldPos: Vector3)
+		mMesh.discoverRegion(worldPos, 15)
 		if not mAddBoundaryEdge then
 			local edgeKey = findNearestEdge(worldPos)
 			if edgeKey then
@@ -327,6 +333,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	end
 
 	local function handleDeleteClick(worldPos: Vector3)
+		mMesh.discoverRegion(worldPos, 15)
 		local vid = findNearestVertex(worldPos)
 		if vid then
 			local vertex = mMesh.getVertex(vid)
@@ -407,6 +414,23 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			return
 		end
 
+		-- Discover geometry under the marquee region
+		local centerX = (mMarqueeStart.X + mMarqueeEnd.X) / 2
+		local centerY = (mMarqueeStart.Y + mMarqueeEnd.Y) / 2
+		local centerRay = camera:ViewportPointToRay(centerX, centerY)
+		local params = RaycastParams.new()
+		params.FilterType = Enum.RaycastFilterType.Exclude
+		params.FilterDescendantsInstances = {}
+		local centerHit = workspace:Raycast(centerRay.Origin, centerRay.Direction * 10000, params)
+		if centerHit then
+			-- Estimate world-space extent from a corner of the marquee
+			local cornerRay = camera:ViewportPointToRay(mMarqueeEnd.X, mMarqueeEnd.Y)
+			local depth = (centerHit.Position - camera.CFrame.Position).Magnitude
+			local cornerWorld = cornerRay.Origin + cornerRay.Direction * depth
+			local halfDiag = (cornerWorld - centerHit.Position).Magnitude
+			mMesh.discoverRegion(centerHit.Position, halfDiag + 10)
+		end
+
 		local minX = math.min(mMarqueeStart.X, mMarqueeEnd.X)
 		local maxX = math.max(mMarqueeStart.X, mMarqueeEnd.X)
 		local minY = math.min(mMarqueeStart.Y, mMarqueeEnd.Y)
@@ -470,6 +494,11 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local radius = currentSettings.InfluenceRadius
 		if radius <= 0 then
 			return
+		end
+
+		-- Discover nearby geometry so unselected vertices within influence are found
+		for _, origPos in mSavedVertexPositions do
+			mMesh.discoverRegion(origPos, radius + 5)
 		end
 
 		for vid, vertex in mMesh.getVertices() do
@@ -793,8 +822,11 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
 		end
 
-		-- Re-scan to pick up the new triangles
-		scanMesh()
+		-- Discover the generated grid parts instead of full rescan
+		local gridExtent = math.max(currentSettings.GridWidth, currentSettings.GridHeight)
+			* currentSettings.GridSpacing / 2 + currentSettings.GridSpacing
+		mMesh.discoverRegion(origin.Position, gridExtent)
+		changeSignal:Fire()
 	end
 	session.MoveSelectedVertices = function(delta: Vector3)
 		if getSelectedVertexCount() == 0 then

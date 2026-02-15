@@ -6,6 +6,17 @@ local getWedgeVertices = require("./getWedgeVertices")
 local SNAP_EPSILON = 0.01
 local THIN_THRESHOLD = 0.5
 
+local function isThinWedge(instance: Instance): BasePart?
+	if instance:IsA("WedgePart") or (instance:IsA("Part") and (instance :: Part).Shape == Enum.PartType.Wedge) then
+		local size = (instance :: BasePart).Size
+		local minSize = math.min(size.X, size.Y, size.Z)
+		if minSize < THIN_THRESHOLD then
+			return instance :: BasePart
+		end
+	end
+	return nil
+end
+
 export type Vertex = {
 	id: number,
 	position: Vector3,
@@ -45,7 +56,10 @@ export type TriangleMesh = {
 	moveVertex: (vertexId: number, newPosition: Vector3, thickness: number, props: fillTriangle.TriangleProps?) -> (),
 	moveVertices: (moves: { [number]: Vector3 }, thickness: number, props: fillTriangle.TriangleProps?) -> (),
 
-	-- Scanning
+	-- Discovery / Scanning
+	discoverPart: (part: BasePart) -> number?,
+	discoverRegion: (center: Vector3, radius: number) -> (),
+	getPartTriangle: (part: BasePart) -> number?,
 	scanWorkspace: (root: Instance?) -> (),
 	clear: () -> (),
 }
@@ -76,6 +90,9 @@ local function createTriangleMesh(): TriangleMesh
 
 	-- Spatial lookup: snapped position string -> vertex id
 	local mPositionToVertex: { [string]: number } = {}
+
+	-- Part -> triangle ID mapping for O(1) discovery cache
+	local mPartToTriangle: { [BasePart]: number } = {}
 
 	local function positionKey(pos: Vector3): string
 		local snapped = snapPosition(pos, SNAP_EPSILON)
@@ -173,6 +190,11 @@ local function createTriangleMesh(): TriangleMesh
 		addEdge(vertexIds[2], vertexIds[3], triangleId)
 		addEdge(vertexIds[3], vertexIds[1], triangleId)
 
+		-- Track parts
+		for _, part in parts do
+			mPartToTriangle[part] = triangleId
+		end
+
 		return triangleId
 	end
 
@@ -180,6 +202,11 @@ local function createTriangleMesh(): TriangleMesh
 		local tri = mTriangles[triangleId]
 		if not tri then
 			return
+		end
+
+		-- Remove part tracking
+		for _, part in tri.parts do
+			mPartToTriangle[part] = nil
 		end
 
 		-- Remove from vertices
@@ -363,7 +390,14 @@ local function createTriangleMesh(): TriangleMesh
 					)
 
 					if #newParts > 0 then
+						-- Update part tracking
+						for _, oldPart in tri.parts do
+							mPartToTriangle[oldPart] = nil
+						end
 						tri.parts = newParts
+						for _, newPart in newParts do
+							mPartToTriangle[newPart] = triId
+						end
 						tri.normal = computeNormal(v1.position, v2.position, v3.position)
 					else
 						-- Triangle became degenerate — parts already parented-out by fillTriangle
@@ -382,136 +416,9 @@ local function createTriangleMesh(): TriangleMesh
 		mesh.clear()
 
 		local scanRoot = root or workspace
-		local wedgeParts: { BasePart } = {}
-
-		-- Find all thin wedge-shaped parts
 		for _, desc in scanRoot:GetDescendants() do
-			if desc:IsA("WedgePart") or (desc:IsA("Part") and (desc :: Part).Shape == Enum.PartType.Wedge) then
-				local size = desc.Size
-				local minSize = math.min(size.X, size.Y, size.Z)
-				if minSize < THIN_THRESHOLD then
-					table.insert(wedgeParts, desc)
-				end
-			end
-		end
-
-		-- Group wedge parts into triangles by finding pairs that share 2 vertices
-		-- and are coplanar (part of the same logical triangle from fillTriangle)
-		local paired: { [BasePart]: boolean } = {}
-
-		for i, wedge1 in wedgeParts do
-			if paired[wedge1] then continue end
-
-			local v1a, v1b, v1c = getWedgeVertices(wedge1)
-			local verts1 = { v1a, v1b, v1c }
-
-			-- Try to find a partner wedge
-			local foundPartner = false
-			for j = i + 1, #wedgeParts do
-				local wedge2 = wedgeParts[j]
-				if paired[wedge2] then continue end
-
-				local v2a, v2b, v2c = getWedgeVertices(wedge2)
-				local verts2 = { v2a, v2b, v2c }
-
-				-- Count shared vertices
-				local sharedCount = 0
-				local sharedVerts: { Vector3 } = {}
-				local uniqueFrom1: { Vector3 } = {}
-				local uniqueFrom2: { Vector3 } = {}
-
-				for _, va in verts1 do
-					local isShared = false
-					for _, vb in verts2 do
-						if (va - vb).Magnitude < SNAP_EPSILON * 2 then
-							isShared = true
-							table.insert(sharedVerts, va)
-							break
-						end
-					end
-					if not isShared then
-						table.insert(uniqueFrom1, va)
-					end
-				end
-				for _, vb in verts2 do
-					local isShared = false
-					for _, shared in sharedVerts do
-						if (vb - shared).Magnitude < SNAP_EPSILON * 2 then
-							isShared = true
-							break
-						end
-					end
-					if not isShared then
-						table.insert(uniqueFrom2, vb)
-					end
-				end
-				sharedCount = #sharedVerts
-
-				-- Two wedges from fillTriangle share exactly 2 vertices
-				if sharedCount == 2 and #uniqueFrom1 == 1 and #uniqueFrom2 == 1 then
-					-- Check coplanarity
-					local triVerts = { sharedVerts[1], sharedVerts[2], uniqueFrom1[1] }
-					local normal1 = computeNormal(triVerts[1], triVerts[2], triVerts[3])
-					local toOther = (uniqueFrom2[1] - sharedVerts[1])
-					local planeDist = math.abs(toOther:Dot(normal1))
-
-					if planeDist < SNAP_EPSILON * 10 then
-						-- Coplanar wedges sharing 2 vertices could be:
-						-- (a) Two halves of the same fillTriangle (split point on line U1-U2)
-						-- (b) Two separate triangles that share an edge
-						-- For case (a), one shared vertex is the split point D that lies
-						-- on the segment between U1 and U2. The triangle corners are
-						-- U1, U2, and the other shared vertex.
-						local u1 = uniqueFrom1[1]
-						local u2 = uniqueFrom2[1]
-						local edgeDir = u2 - u1
-						local edgeLen = edgeDir.Magnitude
-						local splitVertex: Vector3? = nil
-						local cornerVertex: Vector3? = nil
-
-						if edgeLen > 0.001 then
-							local edgeUnit = edgeDir / edgeLen
-							for _, sv in sharedVerts do
-								local toSv = sv - u1
-								local proj = toSv:Dot(edgeUnit)
-								local perpDist = (toSv - edgeUnit * proj).Magnitude
-								if perpDist < SNAP_EPSILON * 4 and proj > SNAP_EPSILON and proj < edgeLen - SNAP_EPSILON then
-									splitVertex = sv
-								else
-									cornerVertex = sv
-								end
-							end
-						end
-
-						if splitVertex and cornerVertex then
-							-- Case (a): fillTriangle pair. Corners are U1, U2, cornerVertex.
-							local vid1 = findOrCreateVertex(u1)
-							local vid2 = findOrCreateVertex(u2)
-							local vid3 = findOrCreateVertex(cornerVertex)
-
-							if vid1 ~= vid2 and vid2 ~= vid3 and vid1 ~= vid3 then
-								registerTriangle({ vid1, vid2, vid3 }, { wedge1, wedge2 })
-								paired[wedge1] = true
-								paired[wedge2] = true
-								foundPartner = true
-								break
-							end
-						end
-						-- Case (b): separate triangles sharing an edge, don't pair
-					end
-				end
-			end
-
-			-- If no partner found, register as a single-wedge triangle
-			if not foundPartner and not paired[wedge1] then
-				local vid1 = findOrCreateVertex(v1a)
-				local vid2 = findOrCreateVertex(v1b)
-				local vid3 = findOrCreateVertex(v1c)
-
-				if vid1 ~= vid2 and vid2 ~= vid3 and vid1 ~= vid3 then
-					registerTriangle({ vid1, vid2, vid3 }, { wedge1 })
-				end
-				paired[wedge1] = true
+			if not mPartToTriangle[desc] and isThinWedge(desc) then
+				mesh.discoverPart(desc :: BasePart)
 			end
 		end
 	end
@@ -521,8 +428,174 @@ local function createTriangleMesh(): TriangleMesh
 		mTriangles = {}
 		mEdges = {}
 		mPositionToVertex = {}
+		mPartToTriangle = {}
 		mNextVertexId = 1
 		mNextTriangleId = 1
+	end
+
+	-- Try to pair two sets of wedge vertices into a fillTriangle pair.
+	-- Returns the 3 corner vertex positions if they form a pair, nil otherwise.
+	local function tryPairWedges(verts1: { Vector3 }, verts2: { Vector3 }): { Vector3 }?
+		-- Count shared vertices
+		local sharedVerts: { Vector3 } = {}
+		local uniqueFrom1: { Vector3 } = {}
+		local uniqueFrom2: { Vector3 } = {}
+
+		for _, va in verts1 do
+			local isShared = false
+			for _, vb in verts2 do
+				if (va - vb).Magnitude < SNAP_EPSILON * 2 then
+					isShared = true
+					table.insert(sharedVerts, va)
+					break
+				end
+			end
+			if not isShared then
+				table.insert(uniqueFrom1, va)
+			end
+		end
+		for _, vb in verts2 do
+			local isShared = false
+			for _, shared in sharedVerts do
+				if (vb - shared).Magnitude < SNAP_EPSILON * 2 then
+					isShared = true
+					break
+				end
+			end
+			if not isShared then
+				table.insert(uniqueFrom2, vb)
+			end
+		end
+
+		-- Two wedges from fillTriangle share exactly 2 vertices
+		if #sharedVerts ~= 2 or #uniqueFrom1 ~= 1 or #uniqueFrom2 ~= 1 then
+			return nil
+		end
+
+		-- Check coplanarity
+		local normal1 = computeNormal(sharedVerts[1], sharedVerts[2], uniqueFrom1[1])
+		local toOther = uniqueFrom2[1] - sharedVerts[1]
+		local planeDist = math.abs(toOther:Dot(normal1))
+		if planeDist >= SNAP_EPSILON * 10 then
+			return nil
+		end
+
+		-- Coplanar wedges sharing 2 vertices could be:
+		-- (a) Two halves of the same fillTriangle (split point on line U1-U2)
+		-- (b) Two separate triangles that share an edge
+		local u1 = uniqueFrom1[1]
+		local u2 = uniqueFrom2[1]
+		local edgeDir = u2 - u1
+		local edgeLen = edgeDir.Magnitude
+		if edgeLen <= 0.001 then
+			return nil
+		end
+
+		local edgeUnit = edgeDir / edgeLen
+		local splitVertex: Vector3? = nil
+		local cornerVertex: Vector3? = nil
+
+		for _, sv in sharedVerts do
+			local toSv = sv - u1
+			local proj = toSv:Dot(edgeUnit)
+			local perpDist = (toSv - edgeUnit * proj).Magnitude
+			if perpDist < SNAP_EPSILON * 4 and proj > SNAP_EPSILON and proj < edgeLen - SNAP_EPSILON then
+				splitVertex = sv
+			else
+				cornerVertex = sv
+			end
+		end
+
+		if splitVertex and cornerVertex then
+			-- Case (a): fillTriangle pair. Corners are U1, U2, cornerVertex.
+			return { u1, u2, cornerVertex }
+		end
+
+		return nil
+	end
+
+	mesh.getPartTriangle = function(part: BasePart): number?
+		return mPartToTriangle[part]
+	end
+
+	mesh.discoverPart = function(part: BasePart): number?
+		-- Cache hit: already tracked
+		local existing = mPartToTriangle[part]
+		if existing then
+			return existing
+		end
+
+		-- Must be a thin wedge
+		if not isThinWedge(part) then
+			return nil
+		end
+
+		local v1a, v1b, v1c = getWedgeVertices(part)
+		local verts1 = { v1a, v1b, v1c }
+
+		-- Spatial query to find candidate partners
+		local maxDim = math.max(part.Size.X, part.Size.Y, part.Size.Z)
+		local candidates = workspace:GetPartBoundsInRadius(part.CFrame.Position, maxDim * 2)
+
+		for _, candidate in candidates do
+			if candidate == part then continue end
+			if not isThinWedge(candidate) then continue end
+
+			-- Skip already-paired parts (part of a 2-wedge triangle)
+			local candidateTriId = mPartToTriangle[candidate]
+			if candidateTriId then
+				local candidateTri = mTriangles[candidateTriId]
+				if candidateTri and #candidateTri.parts == 2 then
+					continue
+				end
+			end
+
+			local v2a, v2b, v2c = getWedgeVertices(candidate)
+			local verts2 = { v2a, v2b, v2c }
+
+			local corners = tryPairWedges(verts1, verts2)
+			if corners then
+				-- If candidate was a single-wedge triangle, unregister it
+				if candidateTriId then
+					local oldTri = mTriangles[candidateTriId]
+					if oldTri then
+						local oldVids = { oldTri.vertices[1], oldTri.vertices[2], oldTri.vertices[3] }
+						unregisterTriangle(candidateTriId)
+						for _, vid in oldVids do
+							cleanupVertex(vid)
+						end
+					end
+				end
+
+				local vid1 = findOrCreateVertex(corners[1])
+				local vid2 = findOrCreateVertex(corners[2])
+				local vid3 = findOrCreateVertex(corners[3])
+
+				if vid1 ~= vid2 and vid2 ~= vid3 and vid1 ~= vid3 then
+					return registerTriangle({ vid1, vid2, vid3 }, { part, candidate })
+				end
+			end
+		end
+
+		-- No partner found — register as single-wedge triangle
+		local vid1 = findOrCreateVertex(v1a)
+		local vid2 = findOrCreateVertex(v1b)
+		local vid3 = findOrCreateVertex(v1c)
+
+		if vid1 ~= vid2 and vid2 ~= vid3 and vid1 ~= vid3 then
+			return registerTriangle({ vid1, vid2, vid3 }, { part })
+		end
+
+		return nil
+	end
+
+	mesh.discoverRegion = function(center: Vector3, radius: number)
+		local candidates = workspace:GetPartBoundsInRadius(center, radius)
+		for _, candidate in candidates do
+			if not mPartToTriangle[candidate] and isThinWedge(candidate) then
+				mesh.discoverPart(candidate)
+			end
+		end
 	end
 
 	return mesh
