@@ -5,6 +5,9 @@ if workspace.Name ~= "runtests" then
 	return
 end
 
+-- Enable ReactRoblox.act() for UI tests
+_G.__ROACT_17_MOCK_SCHEDULER__ = true
+
 local CaptureService = game:GetService("CaptureService")
 local HttpService = game:GetService("HttpService")
 
@@ -85,10 +88,10 @@ local function takeScreenshot(ws: WebSocketClient, name: string?)
 	local done = false
 	local success = false
 	local captureOk, captureErr: any = pcall(function()
-		CaptureService:CaptureScreenshot(function(_contentId: string)
-			success = true
+		CaptureService:TakeScreenshotCaptureAsync(function(result, _screenshotCapture)
+			success = result == Enum.ScreenshotCaptureResult.Success
 			done = true
-		end)
+		end, { UICaptureMode = Enum.UICaptureMode.All })
 	end)
 	if not captureOk then
 		warn("[RunTests] Screenshot failed: " .. tostring(captureErr))
