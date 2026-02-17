@@ -159,6 +159,7 @@ local function runTests(ws: WebSocketClient, filter: string)
 			screenshot = function(name: string?)
 				takeScreenshot(ws, name)
 			end,
+			plugin = plugin,
 		}
 
 		-- Collect and run individual tests
