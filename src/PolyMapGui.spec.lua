@@ -51,20 +51,22 @@ return function(t: TestTypes.TestContext)
 
 			-- This will throw if the element tree is malformed
 			local ok, err = pcall(function()
-				root:render(e(PolyMapGui, {
-					GuiState = "active" :: any,
-					CurrentSettings = settings,
-					UpdatedSettings = function() end,
-					HandleAction = function() end,
-					Panelized = false,
-					Session = nil,
-				}))
-				-- Let React process the render
-				task.wait()
+				ReactRoblox.act(function()
+					root:render(e(PolyMapGui, {
+						GuiState = "active" :: any,
+						CurrentSettings = settings,
+						UpdatedSettings = function() end,
+						HandleAction = function() end,
+						Panelized = false,
+						Session = nil,
+					}))
+				end)
 			end)
 
 			-- Clean up before asserting so we don't leak on failure
-			root:unmount()
+			ReactRoblox.act(function()
+				root:unmount()
+			end)
 			screen:Destroy()
 
 			t.expect(ok).toBe(true)
