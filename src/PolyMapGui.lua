@@ -65,9 +65,9 @@ local function getStatusText(mode: string, settings: Settings.PolyMapSettings, s
 		return `{count} selected. Drag rings to rotate.`
 	elseif mode == "Add" then
 		if session.GetAddBoundaryEdge() then
-			return "Click to place the new triangle vertex."
+			return "Click a vertex, edge, or empty space to place triangle(s). Click empty to cancel."
 		end
-		return "Click a boundary edge to start adding a triangle."
+		return "Hover a boundary edge and click to select it."
 	elseif mode == "Delete" then
 		if settings.DeleteTarget == "Vertex" then
 			return "Click a vertex to delete all its adjacent triangles."
@@ -77,6 +77,16 @@ local function getStatusText(mode: string, settings: Settings.PolyMapSettings, s
 		return "Click on triangles to apply color and material."
 	elseif mode == "Generate" then
 		return "Configure grid settings and click Generate."
+	elseif mode == "Subdivide" then
+		if count == 0 then
+			return "Select vertices, then click Subdivide to split each triangle into 4."
+		end
+		return `{count} selected. Click Subdivide to split adjacent triangles.`
+	elseif mode == "Simplify" then
+		if count < 2 then
+			return "Select at least 2 vertices, then click Collapse to merge the shortest edge."
+		end
+		return `{count} selected. Click Collapse to merge the shortest edge.`
 	end
 	return ""
 end
@@ -215,6 +225,36 @@ local function ModePanel(props: {
 				LayoutOrder = 4,
 				OnClick = function()
 					props.Settings.Mode = "Generate"
+					props.UpdatedSettings()
+				end,
+			}),
+		}),
+		Row3 = e("Frame", {
+			Size = UDim2.fromScale(1, 0),
+			AutomaticSize = Enum.AutomaticSize.Y,
+			BackgroundTransparency = 1,
+			LayoutOrder = 3,
+		}, {
+			ListLayout = e("UIListLayout", {
+				FillDirection = Enum.FillDirection.Horizontal,
+				SortOrder = Enum.SortOrder.LayoutOrder,
+				Padding = UDim.new(0, 4),
+			}),
+			Subdivide = e(ChipForToggle, {
+				Text = "Sub",
+				IsCurrent = current == "Subdivide",
+				LayoutOrder = 1,
+				OnClick = function()
+					props.Settings.Mode = "Subdivide"
+					props.UpdatedSettings()
+				end,
+			}),
+			Simplify = e(ChipForToggle, {
+				Text = "Simp",
+				IsCurrent = current == "Simplify",
+				LayoutOrder = 2,
+				OnClick = function()
+					props.Settings.Mode = "Simplify"
 					props.UpdatedSettings()
 				end,
 			}),
@@ -758,6 +798,60 @@ local function SelectionActionsPanel(props: {
 	})
 end
 
+local function SubdividePanel(props: {
+	Session: createPolyMapSession.PolyMapSession?,
+	LayoutOrder: number?,
+})
+	local session = props.Session
+	local count = if session then session.GetSelectedVertexCount() else 0
+	return e(SubPanel, {
+		Title = "Subdivide",
+		LayoutOrder = props.LayoutOrder,
+		Padding = UDim.new(0, 4),
+	}, {
+		SubdivideButton = e(OperationButton, {
+			Text = "Subdivide Selected",
+			SubText = if count > 0 then `{count} vertices` else nil,
+			Color = Colors.ACTION_BLUE,
+			Disabled = session == nil or count == 0,
+			Height = 30,
+			LayoutOrder = 1,
+			OnClick = function()
+				if session then
+					session.Subdivide()
+				end
+			end,
+		}),
+	})
+end
+
+local function SimplifyPanel(props: {
+	Session: createPolyMapSession.PolyMapSession?,
+	LayoutOrder: number?,
+})
+	local session = props.Session
+	local count = if session then session.GetSelectedVertexCount() else 0
+	return e(SubPanel, {
+		Title = "Simplify",
+		LayoutOrder = props.LayoutOrder,
+		Padding = UDim.new(0, 4),
+	}, {
+		SimplifyButton = e(OperationButton, {
+			Text = "Collapse Shortest Edge",
+			SubText = if count > 0 then `{count} vertices` else nil,
+			Color = Colors.ACTION_BLUE,
+			Disabled = session == nil or count < 2,
+			Height = 30,
+			LayoutOrder = 1,
+			OnClick = function()
+				if session then
+					session.Simplify(1)
+				end
+			end,
+		}),
+	})
+end
+
 local function CloseButton(props: {
 	HandleAction: (string) -> (),
 	LayoutOrder: number?,
@@ -804,11 +898,13 @@ local function PolyMapGui(props: {
 	local session = props.Session
 	local mode = currentSettings.Mode
 	local nextOrder = createNextOrder()
-	local showSelection = mode == "Select" or mode == "Move" or mode == "Rotate"
+	local showSelection = mode == "Select" or mode == "Move" or mode == "Rotate" or mode == "Subdivide" or mode == "Simplify"
 	local showInfluence = mode == "Move" or mode == "Rotate"
 	local showDelete = mode == "Delete"
 	local showPaint = mode == "Paint"
 	local showGrid = mode == "Generate"
+	local showSubdivide = mode == "Subdivide"
+	local showSimplify = mode == "Simplify"
 
 	return e(PluginGui, {
 		Config = POLYMAP_CONFIG,
@@ -820,15 +916,73 @@ local function PolyMapGui(props: {
 			Panelized = props.Panelized,
 		},
 	}, {
-		Overlay = session and e(MeshOverlay, {
-			Mesh = session.GetMesh(),
-			SelectedVertices = session.GetSelectedVertices(),
-			HoverVertexId = session.GetHoverVertexId(),
-			OutlineTriangleIds = session.GetOutlineTriangleIds(),
-			HoverOutlineTriangleIds = session.GetHoverOutlineTriangleIds(),
-			MarqueeStart = session.GetMarquee(),
-			MarqueeEnd = select(2, session.GetMarquee()),
-		}),
+		Overlay = session and e(MeshOverlay, (function()
+			local mesh = session.GetMesh()
+			local overlayProps: { [string]: any } = {
+				Mesh = mesh,
+				SelectedVertices = session.GetSelectedVertices(),
+				HoverVertexId = session.GetHoverVertexId(),
+				OutlineTriangleIds = session.GetOutlineTriangleIds(),
+				HoverOutlineTriangleIds = session.GetHoverOutlineTriangleIds(),
+				MarqueeStart = session.GetMarquee(),
+				MarqueeEnd = select(2, session.GetMarquee()),
+			}
+
+			-- Compute Add mode overlay props
+			if mode == "Add" then
+				local boundaryEdge = session.GetAddBoundaryEdge()
+				if boundaryEdge then
+					-- Phase 2: highlight the selected boundary edge
+					local v1 = mesh.getVertex(boundaryEdge.v1)
+					local v2 = mesh.getVertex(boundaryEdge.v2)
+					if v1 and v2 then
+						overlayProps.AddHighlightEdge = { v1Pos = v1.position, v2Pos = v2.position }
+
+						-- Compute preview triangles from hover target
+						local target = session.GetAddHoverTarget()
+						if target then
+							local previewTris: { { Vector3 } } = {}
+							if target.type == "vertex" and target.vertexId then
+								local tv = mesh.getVertex(target.vertexId)
+								if tv then
+									table.insert(previewTris, { v1.position, v2.position, tv.position })
+								end
+							elseif target.type == "edge" and target.edgeKey then
+								local edges = mesh.getEdges()
+								local targetEdge = edges[target.edgeKey]
+								if targetEdge then
+									local tv1 = mesh.getVertex(targetEdge.v1)
+									local tv2 = mesh.getVertex(targetEdge.v2)
+									if tv1 and tv2 then
+										table.insert(previewTris, { v1.position, v2.position, tv1.position })
+										table.insert(previewTris, { v2.position, tv2.position, tv1.position })
+									end
+								end
+							elseif target.type == "plane" and target.position then
+								table.insert(previewTris, { v1.position, v2.position, target.position })
+							end
+							overlayProps.AddPreviewTriangles = previewTris
+						end
+					end
+				else
+					-- Phase 1: highlight the hovered boundary edge
+					local hoverKey = session.GetHoverEdgeKey()
+					if hoverKey then
+						local edges = mesh.getEdges()
+						local edge = edges[hoverKey]
+						if edge then
+							local v1 = mesh.getVertex(edge.v1)
+							local v2 = mesh.getVertex(edge.v2)
+							if v1 and v2 then
+								overlayProps.AddHighlightEdge = { v1Pos = v1.position, v2Pos = v2.position }
+							end
+						end
+					end
+				end
+			end
+
+			return overlayProps
+		end)()),
 		Content = e(React.Fragment, nil, {
 			ModePanel = e(ModePanel, {
 				Settings = currentSettings,
@@ -861,7 +1015,15 @@ local function PolyMapGui(props: {
 				UpdatedSettings = props.UpdatedSettings,
 				LayoutOrder = nextOrder(),
 			}),
-			SelectionActionsPanel = mode == "Select" and e(SelectionActionsPanel, {
+			SubdividePanel = showSubdivide and e(SubdividePanel, {
+				Session = session,
+				LayoutOrder = nextOrder(),
+			}),
+			SimplifyPanel = showSimplify and e(SimplifyPanel, {
+				Session = session,
+				LayoutOrder = nextOrder(),
+			}),
+			SelectionActionsPanel = showSelection and e(SelectionActionsPanel, {
 				Session = session,
 				LayoutOrder = nextOrder(),
 			}),

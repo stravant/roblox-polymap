@@ -13,7 +13,7 @@ local TestTypes = require("./TestTypes")
 
 local e = React.createElement
 
-local ALL_MODES = { "Select", "Move", "Rotate", "Add", "Delete", "Paint", "Generate" }
+local ALL_MODES = { "Select", "Move", "Rotate", "Add", "Delete", "Paint", "Generate", "Subdivide", "Simplify" }
 
 local function makeSettings(mode: string): Settings.PolyMapSettings
 	return {

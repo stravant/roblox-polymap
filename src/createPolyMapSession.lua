@@ -101,6 +101,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 	-- Add mode state
 	local mAddBoundaryEdge: { v1: number, v2: number }? = nil
+	local mAddPlanePoint: Vector3? = nil
+	local mAddPlaneNormal: Vector3? = nil
+	local mAddHoverTarget: { type: string, vertexId: number?, edgeKey: string?, position: Vector3? }? = nil
 
 	-- Marquee state
 	local mMarqueeStart: Vector2? = nil
@@ -163,12 +166,19 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		}
 	end
 
+	local function clearAddState()
+		mAddBoundaryEdge = nil
+		mAddPlanePoint = nil
+		mAddPlaneNormal = nil
+		mAddHoverTarget = nil
+	end
+
 	local function scanMesh()
 		mMesh.scanWorkspace()
 		mSelectedVertices = {}
 		mHoverVertexId = nil
 		mHoverEdgeKey = nil
-		mAddBoundaryEdge = nil
+		clearAddState()
 		changeSignal:Fire()
 	end
 
@@ -209,7 +219,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return sum / #ids
 	end
 
-	local VERTEX_SCREEN_RADIUS = 30 -- max screen-space pixels to find a vertex
+	local VERTEX_SCREEN_RADIUS = 10000 -- max screen-space pixels to find a vertex
 
 	local function findNearestVertex(worldPos: Vector3): number?
 		local camera = workspace.CurrentCamera
@@ -275,12 +285,80 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return bestKey
 	end
 
+	local function findNearestBoundaryEdge(worldPos: Vector3, skipEdgeKey: string?): string?
+		local camera = workspace.CurrentCamera
+		if not camera then
+			return nil
+		end
+
+		local mouseScreen = camera:WorldToScreenPoint(worldPos)
+		local bestKey: string? = nil
+		local bestDist = 15
+
+		for key, edge in mMesh.getEdges() do
+			if #edge.triangles ~= 1 then continue end
+			if key == skipEdgeKey then continue end
+			local v1 = mMesh.getVertex(edge.v1)
+			local v2 = mMesh.getVertex(edge.v2)
+			if not v1 or not v2 then continue end
+
+			local s1, on1 = camera:WorldToScreenPoint(v1.position)
+			local s2, on2 = camera:WorldToScreenPoint(v2.position)
+			if not on1 or not on2 then continue end
+
+			local bx, by = s2.X - s1.X, s2.Y - s1.Y
+			local lenSq = bx * bx + by * by
+			if lenSq < 0.001 then continue end
+			local px = mouseScreen.X - s1.X
+			local py = mouseScreen.Y - s1.Y
+			local t = math.clamp((px * bx + py * by) / lenSq, 0, 1)
+			local closestX = s1.X + t * bx
+			local closestY = s1.Y + t * by
+			local dist = math.sqrt((mouseScreen.X - closestX) ^ 2 + (mouseScreen.Y - closestY) ^ 2)
+
+			if dist < bestDist then
+				bestDist = dist
+				bestKey = key
+			end
+		end
+
+		return bestKey
+	end
+
+	local function findNearestVertexScreenRadius(worldPos: Vector3, skipVids: { [number]: boolean }?): number?
+		local camera = workspace.CurrentCamera
+		if not camera then
+			return nil
+		end
+
+		local mouseScreen = camera:WorldToScreenPoint(worldPos)
+		local bestId: number? = nil
+		local bestScreenDist = 15
+
+		for id, vertex in mMesh.getVertices() do
+			if skipVids and skipVids[id] then continue end
+			local screenPos, onScreen = camera:WorldToScreenPoint(vertex.position)
+			if onScreen then
+				local dx = screenPos.X - mouseScreen.X
+				local dy = screenPos.Y - mouseScreen.Y
+				local dist = math.sqrt(dx * dx + dy * dy)
+				if dist < bestScreenDist then
+					bestScreenDist = dist
+					bestId = id
+				end
+			end
+		end
+
+		return bestId
+	end
+
 	local function updateHover()
 		if mIsOverUI or mIsDraggingHandle then
-			if mHoverVertexId ~= nil or mHoverEdgeKey ~= nil or #mHoverTriangleIds > 0 then
+			if mHoverVertexId ~= nil or mHoverEdgeKey ~= nil or #mHoverTriangleIds > 0 or mAddHoverTarget ~= nil then
 				mHoverVertexId = nil
 				mHoverEdgeKey = nil
 				mHoverTriangleIds = {}
+				mAddHoverTarget = nil
 				changeSignal:Fire()
 			end
 			return
@@ -290,6 +368,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local newHoverVertex: number? = nil
 		local newHoverEdge: string? = nil
 		local newHoverTriangles: { number } = {}
+		local oldAddHoverTarget = mAddHoverTarget
+		mAddHoverTarget = nil
 
 		-- Compute world position: use raycast hit, or stroke plane fallback during drag
 		local worldPos: Vector3? = if result then result.Position else nil
@@ -315,7 +395,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 		if worldPos then
 			local mode = currentSettings.Mode
-			if mode == "Select" or mode == "Move" or mode == "Rotate" then
+			if mode == "Select" or mode == "Move" or mode == "Rotate" or mode == "Subdivide" or mode == "Simplify" then
 				newHoverVertex = findNearestVertex(worldPos)
 			end
 			if mode == "Delete" then
@@ -349,9 +429,47 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			end
 			if mode == "Add" then
 				if mAddBoundaryEdge then
-					newHoverVertex = findNearestVertex(worldPos)
+					-- Phase 2: three-tier priority hover
+					local skipVids = { [mAddBoundaryEdge.v1] = true, [mAddBoundaryEdge.v2] = true }
+					local snapVid = findNearestVertexScreenRadius(worldPos, skipVids)
+					if snapVid then
+						newHoverVertex = snapVid
+						mAddHoverTarget = { type = "vertex", vertexId = snapVid }
+					else
+						-- Build skip key for the stored boundary edge
+						local storedKey = tostring(math.min(mAddBoundaryEdge.v1, mAddBoundaryEdge.v2))
+							.. "_" .. tostring(math.max(mAddBoundaryEdge.v1, mAddBoundaryEdge.v2))
+						local snapEdge = findNearestBoundaryEdge(worldPos, storedKey)
+						if snapEdge then
+							newHoverEdge = snapEdge
+							mAddHoverTarget = { type = "edge", edgeKey = snapEdge }
+						elseif mAddPlanePoint and mAddPlaneNormal then
+							-- Plane projection fallback
+							local camera = workspace.CurrentCamera
+							if camera then
+								local mouseLocation = UserInputService:GetMouseLocation()
+								local ray = camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
+								local denom = ray.Direction:Dot(mAddPlaneNormal)
+								if math.abs(denom) > 0.0001 then
+									local hitT = (mAddPlanePoint - ray.Origin):Dot(mAddPlaneNormal) / denom
+									if hitT > 0 then
+										mAddHoverTarget = { type = "plane", position = ray.Origin + ray.Direction * hitT }
+									else
+										mAddHoverTarget = nil
+									end
+								else
+									mAddHoverTarget = nil
+								end
+							else
+								mAddHoverTarget = nil
+							end
+						else
+							mAddHoverTarget = nil
+						end
+					end
 				else
-					newHoverEdge = findNearestEdge(worldPos)
+					-- Phase 1: hover boundary edges only
+					newHoverEdge = findNearestBoundaryEdge(worldPos)
 				end
 			end
 		end
@@ -367,7 +485,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			end
 		end
 
-		if newHoverVertex ~= mHoverVertexId or newHoverEdge ~= mHoverEdgeKey or trianglesChanged then
+		local addHoverChanged = mAddHoverTarget ~= oldAddHoverTarget
+		if newHoverVertex ~= mHoverVertexId or newHoverEdge ~= mHoverEdgeKey or trianglesChanged or addHoverChanged then
 			mHoverVertexId = newHoverVertex
 			mHoverEdgeKey = newHoverEdge
 			mHoverTriangleIds = newHoverTriangles
@@ -399,28 +518,76 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local function handleAddClick(worldPos: Vector3)
 		mMesh.discoverRegion(worldPos, 15)
 		if not mAddBoundaryEdge then
-			local edgeKey = findNearestEdge(worldPos)
+			-- Phase 1: select a boundary edge
+			local edgeKey = findNearestBoundaryEdge(worldPos)
 			if edgeKey then
 				local edge = mMesh.getEdges()[edgeKey]
-				if edge and #edge.triangles == 1 then
+				if edge then
 					mAddBoundaryEdge = { v1 = edge.v1, v2 = edge.v2 }
+					-- Store plane from the parent triangle
+					local parentTriId = edge.triangles[1]
+					if parentTriId then
+						local tri = mMesh.getTriangle(parentTriId)
+						if tri then
+							local tv = mMesh.getVertex(tri.vertices[1])
+							if tv then
+								mAddPlanePoint = tv.position
+							end
+							mAddPlaneNormal = tri.normal
+						end
+					end
 					changeSignal:Fire()
 				end
 			end
 		else
+			-- Phase 2: place triangle(s) based on hover target
+			local target = mAddHoverTarget
+			if not target then
+				-- Empty click: cancel
+				clearAddState()
+				changeSignal:Fire()
+				return
+			end
+
 			pushUndoSnapshot()
 			local recording = ChangeHistoryService:TryBeginRecording("PolyMap Add Triangle")
 
 			local v1 = mMesh.getVertex(mAddBoundaryEdge.v1)
 			local v2 = mMesh.getVertex(mAddBoundaryEdge.v2)
 			if v1 and v2 then
-				mMesh.addTriangle(
-					v1.position, v2.position, worldPos,
-					currentSettings.Thickness, workspace.Terrain, getTriangleProps()
-				)
+				if target.type == "vertex" and target.vertexId then
+					local tv = mMesh.getVertex(target.vertexId)
+					if tv then
+						mMesh.addTriangle(
+							v1.position, v2.position, tv.position,
+							currentSettings.Thickness, workspace.Terrain, getTriangleProps()
+						)
+					end
+				elseif target.type == "edge" and target.edgeKey then
+					local targetEdge = mMesh.getEdges()[target.edgeKey]
+					if targetEdge then
+						local tv1 = mMesh.getVertex(targetEdge.v1)
+						local tv2 = mMesh.getVertex(targetEdge.v2)
+						if tv1 and tv2 then
+							mMesh.addTriangle(
+								v1.position, v2.position, tv1.position,
+								currentSettings.Thickness, workspace.Terrain, getTriangleProps()
+							)
+							mMesh.addTriangle(
+								v2.position, tv2.position, tv1.position,
+								currentSettings.Thickness, workspace.Terrain, getTriangleProps()
+							)
+						end
+					end
+				elseif target.type == "plane" and target.position then
+					mMesh.addTriangle(
+						v1.position, v2.position, target.position,
+						currentSettings.Thickness, workspace.Terrain, getTriangleProps()
+					)
+				end
 			end
 
-			mAddBoundaryEdge = nil
+			clearAddState()
 
 			if recording then
 				ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
@@ -577,19 +744,24 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local result = mouseRaycast()
 		if not result then
 			local mode = currentSettings.Mode
-			if (mode == "Select" or mode == "Move" or mode == "Rotate") and not isShiftHeld() then
+			if (mode == "Select" or mode == "Move" or mode == "Rotate" or mode == "Subdivide" or mode == "Simplify") and not isShiftHeld() then
 				mSelectedVertices = {}
 				changeSignal:Fire()
 			end
-			if currentSettings.Mode == "Add" and mAddBoundaryEdge then
-				mAddBoundaryEdge = nil
-				changeSignal:Fire()
+			if mode == "Add" then
+				if mAddBoundaryEdge and mAddHoverTarget then
+					-- Phase 2 with a hover target (e.g., plane) — proceed
+					handleAddClick(Vector3.zero) -- worldPos unused, target comes from mAddHoverTarget
+				elseif mAddBoundaryEdge then
+					clearAddState()
+					changeSignal:Fire()
+				end
 			end
 			return
 		end
 
 		local mode = currentSettings.Mode
-		if mode == "Select" or mode == "Move" or mode == "Rotate" then
+		if mode == "Select" or mode == "Move" or mode == "Rotate" or mode == "Subdivide" or mode == "Simplify" then
 			handleSelectClick(result.Position)
 		elseif mode == "Add" then
 			handleAddClick(result.Position)
@@ -700,10 +872,11 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				continue
 			end
 
-			-- Find minimum distance to any selected vertex
+			-- Find minimum X/Z distance to any selected vertex
 			local minDist = math.huge
 			for _, origPos in mSavedVertexPositions do
-				local dist = (vertex.position - origPos).Magnitude
+				local delta = vertex.position - origPos
+				local dist = Vector3.new(delta.X, 0, delta.Z).Magnitude
 				if dist < minDist then
 					minDist = dist
 				end
@@ -881,7 +1054,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		inputBeganCn = UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
 			if input.UserInputType == Enum.UserInputType.MouseButton1 and not gameProcessed then
 				local mode = currentSettings.Mode
-				if mode == "Select" or mode == "Move" or mode == "Rotate" then
+				if mode == "Select" or mode == "Move" or mode == "Rotate" or mode == "Subdivide" or mode == "Simplify" then
 					local mousePos = UserInputService:GetMouseLocation()
 					mMarqueeStart = mousePos
 					mMarqueeEnd = nil
@@ -938,7 +1111,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 		mHoverVertexId = nil
 		mHoverEdgeKey = nil
-		mAddBoundaryEdge = nil
+		clearAddState()
 		Selection:Set({})
 		changeSignal:Fire()
 	end
@@ -959,7 +1132,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 		mHoverVertexId = nil
 		mHoverEdgeKey = nil
-		mAddBoundaryEdge = nil
+		clearAddState()
 		Selection:Set({})
 		changeSignal:Fire()
 	end
@@ -1055,7 +1228,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			for vid, vertex in mMesh.getVertices() do
 				if not affectedVids[vid] then
 					for _, selPos in seedPositions do
-						if (vertex.position - selPos).Magnitude < radius then
+						local delta = vertex.position - selPos
+						if Vector3.new(delta.X, 0, delta.Z).Magnitude < radius then
 							affectedVids[vid] = true
 							break
 						end
@@ -1085,14 +1259,14 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		if mode == "Delete" or mode == "Paint" then
 			return mHoverTriangleIds
 		end
-		if mode == "Select" or mode == "Move" or mode == "Rotate" then
+		if mode == "Select" or mode == "Move" or mode == "Rotate" or mode == "Subdivide" or mode == "Simplify" then
 			return getExpandedTriangleIds(mSelectedVertices)
 		end
 		return {}
 	end
 	session.GetHoverOutlineTriangleIds = function(): { number }
 		local mode = currentSettings.Mode
-		if mode ~= "Select" and mode ~= "Move" and mode ~= "Rotate" then
+		if mode ~= "Select" and mode ~= "Move" and mode ~= "Rotate" and mode ~= "Subdivide" and mode ~= "Simplify" then
 			return {}
 		end
 		if not mHoverVertexId then
@@ -1105,6 +1279,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	end
 	session.GetAddBoundaryEdge = function(): { v1: number, v2: number }?
 		return mAddBoundaryEdge
+	end
+	session.GetAddHoverTarget = function(): { type: string, vertexId: number?, edgeKey: string?, position: Vector3? }?
+		return mAddHoverTarget
 	end
 	session.GetMarquee = function(): (Vector2?, Vector2?)
 		return mMarqueeStart, mMarqueeEnd
@@ -1189,6 +1366,213 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 		if recording then
 			ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+		end
+		changeSignal:Fire()
+	end
+	session.Subdivide = function()
+		if getSelectedVertexCount() == 0 then
+			return
+		end
+
+		pushUndoSnapshot()
+		local recording = ChangeHistoryService:TryBeginRecording("PolyMap Subdivide")
+
+		-- Collect all triangle IDs touching any selected vertex
+		local affectedTriIds: { [number]: boolean } = {}
+		for vid in mSelectedVertices do
+			local v = mMesh.getVertex(vid)
+			if v then
+				for _, triId in v.triangles do
+					affectedTriIds[triId] = true
+				end
+			end
+		end
+
+		-- Snapshot each triangle
+		local snapshots: { { positions: { Vector3 }, color: Color3, material: Enum.Material } } = {}
+		for triId in affectedTriIds do
+			local tri = mMesh.getTriangle(triId)
+			if tri then
+				local positions: { Vector3 } = {}
+				for _, vid in tri.vertices do
+					local v = mMesh.getVertex(vid)
+					if v then
+						table.insert(positions, v.position)
+					end
+				end
+				if #positions == 3 then
+					local part = tri.parts[1]
+					table.insert(snapshots, {
+						positions = positions,
+						color = part.Color,
+						material = part.Material,
+					})
+				end
+			end
+		end
+
+		-- Remove all affected triangles
+		for triId in affectedTriIds do
+			mMesh.removeTriangle(triId)
+		end
+
+		-- Add subdivided triangles (4 per original)
+		local newMidpoints: { Vector3 } = {}
+		for _, snap in snapshots do
+			local a, b, c = snap.positions[1], snap.positions[2], snap.positions[3]
+			local mab = (a + b) / 2
+			local mbc = (b + c) / 2
+			local mca = (c + a) / 2
+
+			table.insert(newMidpoints, mab)
+			table.insert(newMidpoints, mbc)
+			table.insert(newMidpoints, mca)
+
+			local props: fillTriangle.TriangleProps = {
+				Color = snap.color,
+				Material = snap.material,
+			}
+			mMesh.addTriangle(a, mab, mca, currentSettings.Thickness, workspace.Terrain, props)
+			mMesh.addTriangle(mab, b, mbc, currentSettings.Thickness, workspace.Terrain, props)
+			mMesh.addTriangle(mca, mbc, c, currentSettings.Thickness, workspace.Terrain, props)
+			mMesh.addTriangle(mab, mbc, mca, currentSettings.Thickness, workspace.Terrain, props)
+		end
+
+		-- Update selection: keep original selected vids that still exist, add midpoint vids
+		local newSelection: { [number]: boolean } = {}
+		for vid in mSelectedVertices do
+			if mMesh.getVertex(vid) then
+				newSelection[vid] = true
+			end
+		end
+		for _, midPos in newMidpoints do
+			local vid = mMesh.findVertexNear(midPos, 0.1)
+			if vid then
+				newSelection[vid] = true
+			end
+		end
+		mSelectedVertices = newSelection
+
+		if recording then
+			ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+		end
+		changeSignal:Fire()
+	end
+	session.Simplify = function(count: number)
+		if getSelectedVertexCount() < 2 then
+			return
+		end
+
+		pushUndoSnapshot()
+		local recording = ChangeHistoryService:TryBeginRecording("PolyMap Simplify")
+		local performed = 0
+
+		for _ = 1, count do
+			-- Find shortest edge (XZ distance) where both endpoints are selected
+			local bestEdgeKey: string? = nil
+			local bestDist = math.huge
+			for key, edge in mMesh.getEdges() do
+				if not mSelectedVertices[edge.v1] or not mSelectedVertices[edge.v2] then
+					continue
+				end
+				local v1 = mMesh.getVertex(edge.v1)
+				local v2 = mMesh.getVertex(edge.v2)
+				if not v1 or not v2 then continue end
+				local delta = v1.position - v2.position
+				local dist = Vector3.new(delta.X, 0, delta.Z).Magnitude
+				if dist < bestDist then
+					bestDist = dist
+					bestEdgeKey = key
+				end
+			end
+
+			if not bestEdgeKey then
+				break
+			end
+
+			local edge = mMesh.getEdges()[bestEdgeKey]
+			if not edge then break end
+
+			local v1 = mMesh.getVertex(edge.v1)
+			local v2 = mMesh.getVertex(edge.v2)
+			if not v1 or not v2 then break end
+
+			local midpoint = (v1.position + v2.position) / 2
+
+			-- Collect all triangles touching either endpoint
+			local affectedTriIds: { [number]: boolean } = {}
+			for _, triId in v1.triangles do
+				affectedTriIds[triId] = true
+			end
+			for _, triId in v2.triangles do
+				affectedTriIds[triId] = true
+			end
+
+			-- Snapshot each triangle, replacing either endpoint with midpoint
+			local snapshots: { { positions: { Vector3 }, color: Color3, material: Enum.Material } } = {}
+			for triId in affectedTriIds do
+				local tri = mMesh.getTriangle(triId)
+				if tri then
+					local positions: { Vector3 } = {}
+					for _, vid in tri.vertices do
+						local vtx = mMesh.getVertex(vid)
+						if vtx then
+							if vid == edge.v1 or vid == edge.v2 then
+								table.insert(positions, midpoint)
+							else
+								table.insert(positions, vtx.position)
+							end
+						end
+					end
+					if #positions == 3 then
+						local part = tri.parts[1]
+						table.insert(snapshots, {
+							positions = positions,
+							color = part.Color,
+							material = part.Material,
+						})
+					end
+				end
+			end
+
+			-- Remove old vertex IDs from selection
+			local oldV1 = edge.v1
+			local oldV2 = edge.v2
+			mSelectedVertices[oldV1] = nil
+			mSelectedVertices[oldV2] = nil
+
+			-- Remove all affected triangles
+			for triId in affectedTriIds do
+				mMesh.removeTriangle(triId)
+			end
+
+			-- Recreate triangles with merged vertex (degenerate ones auto-skip)
+			for _, snap in snapshots do
+				local props: fillTriangle.TriangleProps = {
+					Color = snap.color,
+					Material = snap.material,
+				}
+				mMesh.addTriangle(
+					snap.positions[1], snap.positions[2], snap.positions[3],
+					currentSettings.Thickness, workspace.Terrain, props
+				)
+			end
+
+			-- Add merged vertex to selection
+			local mergedVid = mMesh.findVertexNear(midpoint, 0.1)
+			if mergedVid then
+				mSelectedVertices[mergedVid] = true
+			end
+
+			performed += 1
+		end
+
+		if recording then
+			if performed > 0 then
+				ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+			else
+				ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Cancel)
+			end
 		end
 		changeSignal:Fire()
 	end

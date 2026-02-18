@@ -29,6 +29,8 @@ local HOVER_VERTEX_COLOR = Color3.fromRGB(100, 150, 255)
 local OUTLINE_COLOR = Color3.fromRGB(255, 200, 50)
 local HOVER_OUTLINE_COLOR = Color3.fromRGB(100, 150, 255)
 local MARQUEE_BORDER_COLOR = Color3.fromRGB(100, 150, 255)
+local ADD_EDGE_COLOR = Color3.fromRGB(50, 255, 50)
+local ADD_PREVIEW_COLOR = Color3.fromRGB(50, 200, 50)
 
 local function drawBoundaryEdges(wire: WireframeHandleAdornment, mesh: TriangleMesh.TriangleMesh, triangleIds: { number })
 	-- Build set of triangle IDs for fast lookup
@@ -65,10 +67,14 @@ local function MeshOverlay(props: {
 	HoverOutlineTriangleIds: { number }?,
 	MarqueeStart: Vector2?,
 	MarqueeEnd: Vector2?,
+	AddHighlightEdge: { v1Pos: Vector3, v2Pos: Vector3 }?,
+	AddPreviewTriangles: { { Vector3 } }?,
 })
 	local mesh = props.Mesh
 	local outlineRef = React.useRef(nil :: any)
 	local influenceRef = React.useRef(nil :: any)
+	local addEdgeRef = React.useRef(nil :: any)
+	local addPreviewRef = React.useRef(nil :: any)
 
 	local selectedVertices = props.SelectedVertices or {}
 
@@ -112,6 +118,52 @@ local function MeshOverlay(props: {
 		end
 	end)
 
+	-- Draw Add mode edge highlight
+	local addHighlightEdge = props.AddHighlightEdge
+	React.useEffect(function()
+		local wire = addEdgeRef.current :: WireframeHandleAdornment?
+		if not wire then
+			return
+		end
+		wire:Clear()
+
+		if addHighlightEdge then
+			wire:AddLine(addHighlightEdge.v1Pos, addHighlightEdge.v2Pos)
+		end
+
+		return function()
+			if wire then
+				wire:Clear()
+			end
+		end
+	end)
+
+	-- Draw Add mode preview triangles
+	local addPreviewTriangles = props.AddPreviewTriangles
+	React.useEffect(function()
+		local wire = addPreviewRef.current :: WireframeHandleAdornment?
+		if not wire then
+			return
+		end
+		wire:Clear()
+
+		if addPreviewTriangles then
+			for _, tri in addPreviewTriangles do
+				if #tri >= 3 then
+					wire:AddLine(tri[1], tri[2])
+					wire:AddLine(tri[2], tri[3])
+					wire:AddLine(tri[3], tri[1])
+				end
+			end
+		end
+
+		return function()
+			if wire then
+				wire:Clear()
+			end
+		end
+	end)
+
 	if not mesh then
 		return nil
 	end
@@ -132,6 +184,22 @@ local function MeshOverlay(props: {
 		Color3 = HOVER_OUTLINE_COLOR,
 		AlwaysOnTop = true,
 		ref = influenceRef,
+	})
+
+	-- Wireframe adornment for Add mode edge highlight
+	children.AddEdgeWireframe = e("WireframeHandleAdornment", {
+		Adornee = workspace.Terrain,
+		Color3 = ADD_EDGE_COLOR,
+		AlwaysOnTop = true,
+		ref = addEdgeRef,
+	})
+
+	-- Wireframe adornment for Add mode preview triangles
+	children.AddPreviewWireframe = e("WireframeHandleAdornment", {
+		Adornee = workspace.Terrain,
+		Color3 = ADD_PREVIEW_COLOR,
+		AlwaysOnTop = true,
+		ref = addPreviewRef,
 	})
 
 	-- Render selected vertex markers (scale down when many are selected)
