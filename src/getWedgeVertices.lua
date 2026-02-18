@@ -47,9 +47,23 @@ local function getWedgeVertices(wedge: BasePart): (Vector3, Vector3, Vector3)
 	--
 	-- When the thin axis is Y or Z, we need to remap accordingly.
 
-	-- Read _polyTopSign to extract from the correct face (the one at the vertex plane).
-	-- When missing (manually placed parts), falls back to center extraction (sign=0).
-	local topSign = wedge:GetAttribute("_polyTopSign") or 0
+	-- Determine which face of the thin axis to extract vertices from.
+	-- Parts created by fillTriangle store _polyTopSign; for foreign parts
+	-- (e.g. from GapFill) we infer the sign from the part's orientation:
+	-- pick the face whose outward normal has the larger Y component
+	-- (fillTriangle always orients thickness upward).
+	local topSign: number = wedge:GetAttribute("_polyTopSign") or 0
+	if topSign == 0 then
+		local axisDir: Vector3
+		if minAxis == "X" then
+			axisDir = cf.RightVector
+		elseif minAxis == "Y" then
+			axisDir = cf.UpVector
+		else
+			axisDir = -cf.LookVector
+		end
+		topSign = if axisDir.Y >= 0 then 1 else -1
+	end
 
 	local v1, v2, v3: Vector3
 
