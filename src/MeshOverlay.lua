@@ -27,7 +27,7 @@ local HOVER_VERTEX_RADIUS = 2.0
 local SELECTED_VERTEX_COLOR = Color3.fromRGB(255, 100, 50)
 local HOVER_VERTEX_COLOR = Color3.fromRGB(100, 150, 255)
 local OUTLINE_COLOR = Color3.fromRGB(255, 200, 50)
-local INFLUENCE_COLOR = Color3.fromRGB(100, 200, 180)
+local HOVER_OUTLINE_COLOR = Color3.fromRGB(100, 150, 255)
 local MARQUEE_BORDER_COLOR = Color3.fromRGB(100, 150, 255)
 
 local function drawBoundaryEdges(wire: WireframeHandleAdornment, mesh: TriangleMesh.TriangleMesh, triangleIds: { number })
@@ -62,7 +62,7 @@ local function MeshOverlay(props: {
 	SelectedVertices: { [number]: boolean }?,
 	HoverVertexId: number?,
 	OutlineTriangleIds: { number }?,
-	InfluenceTriangleIds: { number }?,
+	HoverOutlineTriangleIds: { number }?,
 	MarqueeStart: Vector2?,
 	MarqueeEnd: Vector2?,
 })
@@ -92,8 +92,8 @@ local function MeshOverlay(props: {
 		end
 	end)
 
-	-- Draw influence radius outline (boundary edges only)
-	local influenceTriangleIds = props.InfluenceTriangleIds or {}
+	-- Draw hover vertex outline (boundary edges only)
+	local hoverOutlineTriangleIds = props.HoverOutlineTriangleIds or {}
 	React.useEffect(function()
 		local wire = influenceRef.current :: WireframeHandleAdornment?
 		if not wire or not mesh then
@@ -101,8 +101,8 @@ local function MeshOverlay(props: {
 		end
 		wire:Clear()
 
-		if #influenceTriangleIds > 0 then
-			drawBoundaryEdges(wire, mesh, influenceTriangleIds)
+		if #hoverOutlineTriangleIds > 0 then
+			drawBoundaryEdges(wire, mesh, hoverOutlineTriangleIds)
 		end
 
 		return function()
@@ -126,10 +126,10 @@ local function MeshOverlay(props: {
 		ref = outlineRef,
 	})
 
-	-- Wireframe adornment for influence radius preview
-	children.InfluenceWireframe = e("WireframeHandleAdornment", {
+	-- Wireframe adornment for hover vertex outline
+	children.HoverWireframe = e("WireframeHandleAdornment", {
 		Adornee = workspace.Terrain,
-		Color3 = INFLUENCE_COLOR,
+		Color3 = HOVER_OUTLINE_COLOR,
 		AlwaysOnTop = true,
 		ref = influenceRef,
 	})
