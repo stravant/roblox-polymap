@@ -1442,22 +1442,39 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			end
 		end
 
-		-- Snapshot each triangle
-		local snapshots: { { positions: { Vector3 }, color: Color3, material: Enum.Material } } = {}
+		-- Snapshot each triangle with per-edge split info.
+		-- An edge is split only if both its endpoints are selected,
+		-- so boundary edges of the selection stay intact and topology is preserved.
+		type TriSnapshot = {
+			p: { Vector3 },
+			vids: { number },
+			splits: { boolean },
+			color: Color3,
+			material: Enum.Material,
+		}
+		local snapshots: { TriSnapshot } = {}
 		for triId in affectedTriIds do
 			local tri = mMesh.getTriangle(triId)
 			if tri then
 				local positions: { Vector3 } = {}
+				local vids: { number } = {}
 				for _, vid in tri.vertices do
 					local v = mMesh.getVertex(vid)
 					if v then
 						table.insert(positions, v.position)
+						table.insert(vids, vid)
 					end
 				end
 				if #positions == 3 then
 					local part = tri.parts[1]
 					table.insert(snapshots, {
-						positions = positions,
+						p = positions,
+						vids = vids,
+						splits = {
+							(mSelectedVertices[vids[1]] and mSelectedVertices[vids[2]]) == true,
+							(mSelectedVertices[vids[2]] and mSelectedVertices[vids[3]]) == true,
+							(mSelectedVertices[vids[3]] and mSelectedVertices[vids[1]]) == true,
+						},
 						color = part.Color,
 						material = part.Material,
 					})
@@ -1470,26 +1487,65 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			mMesh.removeTriangle(triId)
 		end
 
-		-- Add subdivided triangles (4 per original)
+		-- Re-add with adaptive subdivision
 		local newMidpoints: { Vector3 } = {}
+		local thickness = currentSettings.Thickness
+		local parent = workspace.Terrain
 		for _, snap in snapshots do
-			local a, b, c = snap.positions[1], snap.positions[2], snap.positions[3]
-			local mab = (a + b) / 2
-			local mbc = (b + c) / 2
-			local mca = (c + a) / 2
-
-			table.insert(newMidpoints, mab)
-			table.insert(newMidpoints, mbc)
-			table.insert(newMidpoints, mca)
-
+			local p = snap.p
+			local s = snap.splits
 			local props: fillTriangle.TriangleProps = {
 				Color = snap.color,
 				Material = snap.material,
 			}
-			mMesh.addTriangle(a, mab, mca, currentSettings.Thickness, workspace.Terrain, props)
-			mMesh.addTriangle(mab, b, mbc, currentSettings.Thickness, workspace.Terrain, props)
-			mMesh.addTriangle(mca, mbc, c, currentSettings.Thickness, workspace.Terrain, props)
-			mMesh.addTriangle(mab, mbc, mca, currentSettings.Thickness, workspace.Terrain, props)
+			local splitCount = (if s[1] then 1 else 0) + (if s[2] then 1 else 0) + (if s[3] then 1 else 0)
+
+			if splitCount == 0 then
+				-- No edges split — re-add as-is
+				mMesh.addTriangle(p[1], p[2], p[3], thickness, parent, props)
+			elseif splitCount == 3 then
+				-- All edges split — standard 4-way subdivision
+				local m12 = (p[1] + p[2]) / 2
+				local m23 = (p[2] + p[3]) / 2
+				local m31 = (p[3] + p[1]) / 2
+				table.insert(newMidpoints, m12)
+				table.insert(newMidpoints, m23)
+				table.insert(newMidpoints, m31)
+				mMesh.addTriangle(p[1], m12, m31, thickness, parent, props)
+				mMesh.addTriangle(m12, p[2], m23, thickness, parent, props)
+				mMesh.addTriangle(m31, m23, p[3], thickness, parent, props)
+				mMesh.addTriangle(m12, m23, m31, thickness, parent, props)
+			elseif splitCount == 1 then
+				-- One edge split — rotate so split edge is 1-2, then bisect
+				local rp = p
+				if s[2] then
+					rp = { p[2], p[3], p[1] }
+				elseif s[3] then
+					rp = { p[3], p[1], p[2] }
+				end
+				local m = (rp[1] + rp[2]) / 2
+				table.insert(newMidpoints, m)
+				mMesh.addTriangle(rp[1], m, rp[3], thickness, parent, props)
+				mMesh.addTriangle(m, rp[2], rp[3], thickness, parent, props)
+			else -- splitCount == 2
+				-- Two edges split — rotate so unsplit edge is 1-2, apex is vertex 3
+				local rp = p
+				if not s[1] then
+					-- edge 1-2 unsplit, already canonical
+				elseif not s[2] then
+					rp = { p[2], p[3], p[1] }
+				else
+					rp = { p[3], p[1], p[2] }
+				end
+				-- Split edges: rp2-rp3 and rp3-rp1
+				local m23 = (rp[2] + rp[3]) / 2
+				local m31 = (rp[3] + rp[1]) / 2
+				table.insert(newMidpoints, m23)
+				table.insert(newMidpoints, m31)
+				mMesh.addTriangle(rp[3], m31, m23, thickness, parent, props)
+				mMesh.addTriangle(rp[1], rp[2], m23, thickness, parent, props)
+				mMesh.addTriangle(rp[1], m23, m31, thickness, parent, props)
+			end
 		end
 
 		-- Update selection: keep original selected vids that still exist, add midpoint vids
