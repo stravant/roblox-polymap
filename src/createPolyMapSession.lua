@@ -287,7 +287,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return bestKey
 	end
 
-	local function findNearestBoundaryEdge(worldPos: Vector3, skipEdgeKey: string?): string?
+	local function findNearestBoundaryEdge(worldPos: Vector3, skipEdgeKey: string?, maxDist: number?): string?
 		local camera = workspace.CurrentCamera
 		if not camera then
 			return nil
@@ -295,7 +295,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 		local mouseScreen = camera:WorldToScreenPoint(worldPos)
 		local bestKey: string? = nil
-		local bestDist = 15
+		local bestDist = maxDist or 15
 
 		for key, edge in mMesh.getEdges() do
 			if #edge.triangles ~= 1 then continue end
@@ -430,8 +430,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				end
 			end
 			if mode == "Add" and not mAddBoundaryEdge then
-				-- Phase 1: hover boundary edges only
-				newHoverEdge = findNearestBoundaryEdge(worldPos)
+				-- Phase 1: hover boundary edges only (no distance limit)
+				newHoverEdge = findNearestBoundaryEdge(worldPos, nil, 10000)
 			end
 		end
 
@@ -557,8 +557,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local function handleAddClick(worldPos: Vector3)
 		mMesh.discoverRegion(worldPos, 15)
 		if not mAddBoundaryEdge then
-			-- Phase 1: select a boundary edge
-			local edgeKey = findNearestBoundaryEdge(worldPos)
+			-- Phase 1: select a boundary edge (no distance limit)
+			local edgeKey = findNearestBoundaryEdge(worldPos, nil, 10000)
 			if edgeKey then
 				local edge = mMesh.getEdges()[edgeKey]
 				if edge then
