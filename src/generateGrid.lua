@@ -87,16 +87,20 @@ local function generateTriangularGrid(params: GridParams)
 
 			if isOddRow then
 				-- Odd row is shifted right, so connect:
-				-- top-left to bottom-left to bottom-right (upward triangle)
-				fillTriangle(top, bottom, bottomRight, params.Thickness, params.Parent, params.Props)
-				-- top-left to top-right to bottom-right (downward triangle)
-				fillTriangle(top, topRight, bottomRight, params.Thickness, params.Parent, params.Props)
+				-- Vertex order is rotated so that the split edge (CA for
+				-- equilateral) is NOT the shared diagonal (top ↔ bottomRight).
+				-- upward triangle: split along top→bottom (left edge)
+				fillTriangle(bottom, bottomRight, top, params.Thickness, params.Parent, params.Props)
+				-- downward triangle: split along top→topRight (top edge)
+				fillTriangle(topRight, bottomRight, top, params.Thickness, params.Parent, params.Props)
 			else
 				-- Even row connects:
-				-- top-left to top-right to bottom-left (downward triangle)
+				-- Vertex order rotated to avoid splitting on the shared
+				-- diagonal (topRight ↔ bottom).
+				-- downward triangle: split along bottom→top (left edge) — already correct
 				fillTriangle(top, topRight, bottom, params.Thickness, params.Parent, params.Props)
-				-- top-right to bottom-right to bottom-left (upward triangle)
-				fillTriangle(topRight, bottomRight, bottom, params.Thickness, params.Parent, params.Props)
+				-- upward triangle: split along topRight→bottomRight (right edge)
+				fillTriangle(bottomRight, bottom, topRight, params.Thickness, params.Parent, params.Props)
 			end
 		end
 	end
