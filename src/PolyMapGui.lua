@@ -920,8 +920,8 @@ local function PolyMapGui(props: {
 			local mesh = session.GetMesh()
 			local overlayProps: { [string]: any } = {
 				Mesh = mesh,
-				SelectedVertices = session.GetSelectedVertices(),
-				HoverVertexId = session.GetHoverVertexId(),
+				SelectedVertices = if showSelection then session.GetSelectedVertices() else nil,
+				HoverVertexId = if showSelection then session.GetHoverVertexId() else nil,
 				OutlineTriangleIds = session.GetOutlineTriangleIds(),
 				HoverOutlineTriangleIds = session.GetHoverOutlineTriangleIds(),
 				MarqueeStart = session.GetMarquee(),
