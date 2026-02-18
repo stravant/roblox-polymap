@@ -1025,12 +1025,19 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			return mHoverTriangleIds
 		end
 		if mode == "Select" or mode == "Move" or mode == "Rotate" then
-			-- Collect selected vertex positions
+			-- During a drag, use saved positions so the influence boundary
+			-- stays stable as vertices move, preventing outline flicker.
 			local selectedPositions: { Vector3 } = {}
-			for vid in mSelectedVertices do
-				local v = mMesh.getVertex(vid)
-				if v then
-					table.insert(selectedPositions, v.position)
+			if mIsDraggingHandle and next(mSavedVertexPositions) then
+				for _, pos in mSavedVertexPositions do
+					table.insert(selectedPositions, pos)
+				end
+			else
+				for vid in mSelectedVertices do
+					local v = mMesh.getVertex(vid)
+					if v then
+						table.insert(selectedPositions, v.position)
+					end
 				end
 			end
 
@@ -1044,12 +1051,20 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				affectedVids[mHoverVertexId] = true
 			end
 			if radius > 0 and #selectedPositions > 0 and (mode == "Move" or mode == "Rotate") then
-				for vid, vertex in mMesh.getVertices() do
-					if not affectedVids[vid] then
-						for _, selPos in selectedPositions do
-							if (vertex.position - selPos).Magnitude < radius then
-								affectedVids[vid] = true
-								break
+				-- During a drag, include the pre-computed influenced vertices
+				-- directly to avoid recalculating with shifted positions.
+				if mIsDraggingHandle and next(mInfluencedVertices) then
+					for vid in mInfluencedVertices do
+						affectedVids[vid] = true
+					end
+				else
+					for vid, vertex in mMesh.getVertices() do
+						if not affectedVids[vid] then
+							for _, selPos in selectedPositions do
+								if (vertex.position - selPos).Magnitude < radius then
+									affectedVids[vid] = true
+									break
+								end
 							end
 						end
 					end
