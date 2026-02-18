@@ -1019,27 +1019,74 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	session.GetHoverEdgeKey = function(): string?
 		return mHoverEdgeKey
 	end
+	-- Collect triangles from seed vertices expanded by the influence radius.
+	-- During a drag, uses saved positions to prevent flicker.
+	local function getExpandedTriangleIds(seedVids: { [number]: boolean }): { number }
+		if not next(seedVids) then
+			return {}
+		end
+
+		local radius = currentSettings.InfluenceRadius
+		local affectedVids: { [number]: boolean } = {}
+		for vid in seedVids do
+			affectedVids[vid] = true
+		end
+
+		if radius > 0 then
+			-- Get seed positions (use saved positions during drags)
+			local seedPositions: { Vector3 } = {}
+			if mIsDraggingHandle and next(mSavedVertexPositions) then
+				for vid in seedVids do
+					local pos = mSavedVertexPositions[vid]
+					if pos then
+						table.insert(seedPositions, pos)
+					end
+				end
+			else
+				for vid in seedVids do
+					local v = mMesh.getVertex(vid)
+					if v then
+						table.insert(seedPositions, v.position)
+					end
+				end
+			end
+
+			-- Expand by influence radius
+			for vid, vertex in mMesh.getVertices() do
+				if not affectedVids[vid] then
+					for _, selPos in seedPositions do
+						if (vertex.position - selPos).Magnitude < radius then
+							affectedVids[vid] = true
+							break
+						end
+					end
+				end
+			end
+		end
+
+		local triSet: { [number]: boolean } = {}
+		for vid in affectedVids do
+			local v = mMesh.getVertex(vid)
+			if v then
+				for _, triId in v.triangles do
+					triSet[triId] = true
+				end
+			end
+		end
+		local result: { number } = {}
+		for triId in triSet do
+			table.insert(result, triId)
+		end
+		return result
+	end
+
 	session.GetOutlineTriangleIds = function(): { number }
 		local mode = currentSettings.Mode
 		if mode == "Delete" or mode == "Paint" then
 			return mHoverTriangleIds
 		end
 		if mode == "Select" or mode == "Move" or mode == "Rotate" then
-			-- Only triangles touching selected vertices
-			local triSet: { [number]: boolean } = {}
-			for vid in mSelectedVertices do
-				local v = mMesh.getVertex(vid)
-				if v then
-					for _, triId in v.triangles do
-						triSet[triId] = true
-					end
-				end
-			end
-			local result: { number } = {}
-			for triId in triSet do
-				table.insert(result, triId)
-			end
-			return result
+			return getExpandedTriangleIds(mSelectedVertices)
 		end
 		return {}
 	end
@@ -1051,16 +1098,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		if not mHoverVertexId then
 			return {}
 		end
-		-- Triangles touching the hovered vertex (independent of selection)
-		local v = mMesh.getVertex(mHoverVertexId)
-		if not v then
-			return {}
-		end
-		local result: { number } = {}
-		for _, triId in v.triangles do
-			table.insert(result, triId)
-		end
-		return result
+		return getExpandedTriangleIds({ [mHoverVertexId] = true })
 	end
 	session.GetMode = function(): string
 		return currentSettings.Mode
