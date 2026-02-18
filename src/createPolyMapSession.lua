@@ -104,6 +104,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local mAddPlanePoint: Vector3? = nil
 	local mAddPlaneNormal: Vector3? = nil
 	local mAddHoverTarget: { type: string, vertexId: number?, edgeKey: string?, position: Vector3? }? = nil
+	local mAddTriangleProps: fillTriangle.TriangleProps? = nil
 
 	-- Marquee state
 	local mMarqueeStart: Vector2? = nil
@@ -171,6 +172,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		mAddPlanePoint = nil
 		mAddPlaneNormal = nil
 		mAddHoverTarget = nil
+		mAddTriangleProps = nil
 	end
 
 	local function scanMesh()
@@ -561,7 +563,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				local edge = mMesh.getEdges()[edgeKey]
 				if edge then
 					mAddBoundaryEdge = { v1 = edge.v1, v2 = edge.v2 }
-					-- Store plane from the parent triangle
+					-- Store plane and properties from the parent triangle
 					local parentTriId = edge.triangles[1]
 					if parentTriId then
 						local tri = mMesh.getTriangle(parentTriId)
@@ -571,6 +573,13 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 								mAddPlanePoint = tv.position
 							end
 							mAddPlaneNormal = tri.normal
+							local part = tri.parts[1]
+							if part then
+								mAddTriangleProps = {
+									Color = part.Color,
+									Material = part.Material,
+								}
+							end
 						end
 					end
 					changeSignal:Fire()
@@ -589,6 +598,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			pushUndoSnapshot()
 			local recording = ChangeHistoryService:TryBeginRecording("PolyMap Add Triangle")
 
+			local addProps = mAddTriangleProps or getTriangleProps()
 			local v1 = mMesh.getVertex(mAddBoundaryEdge.v1)
 			local v2 = mMesh.getVertex(mAddBoundaryEdge.v2)
 			if v1 and v2 then
@@ -597,7 +607,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					if tv then
 						mMesh.addTriangle(
 							v1.position, v2.position, tv.position,
-							currentSettings.Thickness, workspace.Terrain, getTriangleProps()
+							currentSettings.Thickness, workspace.Terrain, addProps
 						)
 					end
 				elseif target.type == "edge" and target.edgeKey then
@@ -608,18 +618,18 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 						if tv1 and tv2 then
 							mMesh.addTriangle(
 								v1.position, v2.position, tv1.position,
-								currentSettings.Thickness, workspace.Terrain, getTriangleProps()
+								currentSettings.Thickness, workspace.Terrain, addProps
 							)
 							mMesh.addTriangle(
 								v2.position, tv2.position, tv1.position,
-								currentSettings.Thickness, workspace.Terrain, getTriangleProps()
+								currentSettings.Thickness, workspace.Terrain, addProps
 							)
 						end
 					end
 				elseif target.type == "plane" and target.position then
 					mMesh.addTriangle(
 						v1.position, v2.position, target.position,
-						currentSettings.Thickness, workspace.Terrain, getTriangleProps()
+						currentSettings.Thickness, workspace.Terrain, addProps
 					)
 				end
 			end
