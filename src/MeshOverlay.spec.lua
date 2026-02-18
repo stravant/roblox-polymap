@@ -92,6 +92,7 @@ return function(t: TestTypes.TestContext)
 			SelectedVertices: { [number]: boolean }?,
 			HoverVertexId: number?,
 			OutlineTriangleIds: { number }?,
+			InfluenceTriangleIds: { number }?,
 			MarqueeStart: Vector2?,
 			MarqueeEnd: Vector2?,
 		}
@@ -102,6 +103,7 @@ return function(t: TestTypes.TestContext)
 				SelectedVertices = overlayProps.SelectedVertices,
 				HoverVertexId = overlayProps.HoverVertexId,
 				OutlineTriangleIds = overlayProps.OutlineTriangleIds,
+				InfluenceTriangleIds = overlayProps.InfluenceTriangleIds,
 				MarqueeStart = overlayProps.MarqueeStart,
 				MarqueeEnd = overlayProps.MarqueeEnd,
 			}))
@@ -170,6 +172,71 @@ return function(t: TestTypes.TestContext)
 			SelectedVertices = selected,
 			HoverVertexId = hoverId,
 			OutlineTriangleIds = outlineTris,
+		})
+	end)
+
+	t.test("viewport: selection + influence outline", function()
+		-- Select center vertices, show influence region around them
+		local selected: { [number]: boolean } = {}
+		local vertices = mesh.getVertices()
+		for id, vertex in vertices do
+			if (vertex.position - Vector3.zero).Magnitude < SPACING * 0.8 then
+				selected[id] = true
+			end
+		end
+
+		-- Direct outline: triangles touching selected vertices
+		local directTriSet: { [number]: boolean } = {}
+		for vid in selected do
+			local v = mesh.getVertex(vid)
+			if v then
+				for _, triId in v.triangles do
+					directTriSet[triId] = true
+				end
+			end
+		end
+		local outlineTris: { number } = {}
+		for triId in directTriSet do
+			table.insert(outlineTris, triId)
+		end
+
+		-- Influence: triangles in a wider radius, excluding direct
+		local influenceRadius = SPACING * 2.5
+		local influenceVids: { [number]: boolean } = {}
+		for vid, vertex in vertices do
+			if not selected[vid] then
+				for selVid in selected do
+					local selV = mesh.getVertex(selVid)
+					if selV and (vertex.position - selV.position).Magnitude < influenceRadius then
+						influenceVids[vid] = true
+						break
+					end
+				end
+			end
+		end
+		local influenceTriSet: { [number]: boolean } = {}
+		for vid in influenceVids do
+			local v = mesh.getVertex(vid)
+			if v then
+				for _, triId in v.triangles do
+					if not directTriSet[triId] then
+						influenceTriSet[triId] = true
+					end
+				end
+			end
+		end
+		local influenceTris: { number } = {}
+		for triId in influenceTriSet do
+			table.insert(influenceTris, triId)
+		end
+
+		t.expect(#outlineTris > 0).toBe(true)
+		t.expect(#influenceTris > 0).toBe(true)
+
+		renderOverlayAndScreenshot("Overlay_Influence", {
+			SelectedVertices = selected,
+			OutlineTriangleIds = outlineTris,
+			InfluenceTriangleIds = influenceTris,
 		})
 	end)
 

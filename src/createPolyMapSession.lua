@@ -1025,54 +1025,17 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			return mHoverTriangleIds
 		end
 		if mode == "Select" or mode == "Move" or mode == "Rotate" then
-			-- During a drag, use saved positions so the influence boundary
-			-- stays stable as vertices move, preventing outline flicker.
-			local selectedPositions: { Vector3 } = {}
-			if mIsDraggingHandle and next(mSavedVertexPositions) then
-				for _, pos in mSavedVertexPositions do
-					table.insert(selectedPositions, pos)
-				end
-			else
-				for vid in mSelectedVertices do
-					local v = mMesh.getVertex(vid)
-					if v then
-						table.insert(selectedPositions, v.position)
-					end
-				end
-			end
-
-			-- Include triangles from influenced vertices within the radius
-			local radius = currentSettings.InfluenceRadius
-			local affectedVids: { [number]: boolean } = {}
+			-- Only triangles touching directly selected (+ hovered) vertices
+			local directVids: { [number]: boolean } = {}
 			for vid in mSelectedVertices do
-				affectedVids[vid] = true
+				directVids[vid] = true
 			end
 			if mHoverVertexId then
-				affectedVids[mHoverVertexId] = true
-			end
-			if radius > 0 and #selectedPositions > 0 and (mode == "Move" or mode == "Rotate") then
-				-- During a drag, include the pre-computed influenced vertices
-				-- directly to avoid recalculating with shifted positions.
-				if mIsDraggingHandle and next(mInfluencedVertices) then
-					for vid in mInfluencedVertices do
-						affectedVids[vid] = true
-					end
-				else
-					for vid, vertex in mMesh.getVertices() do
-						if not affectedVids[vid] then
-							for _, selPos in selectedPositions do
-								if (vertex.position - selPos).Magnitude < radius then
-									affectedVids[vid] = true
-									break
-								end
-							end
-						end
-					end
-				end
+				directVids[mHoverVertexId] = true
 			end
 
 			local triSet: { [number]: boolean } = {}
-			for vid in affectedVids do
+			for vid in directVids do
 				local v = mMesh.getVertex(vid)
 				if v then
 					for _, triId in v.triangles do
@@ -1087,6 +1050,89 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			return result
 		end
 		return {}
+	end
+	session.GetInfluenceTriangleIds = function(): { number }
+		local mode = currentSettings.Mode
+		if mode ~= "Select" and mode ~= "Move" and mode ~= "Rotate" then
+			return {}
+		end
+		local radius = currentSettings.InfluenceRadius
+		if radius <= 0 then
+			return {}
+		end
+		if not next(mSelectedVertices) then
+			return {}
+		end
+
+		-- Use saved positions during drags to prevent flicker
+		local selectedPositions: { Vector3 } = {}
+		if mIsDraggingHandle and next(mSavedVertexPositions) then
+			for _, pos in mSavedVertexPositions do
+				table.insert(selectedPositions, pos)
+			end
+		else
+			for vid in mSelectedVertices do
+				local v = mMesh.getVertex(vid)
+				if v then
+					table.insert(selectedPositions, v.position)
+				end
+			end
+		end
+		if #selectedPositions == 0 then
+			return {}
+		end
+
+		-- Find influenced vertices (excluding directly selected ones)
+		local influencedVids: { [number]: boolean } = {}
+		if mIsDraggingHandle and next(mInfluencedVertices) then
+			for vid in mInfluencedVertices do
+				influencedVids[vid] = true
+			end
+		else
+			for vid, vertex in mMesh.getVertices() do
+				if not mSelectedVertices[vid] then
+					for _, selPos in selectedPositions do
+						if (vertex.position - selPos).Magnitude < radius then
+							influencedVids[vid] = true
+							break
+						end
+					end
+				end
+			end
+		end
+
+		if not next(influencedVids) then
+			return {}
+		end
+
+		-- Collect triangles touching influenced vertices, excluding triangles
+		-- that only touch directly selected vertices
+		local directTriSet: { [number]: boolean } = {}
+		for vid in mSelectedVertices do
+			local v = mMesh.getVertex(vid)
+			if v then
+				for _, triId in v.triangles do
+					directTriSet[triId] = true
+				end
+			end
+		end
+
+		local influenceTriSet: { [number]: boolean } = {}
+		for vid in influencedVids do
+			local v = mMesh.getVertex(vid)
+			if v then
+				for _, triId in v.triangles do
+					if not directTriSet[triId] then
+						influenceTriSet[triId] = true
+					end
+				end
+			end
+		end
+		local result: { number } = {}
+		for triId in influenceTriSet do
+			table.insert(result, triId)
+		end
+		return result
 	end
 	session.GetMode = function(): string
 		return currentSettings.Mode

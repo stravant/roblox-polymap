@@ -825,6 +825,7 @@ local function PolyMapGui(props: {
 			SelectedVertices = session.GetSelectedVertices(),
 			HoverVertexId = session.GetHoverVertexId(),
 			OutlineTriangleIds = session.GetOutlineTriangleIds(),
+			InfluenceTriangleIds = session.GetInfluenceTriangleIds(),
 			MarqueeStart = session.GetMarquee(),
 			MarqueeEnd = select(2, session.GetMarquee()),
 		}),

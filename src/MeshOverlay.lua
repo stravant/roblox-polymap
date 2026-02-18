@@ -27,18 +27,48 @@ local HOVER_VERTEX_RADIUS = 2.0
 local SELECTED_VERTEX_COLOR = Color3.fromRGB(255, 100, 50)
 local HOVER_VERTEX_COLOR = Color3.fromRGB(100, 150, 255)
 local OUTLINE_COLOR = Color3.fromRGB(255, 200, 50)
+local INFLUENCE_COLOR = Color3.fromRGB(100, 200, 180)
 local MARQUEE_BORDER_COLOR = Color3.fromRGB(100, 150, 255)
+
+local function drawBoundaryEdges(wire: WireframeHandleAdornment, mesh: TriangleMesh.TriangleMesh, triangleIds: { number })
+	-- Build set of triangle IDs for fast lookup
+	local triSet: { [number]: boolean } = {}
+	for _, triId in triangleIds do
+		triSet[triId] = true
+	end
+
+	-- An edge is on the boundary if exactly one of its triangles is in the set
+	local edges = mesh.getEdges()
+	for _, edge in edges do
+		local insideCount = 0
+		for _, triId in edge.triangles do
+			if triSet[triId] then
+				insideCount += 1
+			end
+		end
+		-- Boundary: one side in set, or edge only has one triangle total and it's in set
+		if insideCount > 0 and insideCount < #edge.triangles or (#edge.triangles == 1 and insideCount == 1) then
+			local v1 = mesh.getVertex(edge.v1)
+			local v2 = mesh.getVertex(edge.v2)
+			if v1 and v2 then
+				wire:AddLine(v1.position, v2.position)
+			end
+		end
+	end
+end
 
 local function MeshOverlay(props: {
 	Mesh: TriangleMesh.TriangleMesh?,
 	SelectedVertices: { [number]: boolean }?,
 	HoverVertexId: number?,
 	OutlineTriangleIds: { number }?,
+	InfluenceTriangleIds: { number }?,
 	MarqueeStart: Vector2?,
 	MarqueeEnd: Vector2?,
 })
 	local mesh = props.Mesh
 	local outlineRef = React.useRef(nil :: any)
+	local influenceRef = React.useRef(nil :: any)
 
 	local selectedVertices = props.SelectedVertices or {}
 
@@ -51,33 +81,28 @@ local function MeshOverlay(props: {
 		end
 		wire:Clear()
 
-		if #outlineTriangleIds == 0 then
+		if #outlineTriangleIds > 0 then
+			drawBoundaryEdges(wire, mesh, outlineTriangleIds)
+		end
+
+		return function()
+			if wire then
+				wire:Clear()
+			end
+		end
+	end)
+
+	-- Draw influence radius outline (boundary edges only)
+	local influenceTriangleIds = props.InfluenceTriangleIds or {}
+	React.useEffect(function()
+		local wire = influenceRef.current :: WireframeHandleAdornment?
+		if not wire or not mesh then
 			return
 		end
+		wire:Clear()
 
-		-- Build set of triangle IDs for fast lookup
-		local triSet: { [number]: boolean } = {}
-		for _, triId in outlineTriangleIds do
-			triSet[triId] = true
-		end
-
-		-- An edge is on the boundary if exactly one of its triangles is in the set
-		local edges = mesh.getEdges()
-		for _, edge in edges do
-			local insideCount = 0
-			for _, triId in edge.triangles do
-				if triSet[triId] then
-					insideCount += 1
-				end
-			end
-			-- Boundary: one side in set, or edge only has one triangle total and it's in set
-			if insideCount > 0 and insideCount < #edge.triangles or (#edge.triangles == 1 and insideCount == 1) then
-				local v1 = mesh.getVertex(edge.v1)
-				local v2 = mesh.getVertex(edge.v2)
-				if v1 and v2 then
-					wire:AddLine(v1.position, v2.position)
-				end
-			end
+		if #influenceTriangleIds > 0 then
+			drawBoundaryEdges(wire, mesh, influenceTriangleIds)
 		end
 
 		return function()
@@ -99,6 +124,14 @@ local function MeshOverlay(props: {
 		Color3 = OUTLINE_COLOR,
 		AlwaysOnTop = true,
 		ref = outlineRef,
+	})
+
+	-- Wireframe adornment for influence radius preview
+	children.InfluenceWireframe = e("WireframeHandleAdornment", {
+		Adornee = workspace.Terrain,
+		Color3 = INFLUENCE_COLOR,
+		AlwaysOnTop = true,
+		ref = influenceRef,
 	})
 
 	-- Render selected vertex markers (scale down when many are selected)
