@@ -427,49 +427,86 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					end
 				end
 			end
-			if mode == "Add" then
-				if mAddBoundaryEdge then
-					-- Phase 2: three-tier priority hover
-					local skipVids = { [mAddBoundaryEdge.v1] = true, [mAddBoundaryEdge.v2] = true }
-					local snapVid = findNearestVertexScreenRadius(worldPos, skipVids)
-					if snapVid then
-						newHoverVertex = snapVid
-						mAddHoverTarget = { type = "vertex", vertexId = snapVid }
-					else
-						-- Build skip key for the stored boundary edge
-						local storedKey = tostring(math.min(mAddBoundaryEdge.v1, mAddBoundaryEdge.v2))
-							.. "_" .. tostring(math.max(mAddBoundaryEdge.v1, mAddBoundaryEdge.v2))
-						local snapEdge = findNearestBoundaryEdge(worldPos, storedKey)
-						if snapEdge then
-							newHoverEdge = snapEdge
-							mAddHoverTarget = { type = "edge", edgeKey = snapEdge }
-						elseif mAddPlanePoint and mAddPlaneNormal then
-							-- Plane projection fallback
-							local camera = workspace.CurrentCamera
-							if camera then
-								local mouseLocation = UserInputService:GetMouseLocation()
-								local ray = camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
-								local denom = ray.Direction:Dot(mAddPlaneNormal)
-								if math.abs(denom) > 0.0001 then
-									local hitT = (mAddPlanePoint - ray.Origin):Dot(mAddPlaneNormal) / denom
-									if hitT > 0 then
-										mAddHoverTarget = { type = "plane", position = ray.Origin + ray.Direction * hitT }
-									else
-										mAddHoverTarget = nil
-									end
-								else
-									mAddHoverTarget = nil
-								end
-							else
-								mAddHoverTarget = nil
-							end
-						else
-							mAddHoverTarget = nil
+			if mode == "Add" and not mAddBoundaryEdge then
+				-- Phase 1: hover boundary edges only
+				newHoverEdge = findNearestBoundaryEdge(worldPos)
+			end
+		end
+
+		-- Add mode phase 2 runs even without a raycast hit (plane projection)
+		if currentSettings.Mode == "Add" and mAddBoundaryEdge then
+			local camera = workspace.CurrentCamera
+			if camera then
+				local mouseLocation = UserInputService:GetMouseLocation()
+				local mouseScreenPos = camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
+				-- Use screen pos from the viewport ray origin projected to screen
+				local mouseScreen = Vector3.new(mouseLocation.X, mouseLocation.Y, 0)
+
+				-- Tier 1: vertex snap (15px screen radius)
+				local skipVids = { [mAddBoundaryEdge.v1] = true, [mAddBoundaryEdge.v2] = true }
+				local bestVid: number? = nil
+				local bestVidDist = 15
+				for id, vertex in mMesh.getVertices() do
+					if skipVids[id] then continue end
+					local screenPos, onScreen = camera:WorldToScreenPoint(vertex.position)
+					if onScreen then
+						local dx = screenPos.X - mouseScreen.X
+						local dy = screenPos.Y - mouseScreen.Y
+						local dist = math.sqrt(dx * dx + dy * dy)
+						if dist < bestVidDist then
+							bestVidDist = dist
+							bestVid = id
 						end
 					end
+				end
+
+				if bestVid then
+					newHoverVertex = bestVid
+					mAddHoverTarget = { type = "vertex", vertexId = bestVid }
 				else
-					-- Phase 1: hover boundary edges only
-					newHoverEdge = findNearestBoundaryEdge(worldPos)
+					-- Tier 2: edge snap (15px screen radius, boundary only)
+					local storedKey = tostring(math.min(mAddBoundaryEdge.v1, mAddBoundaryEdge.v2))
+						.. "_" .. tostring(math.max(mAddBoundaryEdge.v1, mAddBoundaryEdge.v2))
+					local bestEdgeKey: string? = nil
+					local bestEdgeDist = 15
+					for key, edge in mMesh.getEdges() do
+						if #edge.triangles ~= 1 then continue end
+						if key == storedKey then continue end
+						local v1 = mMesh.getVertex(edge.v1)
+						local v2 = mMesh.getVertex(edge.v2)
+						if not v1 or not v2 then continue end
+						local s1, on1 = camera:WorldToScreenPoint(v1.position)
+						local s2, on2 = camera:WorldToScreenPoint(v2.position)
+						if not on1 or not on2 then continue end
+						local bx, by = s2.X - s1.X, s2.Y - s1.Y
+						local lenSq = bx * bx + by * by
+						if lenSq < 0.001 then continue end
+						local px = mouseScreen.X - s1.X
+						local py = mouseScreen.Y - s1.Y
+						local t = math.clamp((px * bx + py * by) / lenSq, 0, 1)
+						local closestX = s1.X + t * bx
+						local closestY = s1.Y + t * by
+						local dist = math.sqrt((mouseScreen.X - closestX) ^ 2 + (mouseScreen.Y - closestY) ^ 2)
+						if dist < bestEdgeDist then
+							bestEdgeDist = dist
+							bestEdgeKey = key
+						end
+					end
+
+					if bestEdgeKey then
+						newHoverEdge = bestEdgeKey
+						mAddHoverTarget = { type = "edge", edgeKey = bestEdgeKey }
+					elseif mAddPlanePoint and mAddPlaneNormal then
+						-- Tier 3: plane projection
+						local ray = camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
+						local denom = ray.Direction:Dot(mAddPlaneNormal)
+						if math.abs(denom) > 0.0001 then
+							local hitT = (mAddPlanePoint - ray.Origin):Dot(mAddPlaneNormal) / denom
+							if hitT > 0 then
+								mAddHoverTarget = { type = "plane", position = ray.Origin + ray.Direction * hitT }
+							end
+						end
+					end
 				end
 			end
 		end
