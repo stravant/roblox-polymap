@@ -616,12 +616,19 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 						local tv1 = mMesh.getVertex(targetEdge.v1)
 						local tv2 = mMesh.getVertex(targetEdge.v2)
 						if tv1 and tv2 then
+							-- Pick the pairing that doesn't cross (smaller diagonal sum)
+							local ta, tb = tv1, tv2
+							local distStraight = (v1.position - ta.position).Magnitude + (v2.position - tb.position).Magnitude
+							local distCrossed = (v1.position - tb.position).Magnitude + (v2.position - ta.position).Magnitude
+							if distCrossed < distStraight then
+								ta, tb = tv2, tv1
+							end
 							mMesh.addTriangle(
-								v1.position, v2.position, tv1.position,
+								v1.position, v2.position, ta.position,
 								currentSettings.Thickness, workspace.Terrain, addProps
 							)
 							mMesh.addTriangle(
-								v2.position, tv2.position, tv1.position,
+								v2.position, tb.position, ta.position,
 								currentSettings.Thickness, workspace.Terrain, addProps
 							)
 						end

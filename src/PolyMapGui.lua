@@ -954,8 +954,15 @@ local function PolyMapGui(props: {
 									local tv1 = mesh.getVertex(targetEdge.v1)
 									local tv2 = mesh.getVertex(targetEdge.v2)
 									if tv1 and tv2 then
-										table.insert(previewTris, { v1.position, v2.position, tv1.position })
-										table.insert(previewTris, { v2.position, tv2.position, tv1.position })
+										-- Pick the pairing that doesn't cross
+										local ta, tb = tv1, tv2
+										local distStraight = (v1.position - ta.position).Magnitude + (v2.position - tb.position).Magnitude
+										local distCrossed = (v1.position - tb.position).Magnitude + (v2.position - ta.position).Magnitude
+										if distCrossed < distStraight then
+											ta, tb = tv2, tv1
+										end
+										table.insert(previewTris, { v1.position, v2.position, ta.position })
+										table.insert(previewTris, { v2.position, tb.position, ta.position })
 									end
 								end
 							elseif target.type == "plane" and target.position then
