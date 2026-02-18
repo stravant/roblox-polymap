@@ -4,7 +4,7 @@ local fillTriangle = require("./fillTriangle")
 local getWedgeVertices = require("./getWedgeVertices")
 
 local SNAP_EPSILON = 0.01
-local THIN_THRESHOLD = 0.5
+local THIN_THRESHOLD = 1.5
 
 local function isThinWedge(instance: Instance): BasePart?
 	if instance:IsA("WedgePart") or (instance:IsA("Part") and (instance :: Part).Shape == Enum.PartType.Wedge) then
