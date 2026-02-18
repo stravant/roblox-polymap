@@ -4,13 +4,17 @@ local fillTriangle = require("./fillTriangle")
 local getWedgeVertices = require("./getWedgeVertices")
 
 local SNAP_EPSILON = 0.01
-local THIN_THRESHOLD = 1.5
+local THIN_MAX_ABSOLUTE = 1.5
+local THIN_MAX_RATIO = 0.3
 
 local function isThinWedge(instance: Instance): BasePart?
 	if instance:IsA("WedgePart") or (instance:IsA("Part") and (instance :: Part).Shape == Enum.PartType.Wedge) then
 		local size = (instance :: BasePart).Size
 		local minSize = math.min(size.X, size.Y, size.Z)
-		if minSize < THIN_THRESHOLD then
+		local maxSize = math.max(size.X, size.Y, size.Z)
+		-- Must be thin in absolute terms AND thin relative to the largest dimension.
+		-- This rejects structural wedges (ramps, stairs) that happen to be small.
+		if minSize < THIN_MAX_ABSOLUTE and (maxSize < 0.001 or minSize / maxSize < THIN_MAX_RATIO) then
 			return instance :: BasePart
 		end
 	end
