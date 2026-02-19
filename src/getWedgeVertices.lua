@@ -24,22 +24,16 @@ local function getWedgeVertices(wedge: BasePart): (Vector3, Vector3, Vector3)
 	local halfY = size.Y / 2
 	local halfZ = size.Z / 2
 
-	-- Identify the thin axis (the thickness/depth direction).
-	-- For heightmap terrain the depth axis points roughly vertical, so we
-	-- pick the local axis with the largest absolute Y component. This works
-	-- for both PolyMap parts (depth always in Size.X) and foreign parts
-	-- (e.g. GapFill), and avoids the sliver problem where the smallest
-	-- dimension isn't the depth.
-	local absRY = math.abs(cf.RightVector.Y)
-	local absUY = math.abs(cf.UpVector.Y)
-	local absLY = math.abs(cf.LookVector.Y)
-
+	-- Identify the thin axis (the thickness/depth direction) as the smallest
+	-- Size component. fillTriangle always puts depth in Size.X, but foreign
+	-- parts may use any axis, so we check all three.
+	-- topSign picks the triangular face that faces upward (positive Y).
 	local minAxis: string
 	local topSign: number
-	if absRY >= absUY and absRY >= absLY then
+	if size.X <= size.Y and size.X <= size.Z then
 		minAxis = "X"
 		topSign = if cf.RightVector.Y >= 0 then 1 else -1
-	elseif absUY >= absRY and absUY >= absLY then
+	elseif size.Y <= size.X and size.Y <= size.Z then
 		minAxis = "Y"
 		topSign = if cf.UpVector.Y >= 0 then 1 else -1
 	else

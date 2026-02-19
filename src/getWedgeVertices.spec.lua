@@ -100,6 +100,38 @@ return function(t: TestTypes.TestContext)
 		folder:Destroy()
 	end)
 
+	t.test("round-trip with steep triangle (>45 degree slope)", function()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		-- A nearly vertical triangle face (slope ~70 degrees)
+		local a = Vector3.new(0, 0, 0)
+		local b = Vector3.new(4, 0, 0)
+		local c = Vector3.new(2, 8, 1)
+		local parts = fillTriangle(a, b, c, 0.2, folder)
+
+		local allVerts: { Vector3 } = {}
+		for _, part in parts do
+			local v1, v2, v3 = getWedgeVertices(part)
+			table.insert(allVerts, v1)
+			table.insert(allVerts, v2)
+			table.insert(allVerts, v3)
+		end
+
+		local foundA, foundB, foundC = false, false, false
+		for _, v in allVerts do
+			if fuzzyEqVec3(v, a, ROUND_TRIP_EPSILON) then foundA = true end
+			if fuzzyEqVec3(v, b, ROUND_TRIP_EPSILON) then foundB = true end
+			if fuzzyEqVec3(v, c, ROUND_TRIP_EPSILON) then foundC = true end
+		end
+
+		t.expect(foundA).toBeTruthy()
+		t.expect(foundB).toBeTruthy()
+		t.expect(foundC).toBeTruthy()
+
+		folder:Destroy()
+	end)
+
 	t.test("single wedge part returns exactly 3 vertices", function()
 		-- Create a simple wedge part manually
 		local wedge = Instance.new("Part")
