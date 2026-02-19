@@ -223,7 +223,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 	local VERTEX_SCREEN_RADIUS = 10000 -- max screen-space pixels to find a vertex
 
-	local function findNearestVertex(worldPos: Vector3): number?
+	local function findNearestVertex(worldPos: Vector3, hitTriangleId: number?): number?
 		local camera = workspace.CurrentCamera
 		if not camera then
 			return mMesh.findVertexNear(worldPos, VERTEX_CLICK_RADIUS)
@@ -232,6 +232,29 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local mouseScreen = camera:WorldToScreenPoint(worldPos)
 		local bestId: number? = nil
 		local bestScreenDist = VERTEX_SCREEN_RADIUS
+
+		-- When we know which triangle the cursor hit, only consider that
+		-- triangle's vertices so we never select through the mesh.
+		if hitTriangleId then
+			local tri = mMesh.getTriangle(hitTriangleId)
+			if tri then
+				for _, vid in tri.vertices do
+					local vertex = mMesh.getVertex(vid)
+					if not vertex then continue end
+					local screenPos, onScreen = camera:WorldToScreenPoint(vertex.position)
+					if onScreen then
+						local dx = screenPos.X - mouseScreen.X
+						local dy = screenPos.Y - mouseScreen.Y
+						local dist = math.sqrt(dx * dx + dy * dy)
+						if dist < bestScreenDist then
+							bestScreenDist = dist
+							bestId = vid
+						end
+					end
+				end
+				return bestId
+			end
+		end
 
 		for id, vertex in mMesh.getVertices() do
 			local screenPos, onScreen = camera:WorldToScreenPoint(vertex.position)
@@ -390,19 +413,21 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			end
 		end
 
+		local hitTriangleId: number? = nil
 		if result and result.Instance:IsA("BasePart") then
 			-- Discover the part under the cursor (O(1) for already-tracked parts)
 			mMesh.discoverPart(result.Instance)
+			hitTriangleId = mMesh.getPartTriangle(result.Instance :: BasePart)
 		end
 
 		if worldPos then
 			local mode = currentSettings.Mode
 			if mode == "Select" or mode == "Move" or mode == "Rotate" or mode == "Subdivide" or mode == "Simplify" then
-				newHoverVertex = findNearestVertex(worldPos)
+				newHoverVertex = findNearestVertex(worldPos, hitTriangleId)
 			end
 			if mode == "Delete" then
 				if currentSettings.DeleteTarget == "Vertex" then
-					newHoverVertex = findNearestVertex(worldPos)
+					newHoverVertex = findNearestVertex(worldPos, hitTriangleId)
 				else
 					-- Face mode: hover the triangle(s) that would be affected
 					local radius = currentSettings.DeleteRadius
@@ -533,9 +558,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 	end
 
-	local function handleSelectClick(worldPos: Vector3)
+	local function handleSelectClick(worldPos: Vector3, hitPart: BasePart?)
 		mMesh.discoverRegion(worldPos, 15)
-		local vid = findNearestVertex(worldPos)
+		local hitTriangleId = if hitPart then mMesh.getPartTriangle(hitPart) else nil
+		local vid = findNearestVertex(worldPos, hitTriangleId)
 		if vid then
 			if isShiftHeld() then
 				if mSelectedVertices[vid] then
@@ -691,7 +717,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 		if currentSettings.DeleteTarget == "Vertex" then
 			mMesh.discoverRegion(worldPos, 15)
-			local vid = findNearestVertex(worldPos)
+			local hitTriangleId = if result and result.Instance:IsA("BasePart")
+				then mMesh.getPartTriangle(result.Instance :: BasePart)
+				else nil
+			local vid = findNearestVertex(worldPos, hitTriangleId)
 			if vid then
 				local vertex = mMesh.getVertex(vid)
 				if vertex then
@@ -815,8 +844,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 
 		local mode = currentSettings.Mode
+		local hitPart = if result.Instance:IsA("BasePart") then result.Instance :: BasePart else nil
 		if mode == "Select" or mode == "Move" or mode == "Rotate" or mode == "Subdivide" or mode == "Simplify" then
-			handleSelectClick(result.Position)
+			handleSelectClick(result.Position, hitPart)
 		elseif mode == "Add" then
 			handleAddClick(result.Position)
 		elseif mode == "Delete" or mode == "Paint" then
