@@ -894,46 +894,33 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 		mMesh.discoverRegion(worldPos, radius + 5)
 
-		-- Save all vertex positions on first encounter during this stroke
+		-- Find all vertices within radius using current positions
+		local verticesInRadius: { { id: number, pos: Vector3, dist: number } } = {}
 		for vid, vertex in mMesh.getVertices() do
-			if not mBrushSavedPositions[vid] then
-				mBrushSavedPositions[vid] = vertex.position
-			end
-		end
-
-		-- Find all vertices within radius using saved positions
-		local verticesInRadius: { { id: number, savedPos: Vector3, dist: number } } = {}
-		for vid in mMesh.getVertices() do
-			local savedPos = mBrushSavedPositions[vid]
-			if not savedPos then continue end
-			local dist = (savedPos - worldPos).Magnitude
+			local dist = (vertex.position - worldPos).Magnitude
 			if dist <= radius then
-				table.insert(verticesInRadius, { id = vid, savedPos = savedPos, dist = dist })
+				table.insert(verticesInRadius, { id = vid, pos = vertex.position, dist = dist })
 			end
 		end
 		if #verticesInRadius == 0 then return end
 
-		-- For each vertex: compute Laplacian, project onto local normal, apply
+		-- For each vertex: compute Laplacian from current positions,
+		-- project onto local normal, apply incrementally each frame
 		local moves: { [number]: Vector3 } = {}
 		for _, entry in verticesInRadius do
 			local v = mMesh.getVertex(entry.id)
 			if not v then continue end
 
-			-- Compute area-weighted average normal from this vertex's adjacent triangles
+			-- Compute area-weighted average normal from adjacent triangles
 			local localNormal = Vector3.zero
 			for _, triId in v.triangles do
 				local tri = mMesh.getTriangle(triId)
 				if tri then
 					local verts: { Vector3 } = {}
 					for _, vid in tri.vertices do
-						local saved = mBrushSavedPositions[vid]
-						if saved then
-							table.insert(verts, saved)
-						else
-							local vtx = mMesh.getVertex(vid)
-							if vtx then
-								table.insert(verts, vtx.position)
-							end
+						local vtx = mMesh.getVertex(vid)
+						if vtx then
+							table.insert(verts, vtx.position)
 						end
 					end
 					if #verts == 3 then
@@ -950,38 +937,29 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			if localNormal.Magnitude < 0.0001 then continue end
 			localNormal = localNormal.Unit
 
-			-- Laplacian: average of neighbor saved positions minus this vertex
+			-- Laplacian: average of neighbor positions minus this vertex
 			local neighbors = mMesh.getVertexNeighbors(entry.id)
 			if #neighbors == 0 then continue end
 			local avgPos = Vector3.zero
 			local nCount = 0
 			for _, nid in neighbors do
-				local npos = mBrushSavedPositions[nid]
-				if not npos then
-					local nv = mMesh.getVertex(nid)
-					if nv then
-						npos = nv.position
-					end
-				end
-				if npos then
-					avgPos += npos
+				local nv = mMesh.getVertex(nid)
+				if nv then
+					avgPos += nv.position
 					nCount += 1
 				end
 			end
 			if nCount == 0 then continue end
 			avgPos /= nCount
-			local laplacian = avgPos - entry.savedPos
+			local laplacian = avgPos - entry.pos
 
-			-- Project Laplacian onto local normal to get normal-only displacement
+			-- Project Laplacian onto local normal — normal-only displacement
 			local normalDisp = localNormal * laplacian:Dot(localNormal)
 
 			local t = entry.dist / radius
 			local falloff = (1 + math.cos(t * math.pi)) / 2
-			local amount = mBrushAmounts[entry.id] or 0
-			amount = math.min(amount + strength * falloff, 1)
-			mBrushAmounts[entry.id] = amount
 
-			moves[entry.id] = entry.savedPos + normalDisp * amount
+			moves[entry.id] = entry.pos + normalDisp * strength * falloff
 		end
 
 		mMesh.moveVertices(moves, currentSettings.Thickness, getTriangleProps())
@@ -1002,8 +980,6 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			mStrokeRecording = ChangeHistoryService:TryBeginRecording("PolyMap Relax")
 		elseif mode == "Flatten" then
 			pushUndoSnapshot()
-			mBrushSavedPositions = {}
-			mBrushAmounts = {}
 			mStrokeRecording = ChangeHistoryService:TryBeginRecording("PolyMap Flatten")
 		end
 		mStrokeDragging = true
