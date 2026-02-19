@@ -105,7 +105,7 @@ local function getStatusText(mode: string, settings: Settings.PolyMapSettings, s
 	elseif mode == "Relax" then
 		return "Click and drag to regularize mesh topology within the brush radius."
 	elseif mode == "Flatten" then
-		return "Click and drag to flatten the surface vertically within the brush radius."
+		return "Click and drag to smooth surface normals within the brush radius."
 	end
 	return ""
 end
@@ -996,7 +996,7 @@ local function FlattenPanel(props: {
 				end,
 			}),
 			Help = e(HelpGui.BasicTooltip, {
-				HelpRichText = "How strongly to flatten per stroke. 1 = fully flat in one pass.",
+				HelpRichText = "How strongly to smooth normals per stroke. 1 = fully smooth in one pass.",
 			}),
 		}),
 	})

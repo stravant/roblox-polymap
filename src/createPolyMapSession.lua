@@ -894,13 +894,18 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 		mMesh.discoverRegion(worldPos, radius + 5)
 
-		-- Find all vertices within radius, saving positions on first encounter
-		local verticesInRadius: { { id: number, savedPos: Vector3, dist: number } } = {}
+		-- Save all vertex positions on first encounter during this stroke
 		for vid, vertex in mMesh.getVertices() do
 			if not mBrushSavedPositions[vid] then
 				mBrushSavedPositions[vid] = vertex.position
 			end
+		end
+
+		-- Find all vertices within radius using saved positions
+		local verticesInRadius: { { id: number, savedPos: Vector3, dist: number } } = {}
+		for vid in mMesh.getVertices() do
 			local savedPos = mBrushSavedPositions[vid]
+			if not savedPos then continue end
 			local dist = (savedPos - worldPos).Magnitude
 			if dist <= radius then
 				table.insert(verticesInRadius, { id = vid, savedPos = savedPos, dist = dist })
@@ -908,61 +913,75 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 		if #verticesInRadius == 0 then return end
 
-		-- Compute area-weighted best-fit plane from saved positions
-		local triSet: { [number]: boolean } = {}
+		-- For each vertex: compute Laplacian, project onto local normal, apply
+		local moves: { [number]: Vector3 } = {}
 		for _, entry in verticesInRadius do
 			local v = mMesh.getVertex(entry.id)
-			if v then
-				for _, triId in v.triangles do
-					triSet[triId] = true
-				end
-			end
-		end
-		local weightedNormal = Vector3.zero
-		local centroid = Vector3.zero
-		local totalWeight = 0
-		for triId in triSet do
-			local tri = mMesh.getTriangle(triId)
-			if tri then
-				local verts: { Vector3 } = {}
-				for _, vid in tri.vertices do
-					local saved = mBrushSavedPositions[vid]
-					if saved then
-						table.insert(verts, saved)
-					else
-						local vtx = mMesh.getVertex(vid)
-						if vtx then
-							table.insert(verts, vtx.position)
+			if not v then continue end
+
+			-- Compute area-weighted average normal from this vertex's adjacent triangles
+			local localNormal = Vector3.zero
+			for _, triId in v.triangles do
+				local tri = mMesh.getTriangle(triId)
+				if tri then
+					local verts: { Vector3 } = {}
+					for _, vid in tri.vertices do
+						local saved = mBrushSavedPositions[vid]
+						if saved then
+							table.insert(verts, saved)
+						else
+							local vtx = mMesh.getVertex(vid)
+							if vtx then
+								table.insert(verts, vtx.position)
+							end
+						end
+					end
+					if #verts == 3 then
+						local e1 = verts[2] - verts[1]
+						local e2 = verts[3] - verts[1]
+						local cross = e1:Cross(e2)
+						local area = cross.Magnitude / 2
+						if area > 0.0001 then
+							localNormal += cross.Unit * area
 						end
 					end
 				end
-				if #verts == 3 then
-					local e1 = verts[2] - verts[1]
-					local e2 = verts[3] - verts[1]
-					local cross = e1:Cross(e2)
-					local area = cross.Magnitude / 2
-					if area > 0.0001 then
-						weightedNormal += cross.Unit * area
-						centroid += (verts[1] + verts[2] + verts[3]) / 3 * area
-						totalWeight += area
+			end
+			if localNormal.Magnitude < 0.0001 then continue end
+			localNormal = localNormal.Unit
+
+			-- Laplacian: average of neighbor saved positions minus this vertex
+			local neighbors = mMesh.getVertexNeighbors(entry.id)
+			if #neighbors == 0 then continue end
+			local avgPos = Vector3.zero
+			local nCount = 0
+			for _, nid in neighbors do
+				local npos = mBrushSavedPositions[nid]
+				if not npos then
+					local nv = mMesh.getVertex(nid)
+					if nv then
+						npos = nv.position
 					end
 				end
+				if npos then
+					avgPos += npos
+					nCount += 1
+				end
 			end
-		end
-		if totalWeight < 0.0001 then return end
-		centroid = centroid / totalWeight
-		local normal = weightedNormal.Unit
+			if nCount == 0 then continue end
+			avgPos /= nCount
+			local laplacian = avgPos - entry.savedPos
 
-		-- Accumulate amount per vertex and lerp Y toward the projected plane
-		local moves: { [number]: Vector3 } = {}
-		for _, entry in verticesInRadius do
+			-- Project Laplacian onto local normal to get normal-only displacement
+			local normalDisp = localNormal * laplacian:Dot(localNormal)
+
 			local t = entry.dist / radius
 			local falloff = (1 + math.cos(t * math.pi)) / 2
 			local amount = mBrushAmounts[entry.id] or 0
 			amount = math.min(amount + strength * falloff, 1)
 			mBrushAmounts[entry.id] = amount
-			local projected = entry.savedPos - normal * (entry.savedPos - centroid):Dot(normal)
-			moves[entry.id] = Vector3.new(entry.savedPos.X, entry.savedPos.Y + (projected.Y - entry.savedPos.Y) * amount, entry.savedPos.Z)
+
+			moves[entry.id] = entry.savedPos + normalDisp * amount
 		end
 
 		mMesh.moveVertices(moves, currentSettings.Thickness, getTriangleProps())
