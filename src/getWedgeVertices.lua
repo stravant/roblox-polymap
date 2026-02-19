@@ -24,35 +24,28 @@ local function getWedgeVertices(wedge: BasePart): (Vector3, Vector3, Vector3)
 	local halfY = size.Y / 2
 	local halfZ = size.Z / 2
 
-	-- Identify the thin axis (smallest dimension)
+	-- Identify the thin axis (the thickness/depth direction).
+	-- fillTriangle always puts depth in Size.X, so when _polyTopSign is
+	-- present we can trust that. For foreign parts we fall back to the
+	-- smallest-dimension heuristic.
+	local polyTopSign: number? = wedge:GetAttribute("_polyTopSign")
+
 	local minAxis: string
-	local minVal = math.huge
-	if size.X <= size.Y and size.X <= size.Z then
+	if polyTopSign then
+		-- fillTriangle part: depth is always Size.X regardless of sliver geometry
 		minAxis = "X"
-		minVal = size.X
+	elseif size.X <= size.Y and size.X <= size.Z then
+		minAxis = "X"
 	elseif size.Y <= size.X and size.Y <= size.Z then
 		minAxis = "Y"
-		minVal = size.Y
 	else
 		minAxis = "Z"
-		minVal = size.Z
 	end
 
-	-- The standard wedge shape has 3 vertices on each triangular face.
-	-- In the default orientation (thin axis = X), the triangular face
-	-- vertices in local space are:
-	--   v1 = (0, -halfY,  halfZ)  -- bottom-front (right angle)
-	--   v2 = (0,  halfY,  halfZ)  -- top-front
-	--   v3 = (0, -halfY, -halfZ)  -- bottom-back
-	--
-	-- When the thin axis is Y or Z, we need to remap accordingly.
-
 	-- Determine which face of the thin axis to extract vertices from.
-	-- Parts created by fillTriangle store _polyTopSign; for foreign parts
-	-- (e.g. from GapFill) we infer the sign from the part's orientation:
-	-- pick the face whose outward normal has the larger Y component
-	-- (fillTriangle always orients thickness upward).
-	local topSign: number = wedge:GetAttribute("_polyTopSign") or 0
+	-- _polyTopSign stores the exact sign; for foreign parts infer it
+	-- from orientation (fillTriangle orients thickness upward).
+	local topSign: number = polyTopSign or 0
 	if topSign == 0 then
 		local axisDir: Vector3
 		if minAxis == "X" then
