@@ -23,6 +23,8 @@ export type PolyMapSettings = PluginGuiTypes.PluginGuiSettings & {
 	PaintEyedropper: boolean,
 	RelaxRadius: number,
 	RelaxStrength: number,
+	FlattenRadius: number,
+	FlattenStrength: number,
 }
 
 local function loadSettings(plugin: Plugin): PolyMapSettings
@@ -57,6 +59,8 @@ local function loadSettings(plugin: Plugin): PolyMapSettings
 		PaintEyedropper = false,
 		RelaxRadius = raw.RelaxRadius or 5,
 		RelaxStrength = raw.RelaxStrength or 0.5,
+		FlattenRadius = raw.FlattenRadius or 5,
+		FlattenStrength = raw.FlattenStrength or 0.5,
 	}
 end
 
@@ -86,6 +90,8 @@ local function saveSettings(plugin: Plugin, settings: PolyMapSettings)
 		PaintStrength = settings.PaintStrength,
 		RelaxRadius = settings.RelaxRadius,
 		RelaxStrength = settings.RelaxStrength,
+		FlattenRadius = settings.FlattenRadius,
+		FlattenStrength = settings.FlattenStrength,
 	})
 end
 

@@ -127,10 +127,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local mStrokePlanePoint: Vector3? = nil
 	local mStrokePlaneNormal: Vector3? = nil
 
-	-- Relax: snapshot of all vertex positions at stroke start, and per-vertex
-	-- accumulated relaxation amount (0 to 1) for progressive flattening.
-	local mRelaxSavedPositions: { [number]: Vector3 } = {}
-	local mRelaxAmounts: { [number]: number } = {}
+	-- Brush tools (Flatten/Relax): snapshot of vertex positions at stroke start,
+	-- and per-vertex accumulated amount (0 to 1) for progressive application.
+	local mBrushSavedPositions: { [number]: Vector3 } = {}
+	local mBrushAmounts: { [number]: number } = {}
 
 	-- Undo/redo: save selected vertex positions so selection survives rescan
 	local mUndoSelections: { { Vector3 } } = {}
@@ -461,6 +461,13 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			end
 			if mode == "Relax" then
 				local radius = currentSettings.RelaxRadius
+				if radius > 0 then
+					mMesh.discoverRegion(worldPos, radius + 5)
+					newHoverTriangles = mMesh.findTrianglesInRadius(worldPos, radius)
+				end
+			end
+			if mode == "Flatten" then
+				local radius = currentSettings.FlattenRadius
 				if radius > 0 then
 					mMesh.discoverRegion(worldPos, radius + 5)
 					newHoverTriangles = mMesh.findTrianglesInRadius(worldPos, radius)
@@ -816,14 +823,18 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 		mMesh.discoverRegion(worldPos, radius + 5)
 
-		-- Find all vertices within radius, using saved positions for stability
-		local verticesInRadius: { { id: number, savedPos: Vector3, dist: number } } = {}
+		-- Save all vertex positions on first encounter during this stroke
 		for vid, vertex in mMesh.getVertices() do
-			-- Save position on first encounter during this stroke
-			if not mRelaxSavedPositions[vid] then
-				mRelaxSavedPositions[vid] = vertex.position
+			if not mBrushSavedPositions[vid] then
+				mBrushSavedPositions[vid] = vertex.position
 			end
-			local savedPos = mRelaxSavedPositions[vid]
+		end
+
+		-- Find all vertices within radius using saved positions
+		local verticesInRadius: { { id: number, savedPos: Vector3, dist: number } } = {}
+		for vid in mMesh.getVertices() do
+			local savedPos = mBrushSavedPositions[vid]
+			if not savedPos then continue end
 			local dist = (savedPos - worldPos).Magnitude
 			if dist <= radius then
 				table.insert(verticesInRadius, { id = vid, savedPos = savedPos, dist = dist })
@@ -831,7 +842,73 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 		if #verticesInRadius == 0 then return end
 
-		-- Compute area-weighted average normal from triangles using saved positions
+		-- Laplacian XZ smoothing: move each vertex toward the average XZ of its neighbors
+		local moves: { [number]: Vector3 } = {}
+		for _, entry in verticesInRadius do
+			local neighbors = mMesh.getVertexNeighbors(entry.id)
+			if #neighbors == 0 then continue end
+
+			-- Average XZ of saved neighbor positions
+			local avgX, avgZ = 0, 0
+			local nCount = 0
+			for _, nid in neighbors do
+				local npos = mBrushSavedPositions[nid]
+				if not npos then
+					local nv = mMesh.getVertex(nid)
+					if nv then
+						npos = nv.position
+					end
+				end
+				if npos then
+					avgX += npos.X
+					avgZ += npos.Z
+					nCount += 1
+				end
+			end
+			if nCount == 0 then continue end
+			avgX /= nCount
+			avgZ /= nCount
+
+			local t = entry.dist / radius
+			local falloff = (1 + math.cos(t * math.pi)) / 2
+			local amount = mBrushAmounts[entry.id] or 0
+			amount = math.min(amount + strength * falloff, 1)
+			mBrushAmounts[entry.id] = amount
+
+			local newX = entry.savedPos.X + (avgX - entry.savedPos.X) * amount
+			local newZ = entry.savedPos.Z + (avgZ - entry.savedPos.Z) * amount
+			moves[entry.id] = Vector3.new(newX, entry.savedPos.Y, newZ)
+		end
+
+		mMesh.moveVertices(moves, currentSettings.Thickness, getTriangleProps())
+		changeSignal:Fire()
+	end
+
+	local function applyFlattenAtCursor()
+		local worldPos = getStrokeWorldPos()
+		if not worldPos then return end
+
+		local radius = currentSettings.FlattenRadius
+		local strength = currentSettings.FlattenStrength
+		if radius <= 0 or strength <= 0 then return end
+
+		mMesh.discoverRegion(worldPos, radius + 5)
+
+		-- Find all vertices within radius, saving positions on first encounter
+		local verticesInRadius: { { id: number, savedPos: Vector3, dist: number } } = {}
+		for vid, vertex in mMesh.getVertices() do
+			if not mBrushSavedPositions[vid] then
+				mBrushSavedPositions[vid] = vertex.position
+			end
+			local savedPos = mBrushSavedPositions[vid]
+			local dist = (savedPos - worldPos).Magnitude
+			if dist <= radius then
+				table.insert(verticesInRadius, { id = vid, savedPos = savedPos, dist = dist })
+			end
+		end
+		if #verticesInRadius == 0 then return end
+
+		-- Compute area-weighted best-fit plane from saved positions
 		local triSet: { [number]: boolean } = {}
 		for _, entry in verticesInRadius do
 			local v = mMesh.getVertex(entry.id)
@@ -849,7 +926,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			if tri then
 				local verts: { Vector3 } = {}
 				for _, vid in tri.vertices do
-					local saved = mRelaxSavedPositions[vid]
+					local saved = mBrushSavedPositions[vid]
 					if saved then
 						table.insert(verts, saved)
 					else
@@ -876,16 +953,16 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		centroid = centroid / totalWeight
 		local normal = weightedNormal.Unit
 
-		-- Accumulate relaxation amount per vertex and lerp from saved position
+		-- Accumulate amount per vertex and lerp Y toward the projected plane
 		local moves: { [number]: Vector3 } = {}
 		for _, entry in verticesInRadius do
 			local t = entry.dist / radius
 			local falloff = (1 + math.cos(t * math.pi)) / 2
-			local amount = mRelaxAmounts[entry.id] or 0
+			local amount = mBrushAmounts[entry.id] or 0
 			amount = math.min(amount + strength * falloff, 1)
-			mRelaxAmounts[entry.id] = amount
+			mBrushAmounts[entry.id] = amount
 			local projected = entry.savedPos - normal * (entry.savedPos - centroid):Dot(normal)
-			moves[entry.id] = entry.savedPos:Lerp(projected, amount)
+			moves[entry.id] = Vector3.new(entry.savedPos.X, entry.savedPos.Y + (projected.Y - entry.savedPos.Y) * amount, entry.savedPos.Z)
 		end
 
 		mMesh.moveVertices(moves, currentSettings.Thickness, getTriangleProps())
@@ -901,9 +978,14 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			mStrokeRecording = ChangeHistoryService:TryBeginRecording("PolyMap Paint")
 		elseif mode == "Relax" then
 			pushUndoSnapshot()
-			mRelaxSavedPositions = {}
-			mRelaxAmounts = {}
+			mBrushSavedPositions = {}
+			mBrushAmounts = {}
 			mStrokeRecording = ChangeHistoryService:TryBeginRecording("PolyMap Relax")
+		elseif mode == "Flatten" then
+			pushUndoSnapshot()
+			mBrushSavedPositions = {}
+			mBrushAmounts = {}
+			mStrokeRecording = ChangeHistoryService:TryBeginRecording("PolyMap Flatten")
 		end
 		mStrokeDragging = true
 	end
@@ -916,6 +998,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			applyPaintAtCursor()
 		elseif mode == "Relax" then
 			applyRelaxAtCursor()
+		elseif mode == "Flatten" then
+			applyFlattenAtCursor()
 		end
 	end
 
@@ -927,8 +1011,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		mStrokeDragging = false
 		mStrokePlanePoint = nil
 		mStrokePlaneNormal = nil
-		mRelaxSavedPositions = {}
-		mRelaxAmounts = {}
+		mBrushSavedPositions = {}
+		mBrushAmounts = {}
 	end
 
 	local function handleClick()
@@ -972,7 +1056,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			handleSelectClick(result.Position, hitPart)
 		elseif mode == "Add" then
 			handleAddClick(result.Position)
-		elseif mode == "Delete" or mode == "Paint" or mode == "Relax" then
+		elseif mode == "Delete" or mode == "Paint" or mode == "Relax" or mode == "Flatten" then
 			startStroke()
 			applyStrokeAtCursor()
 		end
@@ -1463,7 +1547,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 	session.GetOutlineTriangleIds = function(): { number }
 		local mode = currentSettings.Mode
-		if mode == "Delete" or mode == "Paint" or mode == "Relax" then
+		if mode == "Delete" or mode == "Paint" or mode == "Relax" or mode == "Flatten" then
 			return mHoverTriangleIds
 		end
 		if mode == "Select" or mode == "Move" or mode == "Rotate" or mode == "Subdivide" or mode == "Simplify" then
