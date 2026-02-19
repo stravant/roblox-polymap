@@ -18,16 +18,31 @@ local createPolyMapSession = require("./createPolyMapSession")
 
 local e = React.createElement
 
-local kColorPresets: { { Name: string, Color: { number } } } = {
-	{ Name = "Grass", Color = { 0.30, 0.59, 0.30 } },
-	{ Name = "Dirt", Color = { 0.55, 0.37, 0.22 } },
-	{ Name = "Rock", Color = { 0.50, 0.50, 0.50 } },
-	{ Name = "Sand", Color = { 0.84, 0.77, 0.55 } },
-	{ Name = "Snow", Color = { 0.92, 0.92, 0.95 } },
-	{ Name = "Water", Color = { 0.20, 0.45, 0.70 } },
-	{ Name = "Forest", Color = { 0.15, 0.35, 0.15 } },
-	{ Name = "Grey", Color = { 0.63, 0.63, 0.63 } },
-}
+-- 60-swatch color palette: 10 grayscale + 5 rows of 10 hues
+local kColorPalette: { { number } } = (function()
+	local palette: { { number } } = {}
+	-- Row 0: grayscale (10 swatches, black to white)
+	for i = 0, 9 do
+		local v = i / 9
+		table.insert(palette, { v, v, v })
+	end
+	-- Rows 1-5: hues at varying saturation/value
+	local rows = {
+		{ s = 1.0, v = 1.0 },  -- vivid
+		{ s = 0.5, v = 1.0 },  -- pastel
+		{ s = 1.0, v = 0.6 },  -- dark
+		{ s = 0.7, v = 0.8 },  -- medium
+		{ s = 1.0, v = 0.35 }, -- very dark
+	}
+	for _, row in rows do
+		for i = 0, 9 do
+			local h = i / 10
+			local c3 = Color3.fromHSV(h, row.s, row.v)
+			table.insert(palette, { c3.R, c3.G, c3.B })
+		end
+	end
+	return palette
+end)()
 
 local function createNextOrder()
 	local order = 0
@@ -482,6 +497,16 @@ local function InfluencePanel(props: {
 	})
 end
 
+local kMaterialRows: { { { name: string, label: string } } } = {
+	{ { name = "Grass", label = "Grass" }, { name = "LeafyGrass", label = "Leafy" }, { name = "Ground", label = "Ground" } },
+	{ { name = "Sand", label = "Sand" }, { name = "Mud", label = "Mud" }, { name = "Rock", label = "Rock" } },
+	{ { name = "Slate", label = "Slate" }, { name = "Basalt", label = "Basalt" }, { name = "Limestone", label = "Limestone" } },
+	{ { name = "Sandstone", label = "Sandstone" }, { name = "Cobblestone", label = "Cobble" }, { name = "Brick", label = "Brick" } },
+	{ { name = "Concrete", label = "Concrete" }, { name = "Asphalt", label = "Asphalt" }, { name = "Pavement", label = "Pavement" } },
+	{ { name = "Plastic", label = "Plastic" }, { name = "SmoothPlastic", label = "Smooth" }, { name = "Ice", label = "Ice" } },
+	{ { name = "Snow", label = "Snow" }, { name = "Neon", label = "Neon" }, { name = "Wood", label = "Wood" } },
+}
+
 local function PaintPanel(props: {
 	Settings: Settings.PolyMapSettings,
 	UpdatedSettings: () -> (),
@@ -492,27 +517,28 @@ local function PaintPanel(props: {
 	local currentMaterial = props.Settings.PaintMaterial
 	local nextOrder = createNextOrder()
 
-	-- Build preset swatch children
-	local presetChildren: { [string]: React.ReactElement<any, any> } = {
+	-- Build palette swatch children
+	local paletteChildren: { [string]: React.ReactElement<any, any> } = {
 		GridLayout = e("UIGridLayout", {
-			CellSize = UDim2.fromOffset(20, 20),
-			CellPadding = UDim2.fromOffset(4, 4),
+			CellSize = UDim2.fromOffset(16, 16),
+			CellPadding = UDim2.fromOffset(2, 2),
+			FillDirectionMaxCells = 10,
 			SortOrder = Enum.SortOrder.LayoutOrder,
 		}),
 	}
-	for i, preset in kColorPresets do
-		local isSelected = colorsMatch(c, preset.Color)
-		presetChildren[preset.Name] = e("TextButton", {
+	for i, swatch in kColorPalette do
+		local isSelected = colorsMatch(c, swatch)
+		paletteChildren[`Swatch{i}`] = e("TextButton", {
 			Text = "",
-			BackgroundColor3 = Color3.new(preset.Color[1], preset.Color[2], preset.Color[3]),
+			BackgroundColor3 = Color3.new(swatch[1], swatch[2], swatch[3]),
 			LayoutOrder = i,
 			[React.Event.Activated] = function()
-				props.Settings.PaintColor = { preset.Color[1], preset.Color[2], preset.Color[3] }
+				props.Settings.PaintColor = { swatch[1], swatch[2], swatch[3] }
 				props.UpdatedSettings()
 			end,
 		}, {
 			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 4),
+				CornerRadius = UDim.new(0, 3),
 			}),
 			Border = isSelected and e("UIStroke", {
 				Color = Colors.WHITE,
@@ -522,26 +548,80 @@ local function PaintPanel(props: {
 		})
 	end
 
+	-- Build material row children
+	local materialChildren: { [string]: React.ReactElement<any, any> } = {
+		ListLayout = e("UIListLayout", {
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			Padding = UDim.new(0, 2),
+		}),
+	}
+	for rowIdx, row in kMaterialRows do
+		local rowChildren: { [string]: React.ReactElement<any, any> } = {
+			ListLayout = e("UIListLayout", {
+				FillDirection = Enum.FillDirection.Horizontal,
+				SortOrder = Enum.SortOrder.LayoutOrder,
+				Padding = UDim.new(0, 4),
+			}),
+		}
+		for colIdx, mat in row do
+			rowChildren[mat.name] = e(ChipForToggle, {
+				Text = mat.label,
+				IsCurrent = currentMaterial == mat.name,
+				LayoutOrder = colIdx,
+				OnClick = function()
+					props.Settings.PaintMaterial = mat.name
+					props.UpdatedSettings()
+				end,
+			})
+		end
+		materialChildren[`Row{rowIdx}`] = e("Frame", {
+			Size = UDim2.fromScale(1, 0),
+			AutomaticSize = Enum.AutomaticSize.Y,
+			BackgroundTransparency = 1,
+			LayoutOrder = rowIdx,
+		}, rowChildren)
+	end
+
 	return e(SubPanel, {
 		Title = "Paint",
 		LayoutOrder = props.LayoutOrder,
 		Padding = UDim.new(0, 4),
 	}, {
-		ColorPreview = e("Frame", {
+		ColorPreviewRow = e("Frame", {
 			Size = UDim2.new(1, 0, 0, 20),
-			BackgroundColor3 = currentColor,
+			BackgroundTransparency = 1,
 			LayoutOrder = nextOrder(),
 		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 4),
+			ListLayout = e("UIListLayout", {
+				FillDirection = Enum.FillDirection.Horizontal,
+				SortOrder = Enum.SortOrder.LayoutOrder,
+				Padding = UDim.new(0, 4),
+			}),
+			ColorPreview = e("Frame", {
+				Size = UDim2.new(1, -28, 0, 20),
+				BackgroundColor3 = currentColor,
+				LayoutOrder = 1,
+			}, {
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(0, 4),
+				}),
+			}),
+			PickButton = e(ChipForToggle, {
+				Text = "Pick",
+				IsCurrent = props.Settings.PaintEyedropper == true,
+				LayoutOrder = 2,
+				OnClick = function()
+					props.Settings.PaintEyedropper = not props.Settings.PaintEyedropper
+					props.UpdatedSettings()
+				end,
 			}),
 		}),
-		PresetSwatches = e("Frame", {
+		PaletteSwatches = e("Frame", {
 			Size = UDim2.fromScale(1, 0),
 			AutomaticSize = Enum.AutomaticSize.Y,
 			BackgroundTransparency = 1,
 			LayoutOrder = nextOrder(),
-		}, presetChildren),
+		}, paletteChildren),
 		RGBRow = e("Frame", {
 			Size = UDim2.fromScale(1, 0),
 			AutomaticSize = Enum.AutomaticSize.Y,
@@ -590,84 +670,12 @@ local function PaintPanel(props: {
 				end,
 			}),
 		}),
-		MaterialRow1 = e("Frame", {
+		Materials = e("Frame", {
 			Size = UDim2.fromScale(1, 0),
 			AutomaticSize = Enum.AutomaticSize.Y,
 			BackgroundTransparency = 1,
 			LayoutOrder = nextOrder(),
-		}, {
-			ListLayout = e("UIListLayout", {
-				FillDirection = Enum.FillDirection.Horizontal,
-				SortOrder = Enum.SortOrder.LayoutOrder,
-				Padding = UDim.new(0, 4),
-			}),
-			Plastic = e(ChipForToggle, {
-				Text = "Plastic",
-				IsCurrent = currentMaterial == "Plastic",
-				LayoutOrder = 1,
-				OnClick = function()
-					props.Settings.PaintMaterial = "Plastic"
-					props.UpdatedSettings()
-				end,
-			}),
-			SmoothPlastic = e(ChipForToggle, {
-				Text = "Smooth",
-				IsCurrent = currentMaterial == "SmoothPlastic",
-				LayoutOrder = 2,
-				OnClick = function()
-					props.Settings.PaintMaterial = "SmoothPlastic"
-					props.UpdatedSettings()
-				end,
-			}),
-			Slate = e(ChipForToggle, {
-				Text = "Slate",
-				IsCurrent = currentMaterial == "Slate",
-				LayoutOrder = 3,
-				OnClick = function()
-					props.Settings.PaintMaterial = "Slate"
-					props.UpdatedSettings()
-				end,
-			}),
-		}),
-		MaterialRow2 = e("Frame", {
-			Size = UDim2.fromScale(1, 0),
-			AutomaticSize = Enum.AutomaticSize.Y,
-			BackgroundTransparency = 1,
-			LayoutOrder = nextOrder(),
-		}, {
-			ListLayout = e("UIListLayout", {
-				FillDirection = Enum.FillDirection.Horizontal,
-				SortOrder = Enum.SortOrder.LayoutOrder,
-				Padding = UDim.new(0, 4),
-			}),
-			Concrete = e(ChipForToggle, {
-				Text = "Concrete",
-				IsCurrent = currentMaterial == "Concrete",
-				LayoutOrder = 1,
-				OnClick = function()
-					props.Settings.PaintMaterial = "Concrete"
-					props.UpdatedSettings()
-				end,
-			}),
-			Grass = e(ChipForToggle, {
-				Text = "Grass",
-				IsCurrent = currentMaterial == "Grass",
-				LayoutOrder = 2,
-				OnClick = function()
-					props.Settings.PaintMaterial = "Grass"
-					props.UpdatedSettings()
-				end,
-			}),
-			Neon = e(ChipForToggle, {
-				Text = "Neon",
-				IsCurrent = currentMaterial == "Neon",
-				LayoutOrder = 3,
-				OnClick = function()
-					props.Settings.PaintMaterial = "Neon"
-					props.UpdatedSettings()
-				end,
-			}),
-		}),
+		}, materialChildren),
 		PaintRadius = e(HelpGui.WithHelpIcon, {
 			LayoutOrder = nextOrder(),
 			Subject = e(NumberInput, {
