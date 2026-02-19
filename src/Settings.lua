@@ -19,6 +19,7 @@ export type PolyMapSettings = PluginGuiTypes.PluginGuiSettings & {
 	GridSpacing: number,
 	PaintColor: { number },
 	PaintMaterial: string,
+	PaintStrength: number,
 	RelaxRadius: number,
 	RelaxStrength: number,
 }
@@ -51,6 +52,7 @@ local function loadSettings(plugin: Plugin): PolyMapSettings
 		GridSpacing = raw.GridSpacing or 4,
 		PaintColor = raw.PaintColor or { 0.294, 0.592, 0.294 },
 		PaintMaterial = raw.PaintMaterial or "Grass",
+		PaintStrength = raw.PaintStrength or 1.0,
 		RelaxRadius = raw.RelaxRadius or 5,
 		RelaxStrength = raw.RelaxStrength or 0.5,
 	}
@@ -79,6 +81,7 @@ local function saveSettings(plugin: Plugin, settings: PolyMapSettings)
 		GridSpacing = settings.GridSpacing,
 		PaintColor = settings.PaintColor,
 		PaintMaterial = settings.PaintMaterial,
+		PaintStrength = settings.PaintStrength,
 		RelaxRadius = settings.RelaxRadius,
 		RelaxStrength = settings.RelaxStrength,
 	})

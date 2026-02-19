@@ -786,8 +786,13 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				end
 			end
 
+			local paintStrength = currentSettings.PaintStrength
 			for _, part in partsToPaint do
-				part.Color = color
+				if paintStrength >= 1.0 then
+					part.Color = color
+				else
+					part.Color = part.Color:Lerp(color, paintStrength)
+				end
 				if mat then
 					part.Material = mat
 				end

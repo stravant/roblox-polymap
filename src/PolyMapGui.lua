@@ -687,6 +687,24 @@ local function PaintPanel(props: {
 				HelpRichText = "Paint within this radius. 0 = single triangle.",
 			}),
 		}),
+		PaintStrength = e(HelpGui.WithHelpIcon, {
+			LayoutOrder = nextOrder(),
+			Subject = e(NumberInput, {
+				Label = "Strength",
+				Value = props.Settings.PaintStrength,
+				ValueEntered = function(newValue: number)
+					if newValue >= 0 and newValue <= 1 then
+						props.Settings.PaintStrength = newValue
+						props.UpdatedSettings()
+						return newValue
+					end
+					return nil
+				end,
+			}),
+			Help = e(HelpGui.BasicTooltip, {
+				HelpRichText = "Color blend strength. 1 = full replace, lower values blend with existing color.",
+			}),
+		}),
 	})
 end
 
