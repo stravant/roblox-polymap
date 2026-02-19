@@ -842,9 +842,19 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 		if #verticesInRadius == 0 then return end
 
+		-- Build set of boundary vertices (on edges with only 1 triangle) to pin them
+		local boundaryVids: { [number]: boolean } = {}
+		for _, edge in mMesh.getEdges() do
+			if #edge.triangles == 1 then
+				boundaryVids[edge.v1] = true
+				boundaryVids[edge.v2] = true
+			end
+		end
+
 		-- Laplacian XZ smoothing: move each vertex toward the average XZ of its neighbors
 		local moves: { [number]: Vector3 } = {}
 		for _, entry in verticesInRadius do
+			if boundaryVids[entry.id] then continue end
 			local neighbors = mMesh.getVertexNeighbors(entry.id)
 			if #neighbors == 0 then continue end
 
