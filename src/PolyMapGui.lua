@@ -87,6 +87,8 @@ local function getStatusText(mode: string, settings: Settings.PolyMapSettings, s
 			return "Select at least 2 vertices, then click Collapse to merge the shortest edge."
 		end
 		return `{count} selected. Click Collapse to merge the shortest edge.`
+	elseif mode == "Relax" then
+		return "Click and drag to flatten the surface within the brush radius."
 	end
 	return ""
 end
@@ -255,6 +257,15 @@ local function ModePanel(props: {
 				LayoutOrder = 2,
 				OnClick = function()
 					props.Settings.Mode = "Simplify"
+					props.UpdatedSettings()
+				end,
+			}),
+			Relax = e(ChipForToggle, {
+				Text = "Rlx",
+				IsCurrent = current == "Relax",
+				LayoutOrder = 3,
+				OnClick = function()
+					props.Settings.Mode = "Relax"
 					props.UpdatedSettings()
 				end,
 			}),
@@ -852,6 +863,57 @@ local function SimplifyPanel(props: {
 	})
 end
 
+local function RelaxPanel(props: {
+	Settings: Settings.PolyMapSettings,
+	UpdatedSettings: () -> (),
+	LayoutOrder: number?,
+})
+	local nextOrder = createNextOrder()
+	return e(SubPanel, {
+		Title = "Relax",
+		LayoutOrder = props.LayoutOrder,
+		Padding = UDim.new(0, 4),
+	}, {
+		RadiusInput = e(HelpGui.WithHelpIcon, {
+			LayoutOrder = nextOrder(),
+			Subject = e(NumberInput, {
+				Label = "Radius",
+				Value = props.Settings.RelaxRadius,
+				Unit = " studs",
+				ValueEntered = function(newValue: number)
+					if newValue > 0 then
+						props.Settings.RelaxRadius = newValue
+						props.UpdatedSettings()
+						return newValue
+					end
+					return nil
+				end,
+			}),
+			Help = e(HelpGui.BasicTooltip, {
+				HelpRichText = "Radius of the relax brush.",
+			}),
+		}),
+		StrengthInput = e(HelpGui.WithHelpIcon, {
+			LayoutOrder = nextOrder(),
+			Subject = e(NumberInput, {
+				Label = "Strength",
+				Value = props.Settings.RelaxStrength,
+				ValueEntered = function(newValue: number)
+					if newValue >= 0 and newValue <= 1 then
+						props.Settings.RelaxStrength = newValue
+						props.UpdatedSettings()
+						return newValue
+					end
+					return nil
+				end,
+			}),
+			Help = e(HelpGui.BasicTooltip, {
+				HelpRichText = "How strongly to flatten per stroke. 1 = fully flat in one pass.",
+			}),
+		}),
+	})
+end
+
 local function CloseButton(props: {
 	HandleAction: (string) -> (),
 	LayoutOrder: number?,
@@ -905,6 +967,7 @@ local function PolyMapGui(props: {
 	local showGrid = mode == "Generate"
 	local showSubdivide = mode == "Subdivide"
 	local showSimplify = mode == "Simplify"
+	local showRelax = mode == "Relax"
 
 	return e(PluginGui, {
 		Config = POLYMAP_CONFIG,
@@ -1028,6 +1091,11 @@ local function PolyMapGui(props: {
 			}),
 			SimplifyPanel = showSimplify and e(SimplifyPanel, {
 				Session = session,
+				LayoutOrder = nextOrder(),
+			}),
+			RelaxPanel = showRelax and e(RelaxPanel, {
+				Settings = currentSettings,
+				UpdatedSettings = props.UpdatedSettings,
 				LayoutOrder = nextOrder(),
 			}),
 			SelectionActionsPanel = showSelection and e(SelectionActionsPanel, {

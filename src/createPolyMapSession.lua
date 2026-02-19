@@ -454,6 +454,13 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					end
 				end
 			end
+			if mode == "Relax" then
+				local radius = currentSettings.RelaxRadius
+				if radius > 0 then
+					mMesh.discoverRegion(worldPos, radius + 5)
+					newHoverTriangles = mMesh.findTrianglesInRadius(worldPos, radius)
+				end
+			end
 			if mode == "Add" and not mAddBoundaryEdge then
 				-- Phase 1: hover boundary edges only (no distance limit)
 				newHoverEdge = findNearestBoundaryEdge(worldPos, nil, 10000)
@@ -789,6 +796,79 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 	end
 
+	local function applyRelaxAtCursor()
+		local worldPos = getStrokeWorldPos()
+		if not worldPos then return end
+
+		local radius = currentSettings.RelaxRadius
+		local strength = currentSettings.RelaxStrength
+		if radius <= 0 or strength <= 0 then return end
+
+		mMesh.discoverRegion(worldPos, radius + 5)
+
+		-- Find all vertices within radius
+		local verticesInRadius: { { id: number, position: Vector3, dist: number } } = {}
+		for vid, vertex in mMesh.getVertices() do
+			local dist = (vertex.position - worldPos).Magnitude
+			if dist <= radius then
+				table.insert(verticesInRadius, { id = vid, position = vertex.position, dist = dist })
+			end
+		end
+		if #verticesInRadius == 0 then return end
+
+		-- Compute area-weighted average normal from triangles in the region
+		local triSet: { [number]: boolean } = {}
+		for _, entry in verticesInRadius do
+			local v = mMesh.getVertex(entry.id)
+			if v then
+				for _, triId in v.triangles do
+					triSet[triId] = true
+				end
+			end
+		end
+		local weightedNormal = Vector3.zero
+		local centroid = Vector3.zero
+		local totalWeight = 0
+		for triId in triSet do
+			local tri = mMesh.getTriangle(triId)
+			if tri then
+				local verts: { Vector3 } = {}
+				for _, vid in tri.vertices do
+					local vtx = mMesh.getVertex(vid)
+					if vtx then
+						table.insert(verts, vtx.position)
+					end
+				end
+				if #verts == 3 then
+					local e1 = verts[2] - verts[1]
+					local e2 = verts[3] - verts[1]
+					local cross = e1:Cross(e2)
+					local area = cross.Magnitude / 2
+					if area > 0.0001 then
+						weightedNormal += cross.Unit * area
+						centroid += (verts[1] + verts[2] + verts[3]) / 3 * area
+						totalWeight += area
+					end
+				end
+			end
+		end
+		if totalWeight < 0.0001 then return end
+		centroid = centroid / totalWeight
+		local normal = weightedNormal.Unit
+
+		-- Project each vertex onto the best-fit plane and lerp
+		local moves: { [number]: Vector3 } = {}
+		for _, entry in verticesInRadius do
+			local t = entry.dist / radius
+			local falloff = (1 + math.cos(t * math.pi)) / 2
+			local projected = entry.position - normal * (entry.position - centroid):Dot(normal)
+			moves[entry.id] = entry.position:Lerp(projected, strength * falloff)
+		end
+
+		mMesh.moveVertices(moves, currentSettings.Thickness, getTriangleProps())
+		changeSignal:Fire()
+	end
+
 	local function startStroke()
 		local mode = currentSettings.Mode
 		if mode == "Delete" then
@@ -796,6 +876,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			mStrokeRecording = ChangeHistoryService:TryBeginRecording("PolyMap Delete")
 		elseif mode == "Paint" then
 			mStrokeRecording = ChangeHistoryService:TryBeginRecording("PolyMap Paint")
+		elseif mode == "Relax" then
+			pushUndoSnapshot()
+			mStrokeRecording = ChangeHistoryService:TryBeginRecording("PolyMap Relax")
 		end
 		mStrokeDragging = true
 	end
@@ -806,6 +889,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			applyDeleteAtCursor()
 		elseif mode == "Paint" then
 			applyPaintAtCursor()
+		elseif mode == "Relax" then
+			applyRelaxAtCursor()
 		end
 	end
 
@@ -849,7 +934,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			handleSelectClick(result.Position, hitPart)
 		elseif mode == "Add" then
 			handleAddClick(result.Position)
-		elseif mode == "Delete" or mode == "Paint" then
+		elseif mode == "Delete" or mode == "Paint" or mode == "Relax" then
 			startStroke()
 			applyStrokeAtCursor()
 		end
@@ -1340,7 +1425,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 	session.GetOutlineTriangleIds = function(): { number }
 		local mode = currentSettings.Mode
-		if mode == "Delete" or mode == "Paint" then
+		if mode == "Delete" or mode == "Paint" or mode == "Relax" then
 			return mHoverTriangleIds
 		end
 		if mode == "Select" or mode == "Move" or mode == "Rotate" or mode == "Subdivide" or mode == "Simplify" then
