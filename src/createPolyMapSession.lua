@@ -127,8 +127,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local mStrokePlanePoint: Vector3? = nil
 	local mStrokePlaneNormal: Vector3? = nil
 
-	-- Relax: snapshot of all vertex positions at stroke start
+	-- Relax: snapshot of all vertex positions at stroke start, and per-vertex
+	-- accumulated relaxation amount (0 to 1) for progressive flattening.
 	local mRelaxSavedPositions: { [number]: Vector3 } = {}
+	local mRelaxAmounts: { [number]: number } = {}
 
 	-- Undo/redo: save selected vertex positions so selection survives rescan
 	local mUndoSelections: { { Vector3 } } = {}
@@ -874,13 +876,16 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		centroid = centroid / totalWeight
 		local normal = weightedNormal.Unit
 
-		-- Project each vertex from its saved position onto the best-fit plane
+		-- Accumulate relaxation amount per vertex and lerp from saved position
 		local moves: { [number]: Vector3 } = {}
 		for _, entry in verticesInRadius do
 			local t = entry.dist / radius
 			local falloff = (1 + math.cos(t * math.pi)) / 2
+			local amount = mRelaxAmounts[entry.id] or 0
+			amount = math.min(amount + strength * falloff, 1)
+			mRelaxAmounts[entry.id] = amount
 			local projected = entry.savedPos - normal * (entry.savedPos - centroid):Dot(normal)
-			moves[entry.id] = entry.savedPos:Lerp(projected, strength * falloff)
+			moves[entry.id] = entry.savedPos:Lerp(projected, amount)
 		end
 
 		mMesh.moveVertices(moves, currentSettings.Thickness, getTriangleProps())
@@ -897,6 +902,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		elseif mode == "Relax" then
 			pushUndoSnapshot()
 			mRelaxSavedPositions = {}
+			mRelaxAmounts = {}
 			mStrokeRecording = ChangeHistoryService:TryBeginRecording("PolyMap Relax")
 		end
 		mStrokeDragging = true
@@ -922,6 +928,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		mStrokePlanePoint = nil
 		mStrokePlaneNormal = nil
 		mRelaxSavedPositions = {}
+		mRelaxAmounts = {}
 	end
 
 	local function handleClick()
