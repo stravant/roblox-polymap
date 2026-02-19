@@ -127,6 +127,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local mStrokePlanePoint: Vector3? = nil
 	local mStrokePlaneNormal: Vector3? = nil
 
+	-- Relax: snapshot of all vertex positions at stroke start
+	local mRelaxSavedPositions: { [number]: Vector3 } = {}
+
 	-- Undo/redo: save selected vertex positions so selection survives rescan
 	local mUndoSelections: { { Vector3 } } = {}
 	local mRedoSelections: { { Vector3 } } = {}
@@ -811,17 +814,22 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 		mMesh.discoverRegion(worldPos, radius + 5)
 
-		-- Find all vertices within radius
-		local verticesInRadius: { { id: number, position: Vector3, dist: number } } = {}
+		-- Find all vertices within radius, using saved positions for stability
+		local verticesInRadius: { { id: number, savedPos: Vector3, dist: number } } = {}
 		for vid, vertex in mMesh.getVertices() do
-			local dist = (vertex.position - worldPos).Magnitude
+			-- Save position on first encounter during this stroke
+			if not mRelaxSavedPositions[vid] then
+				mRelaxSavedPositions[vid] = vertex.position
+			end
+			local savedPos = mRelaxSavedPositions[vid]
+			local dist = (savedPos - worldPos).Magnitude
 			if dist <= radius then
-				table.insert(verticesInRadius, { id = vid, position = vertex.position, dist = dist })
+				table.insert(verticesInRadius, { id = vid, savedPos = savedPos, dist = dist })
 			end
 		end
 		if #verticesInRadius == 0 then return end
 
-		-- Compute area-weighted average normal from triangles in the region
+		-- Compute area-weighted average normal from triangles using saved positions
 		local triSet: { [number]: boolean } = {}
 		for _, entry in verticesInRadius do
 			local v = mMesh.getVertex(entry.id)
@@ -839,9 +847,14 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			if tri then
 				local verts: { Vector3 } = {}
 				for _, vid in tri.vertices do
-					local vtx = mMesh.getVertex(vid)
-					if vtx then
-						table.insert(verts, vtx.position)
+					local saved = mRelaxSavedPositions[vid]
+					if saved then
+						table.insert(verts, saved)
+					else
+						local vtx = mMesh.getVertex(vid)
+						if vtx then
+							table.insert(verts, vtx.position)
+						end
 					end
 				end
 				if #verts == 3 then
@@ -861,13 +874,13 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		centroid = centroid / totalWeight
 		local normal = weightedNormal.Unit
 
-		-- Project each vertex onto the best-fit plane and lerp
+		-- Project each vertex from its saved position onto the best-fit plane
 		local moves: { [number]: Vector3 } = {}
 		for _, entry in verticesInRadius do
 			local t = entry.dist / radius
 			local falloff = (1 + math.cos(t * math.pi)) / 2
-			local projected = entry.position - normal * (entry.position - centroid):Dot(normal)
-			moves[entry.id] = entry.position:Lerp(projected, strength * falloff)
+			local projected = entry.savedPos - normal * (entry.savedPos - centroid):Dot(normal)
+			moves[entry.id] = entry.savedPos:Lerp(projected, strength * falloff)
 		end
 
 		mMesh.moveVertices(moves, currentSettings.Thickness, getTriangleProps())
@@ -883,6 +896,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			mStrokeRecording = ChangeHistoryService:TryBeginRecording("PolyMap Paint")
 		elseif mode == "Relax" then
 			pushUndoSnapshot()
+			mRelaxSavedPositions = {}
 			mStrokeRecording = ChangeHistoryService:TryBeginRecording("PolyMap Relax")
 		end
 		mStrokeDragging = true
@@ -907,6 +921,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		mStrokeDragging = false
 		mStrokePlanePoint = nil
 		mStrokePlaneNormal = nil
+		mRelaxSavedPositions = {}
 	end
 
 	local function handleClick()
