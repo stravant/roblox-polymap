@@ -32,8 +32,8 @@ local function verticesSetsMatch(set1: { Vector3 }, set2: { Vector3 }, epsilon: 
 end
 
 return function(t: TestTypes.TestContext)
-	-- With _polyTopSign attribute, getWedgeVertices extracts from the correct face
-	-- so the round-trip is accurate to floating-point precision.
+	-- The orientation heuristic picks the face whose outward normal has the
+	-- larger Y component, which is accurate for heightmap-like triangles.
 	local ROUND_TRIP_EPSILON = 0.05
 
 	t.test("round-trip: fillTriangle -> getWedgeVertices recovers original vertices", function()
@@ -42,7 +42,7 @@ return function(t: TestTypes.TestContext)
 
 		local a = Vector3.new(0, 0, 0)
 		local b = Vector3.new(4, 0, 0)
-		local c = Vector3.new(2, 3, 0)
+		local c = Vector3.new(2, 0, 3)
 		local parts = fillTriangle(a, b, c, 0.2, folder)
 
 		-- Collect all vertices from all wedge parts

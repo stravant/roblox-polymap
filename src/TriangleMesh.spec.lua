@@ -13,7 +13,7 @@ return function(t: TestTypes.TestContext)
 		local triId = mesh.addTriangle(
 			Vector3.new(0, 0, 0),
 			Vector3.new(4, 0, 0),
-			Vector3.new(2, 3, 0),
+			Vector3.new(2, 0, 3),
 			0.2, folder
 		)
 
@@ -51,13 +51,13 @@ return function(t: TestTypes.TestContext)
 		mesh.addTriangle(
 			Vector3.new(0, 0, 0),
 			Vector3.new(4, 0, 0),
-			Vector3.new(2, 3, 0),
+			Vector3.new(2, 0, 3),
 			0.2, folder
 		)
 		mesh.addTriangle(
 			Vector3.new(0, 0, 0),
 			Vector3.new(4, 0, 0),
-			Vector3.new(2, -3, 0),
+			Vector3.new(2, 0, -3),
 			0.2, folder
 		)
 
@@ -86,7 +86,7 @@ return function(t: TestTypes.TestContext)
 		mesh.addTriangle(
 			Vector3.new(0, 0, 0),
 			Vector3.new(4, 0, 0),
-			Vector3.new(2, 3, 0),
+			Vector3.new(2, 0, 3),
 			0.2, folder
 		)
 
@@ -98,7 +98,7 @@ return function(t: TestTypes.TestContext)
 		mesh.addTriangle(
 			Vector3.new(0, 0, 0),
 			Vector3.new(4, 0, 0),
-			Vector3.new(2, -3, 0),
+			Vector3.new(2, 0, -3),
 			0.2, folder
 		)
 
@@ -117,7 +117,7 @@ return function(t: TestTypes.TestContext)
 		local triId = mesh.addTriangle(
 			Vector3.new(0, 0, 0),
 			Vector3.new(4, 0, 0),
-			Vector3.new(2, 3, 0),
+			Vector3.new(2, 0, 3),
 			0.2, folder
 		)
 		assert(triId)
@@ -147,13 +147,13 @@ return function(t: TestTypes.TestContext)
 		local tri1 = mesh.addTriangle(
 			Vector3.new(0, 0, 0),
 			Vector3.new(4, 0, 0),
-			Vector3.new(2, 3, 0),
+			Vector3.new(2, 0, 3),
 			0.2, folder
 		)
 		mesh.addTriangle(
 			Vector3.new(0, 0, 0),
 			Vector3.new(4, 0, 0),
-			Vector3.new(2, -3, 0),
+			Vector3.new(2, 0, -3),
 			0.2, folder
 		)
 		assert(tri1)
@@ -178,7 +178,7 @@ return function(t: TestTypes.TestContext)
 		mesh.addTriangle(
 			Vector3.new(0, 0, 0),
 			Vector3.new(4, 0, 0),
-			Vector3.new(2, 3, 0),
+			Vector3.new(2, 0, 3),
 			0.2, folder
 		)
 
@@ -201,7 +201,7 @@ return function(t: TestTypes.TestContext)
 		mesh.addTriangle(
 			Vector3.new(0, 0, 0),
 			Vector3.new(4, 0, 0),
-			Vector3.new(2, 3, 0),
+			Vector3.new(2, 0, 3),
 			0.2, folder
 		)
 
@@ -223,7 +223,7 @@ return function(t: TestTypes.TestContext)
 		-- Create a triangle manually
 		local a = Vector3.new(10, 10, 0)
 		local b = Vector3.new(14, 10, 0)
-		local c = Vector3.new(12, 13, 0)
+		local c = Vector3.new(12, 10, 3)
 		fillTriangle(a, b, c, 0.2, folder)
 
 		mesh.scanWorkspace(folder)
@@ -253,7 +253,7 @@ return function(t: TestTypes.TestContext)
 		local triId = mesh.addTriangle(
 			Vector3.new(0, 0, 0),
 			Vector3.new(4, 0, 0),
-			Vector3.new(2, 3, 0),
+			Vector3.new(2, 0, 3),
 			0.2, folder
 		)
 		assert(triId)
@@ -282,20 +282,20 @@ return function(t: TestTypes.TestContext)
 		mesh.addTriangle(
 			Vector3.new(0, 0, 0),
 			Vector3.new(4, 0, 0),
-			Vector3.new(2, 3, 0),
+			Vector3.new(2, 0, 3),
 			0.2, folder
 		)
 
-		local vid = mesh.findVertexNear(Vector3.new(2, 3, 0), 0.1)
+		local vid = mesh.findVertexNear(Vector3.new(2, 0, 3), 0.1)
 		t.expect(vid).toBeTruthy()
 		assert(vid)
 
-		mesh.moveVertex(vid, Vector3.new(2, 5, 0), 0.2)
+		mesh.moveVertex(vid, Vector3.new(2, 0, 5), 0.2)
 
 		local vertex = mesh.getVertex(vid)
 		t.expect(vertex).toBeTruthy()
 		assert(vertex)
-		t.expect((vertex.position - Vector3.new(2, 5, 0)).Magnitude < 0.02).toBeTruthy()
+		t.expect((vertex.position - Vector3.new(2, 0, 5)).Magnitude < 0.02).toBeTruthy()
 
 		-- Should still have 1 triangle
 		local triCount = 0
@@ -315,7 +315,7 @@ return function(t: TestTypes.TestContext)
 		local triId = mesh.addTriangle(
 			Vector3.new(0, 0, 0),
 			Vector3.new(4, 0, 0),
-			Vector3.new(2, 3, 0),
+			Vector3.new(2, 0, 3),
 			0.2, folder
 		)
 		assert(triId)
@@ -325,10 +325,10 @@ return function(t: TestTypes.TestContext)
 		assert(triBefore)
 		local partsBefore = table.clone(triBefore.parts)
 
-		local vid = mesh.findVertexNear(Vector3.new(2, 3, 0), 0.1)
+		local vid = mesh.findVertexNear(Vector3.new(2, 0, 3), 0.1)
 		assert(vid)
 
-		mesh.moveVertex(vid, Vector3.new(2, 5, 0), 0.2)
+		mesh.moveVertex(vid, Vector3.new(2, 0, 5), 0.2)
 
 		-- Triangle should still exist with same ID (edit-in-place)
 		local triAfter = mesh.getTriangle(triId)
@@ -354,7 +354,7 @@ return function(t: TestTypes.TestContext)
 		-- Create a triangle via fillTriangle (produces 1-2 wedge parts)
 		local a = Vector3.new(20, 10, 0)
 		local b = Vector3.new(24, 10, 0)
-		local c = Vector3.new(22, 13, 0)
+		local c = Vector3.new(22, 10, 3)
 		local parts = fillTriangle(a, b, c, 0.2, folder)
 		t.expect(#parts > 0).toBeTruthy()
 
@@ -391,7 +391,7 @@ return function(t: TestTypes.TestContext)
 		local parts = fillTriangle(
 			Vector3.new(30, 10, 0),
 			Vector3.new(34, 10, 0),
-			Vector3.new(32, 13, 0),
+			Vector3.new(32, 10, 3),
 			0.2, folder
 		)
 
@@ -407,22 +407,22 @@ return function(t: TestTypes.TestContext)
 		local folder = Instance.new("Folder")
 		folder.Parent = workspace
 
-		-- Create two separate triangles near each other
+		-- Create two separate triangles near each other (far from other tests)
 		fillTriangle(
-			Vector3.new(40, 10, 0),
-			Vector3.new(44, 10, 0),
-			Vector3.new(42, 13, 0),
+			Vector3.new(200, 10, 0),
+			Vector3.new(204, 10, 0),
+			Vector3.new(202, 10, 3),
 			0.2, folder
 		)
 		fillTriangle(
-			Vector3.new(40, 10, 0),
-			Vector3.new(44, 10, 0),
-			Vector3.new(42, 7, 0),
+			Vector3.new(200, 10, 0),
+			Vector3.new(204, 10, 0),
+			Vector3.new(202, 10, -3),
 			0.2, folder
 		)
 
 		-- Discover the region covering both
-		mesh.discoverRegion(Vector3.new(42, 10, 0), 20)
+		mesh.discoverRegion(Vector3.new(202, 10, 0), 20)
 
 		local triCount = 0
 		for _ in mesh.getTriangles() do
@@ -441,7 +441,7 @@ return function(t: TestTypes.TestContext)
 		local parts = fillTriangle(
 			Vector3.new(50, 10, 0),
 			Vector3.new(54, 10, 0),
-			Vector3.new(52, 13, 0),
+			Vector3.new(52, 10, 3),
 			0.2, folder
 		)
 

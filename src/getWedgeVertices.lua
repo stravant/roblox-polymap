@@ -25,37 +25,27 @@ local function getWedgeVertices(wedge: BasePart): (Vector3, Vector3, Vector3)
 	local halfZ = size.Z / 2
 
 	-- Identify the thin axis (the thickness/depth direction).
-	-- fillTriangle always puts depth in Size.X, so when _polyTopSign is
-	-- present we can trust that. For foreign parts we fall back to the
-	-- smallest-dimension heuristic.
-	local polyTopSign: number? = wedge:GetAttribute("_polyTopSign")
+	-- For heightmap terrain the depth axis points roughly vertical, so we
+	-- pick the local axis with the largest absolute Y component. This works
+	-- for both PolyMap parts (depth always in Size.X) and foreign parts
+	-- (e.g. GapFill), and avoids the sliver problem where the smallest
+	-- dimension isn't the depth.
+	local absRY = math.abs(cf.RightVector.Y)
+	local absUY = math.abs(cf.UpVector.Y)
+	local absLY = math.abs(cf.LookVector.Y)
 
 	local minAxis: string
-	if polyTopSign then
-		-- fillTriangle part: depth is always Size.X regardless of sliver geometry
+	local topSign: number
+	if absRY >= absUY and absRY >= absLY then
 		minAxis = "X"
-	elseif size.X <= size.Y and size.X <= size.Z then
-		minAxis = "X"
-	elseif size.Y <= size.X and size.Y <= size.Z then
+		topSign = if cf.RightVector.Y >= 0 then 1 else -1
+	elseif absUY >= absRY and absUY >= absLY then
 		minAxis = "Y"
+		topSign = if cf.UpVector.Y >= 0 then 1 else -1
 	else
 		minAxis = "Z"
-	end
-
-	-- Determine which face of the thin axis to extract vertices from.
-	-- _polyTopSign stores the exact sign; for foreign parts infer it
-	-- from orientation (fillTriangle orients thickness upward).
-	local topSign: number = polyTopSign or 0
-	if topSign == 0 then
-		local axisDir: Vector3
-		if minAxis == "X" then
-			axisDir = cf.RightVector
-		elseif minAxis == "Y" then
-			axisDir = cf.UpVector
-		else
-			axisDir = -cf.LookVector
-		end
-		topSign = if axisDir.Y >= 0 then 1 else -1
+		-- LookVector points along -Z, so negate
+		topSign = if -cf.LookVector.Y >= 0 then 1 else -1
 	end
 
 	local v1, v2, v3: Vector3
