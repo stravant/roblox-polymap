@@ -21,6 +21,8 @@ local createTriangleMesh = require("./TriangleMesh")
 local fillTriangle = require("./fillTriangle")
 local generateGrid = require("./generateGrid")
 
+local kSpherecastRadius = 2
+
 local function mouseRaycast(): RaycastResult?
 	local mouseLocation = UserInputService:GetMouseLocation()
 	local camera = workspace.CurrentCamera
@@ -32,6 +34,24 @@ local function mouseRaycast(): RaycastResult?
 	params.FilterType = Enum.RaycastFilterType.Exclude
 	params.FilterDescendantsInstances = {}
 	return workspace:Raycast(ray.Origin, ray.Direction * 10000, params)
+end
+
+-- Raycast with a spherecast fallback for modes that want loose targeting
+local function mouseRaycastLoose(): RaycastResult?
+	local mouseLocation = UserInputService:GetMouseLocation()
+	local camera = workspace.CurrentCamera
+	if not camera then
+		return nil
+	end
+	local ray = camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = {}
+	local result = workspace:Raycast(ray.Origin, ray.Direction * 10000, params)
+	if result then
+		return result
+	end
+	return workspace:Spherecast(ray.Origin, kSpherecastRadius, ray.Direction * 10000, params)
 end
 
 local function createCFrameDraggerSchema(isEmptyFunc, getBoundingBoxFunc)
@@ -394,7 +414,11 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			return
 		end
 
-		local result = mouseRaycast()
+		-- Use loose targeting (spherecast fallback) for selection/add modes
+		local mode = currentSettings.Mode
+		local useLoose = mode == "Select" or mode == "Move" or mode == "Rotate"
+			or mode == "Subdivide" or mode == "Simplify" or mode == "Add"
+		local result = if useLoose then mouseRaycastLoose() else mouseRaycast()
 		local newHoverVertex: number? = nil
 		local newHoverEdge: string? = nil
 		local newHoverTriangles: { number } = {}
@@ -426,7 +450,6 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 
 		if worldPos then
-			local mode = currentSettings.Mode
 			if mode == "Select" or mode == "Move" or mode == "Rotate" or mode == "Subdivide" or mode == "Simplify" then
 				newHoverVertex = findNearestVertex(worldPos, hitTriangleId)
 			end
@@ -993,9 +1016,12 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			return
 		end
 
-		local result = mouseRaycast()
+		-- Use loose targeting (spherecast fallback) for selection/add modes
+		local mode = currentSettings.Mode
+		local useLoose = mode == "Select" or mode == "Move" or mode == "Rotate"
+			or mode == "Subdivide" or mode == "Simplify" or mode == "Add"
+		local result = if useLoose then mouseRaycastLoose() else mouseRaycast()
 		if not result then
-			local mode = currentSettings.Mode
 			if (mode == "Select" or mode == "Move" or mode == "Rotate" or mode == "Subdivide" or mode == "Simplify") and not isShiftHeld() then
 				mSelectedVertices = {}
 				changeSignal:Fire()
@@ -1012,7 +1038,6 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			return
 		end
 
-		local mode = currentSettings.Mode
 		local hitPart = if result.Instance:IsA("BasePart") then result.Instance :: BasePart else nil
 
 		-- Eyedropper intercept: sample color+material from clicked part
