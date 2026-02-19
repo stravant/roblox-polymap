@@ -904,62 +904,30 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 		if #verticesInRadius == 0 then return end
 
-		-- For each vertex: compute Laplacian from current positions,
-		-- project onto local normal, apply incrementally each frame
+		-- Incremental Y-only Laplacian: move each vertex's Y toward
+		-- the average Y of its neighbors, leaving XZ untouched.
 		local moves: { [number]: Vector3 } = {}
 		for _, entry in verticesInRadius do
-			local v = mMesh.getVertex(entry.id)
-			if not v then continue end
-
-			-- Compute area-weighted average normal from adjacent triangles
-			local localNormal = Vector3.zero
-			for _, triId in v.triangles do
-				local tri = mMesh.getTriangle(triId)
-				if tri then
-					local verts: { Vector3 } = {}
-					for _, vid in tri.vertices do
-						local vtx = mMesh.getVertex(vid)
-						if vtx then
-							table.insert(verts, vtx.position)
-						end
-					end
-					if #verts == 3 then
-						local e1 = verts[2] - verts[1]
-						local e2 = verts[3] - verts[1]
-						local cross = e1:Cross(e2)
-						local area = cross.Magnitude / 2
-						if area > 0.0001 then
-							localNormal += cross.Unit * area
-						end
-					end
-				end
-			end
-			if localNormal.Magnitude < 0.0001 then continue end
-			localNormal = localNormal.Unit
-
-			-- Laplacian: average of neighbor positions minus this vertex
 			local neighbors = mMesh.getVertexNeighbors(entry.id)
 			if #neighbors == 0 then continue end
-			local avgPos = Vector3.zero
+
+			local avgY = 0
 			local nCount = 0
 			for _, nid in neighbors do
 				local nv = mMesh.getVertex(nid)
 				if nv then
-					avgPos += nv.position
+					avgY += nv.position.Y
 					nCount += 1
 				end
 			end
 			if nCount == 0 then continue end
-			avgPos /= nCount
-			local laplacian = avgPos - entry.pos
-
-			-- Project Laplacian onto local normal — normal-only displacement
-			local normalDisp = localNormal * laplacian:Dot(localNormal)
+			avgY /= nCount
 
 			local t = entry.dist / radius
 			local falloff = (1 + math.cos(t * math.pi)) / 2
+			local deltaY = (avgY - entry.pos.Y) * strength * falloff
 
-			moves[entry.id] = entry.pos + normalDisp * strength * falloff
+			moves[entry.id] = Vector3.new(entry.pos.X, entry.pos.Y + deltaY, entry.pos.Z)
 		end
 
 		mMesh.moveVertices(moves, currentSettings.Thickness, getTriangleProps())
