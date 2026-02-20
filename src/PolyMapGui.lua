@@ -338,34 +338,39 @@ local function GridPanel(props: {
 		LayoutOrder = props.LayoutOrder,
 		Padding = UDim.new(0, 4),
 	}, {
-		TypeRow = e("Frame", {
-			Size = UDim2.fromScale(1, 0),
-			AutomaticSize = Enum.AutomaticSize.Y,
-			BackgroundTransparency = 1,
+		TypeRow = e(HelpGui.WithHelpIcon, {
 			LayoutOrder = nextOrder(),
-		}, {
-			ListLayout = e("UIListLayout", {
-				FillDirection = Enum.FillDirection.Horizontal,
-				SortOrder = Enum.SortOrder.LayoutOrder,
-				Padding = UDim.new(0, 4),
+			Subject = e("Frame", {
+				Size = UDim2.fromScale(1, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
+				BackgroundTransparency = 1,
+			}, {
+				ListLayout = e("UIListLayout", {
+					FillDirection = Enum.FillDirection.Horizontal,
+					SortOrder = Enum.SortOrder.LayoutOrder,
+					Padding = UDim.new(0, 4),
+				}),
+				Square = e(ChipForToggle, {
+					Text = "Square",
+					IsCurrent = currentType == "Square",
+					LayoutOrder = 1,
+					OnClick = function()
+						props.Settings.GridType = "Square"
+						props.UpdatedSettings()
+					end,
+				}),
+				Triangular = e(ChipForToggle, {
+					Text = "Triangular",
+					IsCurrent = currentType == "Triangular",
+					LayoutOrder = 2,
+					OnClick = function()
+						props.Settings.GridType = "Triangular"
+						props.UpdatedSettings()
+					end,
+				}),
 			}),
-			Square = e(ChipForToggle, {
-				Text = "Square",
-				IsCurrent = currentType == "Square",
-				LayoutOrder = 1,
-				OnClick = function()
-					props.Settings.GridType = "Square"
-					props.UpdatedSettings()
-				end,
-			}),
-			Triangular = e(ChipForToggle, {
-				Text = "Triangular",
-				IsCurrent = currentType == "Triangular",
-				LayoutOrder = 2,
-				OnClick = function()
-					props.Settings.GridType = "Triangular"
-					props.UpdatedSettings()
-				end,
+			Help = e(HelpGui.BasicTooltip, {
+				HelpRichText = "Square: 2 tris per cell. Triangular: equilateral triangle grid.",
 			}),
 		}),
 		Width = e(NumberInput, {
@@ -394,19 +399,24 @@ local function GridPanel(props: {
 				return nil
 			end,
 		}),
-		Spacing = e(NumberInput, {
-			Label = "Spacing",
-			Value = props.Settings.GridSpacing,
-			Unit = " studs",
+		Spacing = e(HelpGui.WithHelpIcon, {
 			LayoutOrder = nextOrder(),
-			ValueEntered = function(newValue: number)
-				if newValue > 0 then
-					props.Settings.GridSpacing = newValue
-					props.UpdatedSettings()
-					return newValue
-				end
-				return nil
-			end,
+			Subject = e(NumberInput, {
+				Label = "Spacing",
+				Value = props.Settings.GridSpacing,
+				Unit = " studs",
+				ValueEntered = function(newValue: number)
+					if newValue > 0 then
+						props.Settings.GridSpacing = newValue
+						props.UpdatedSettings()
+						return newValue
+					end
+					return nil
+				end,
+			}),
+			Help = e(HelpGui.BasicTooltip, {
+				HelpRichText = "Distance between grid vertices in studs.",
+			}),
 		}),
 		GenerateButton = e(OperationButton, {
 			Text = "Generate",
@@ -523,19 +533,24 @@ local function ImportPanel(props: {
 				return nil
 			end,
 		}),
-		HeightScale = e(NumberInput, {
-			Label = "Height",
-			Value = props.Settings.ImportHeightScale,
-			Unit = " studs",
+		HeightScale = e(HelpGui.WithHelpIcon, {
 			LayoutOrder = nextOrder(),
-			ValueEntered = function(newValue: number)
-				if newValue >= 0 then
-					props.Settings.ImportHeightScale = newValue
-					props.UpdatedSettings()
-					return newValue
-				end
-				return nil
-			end,
+			Subject = e(NumberInput, {
+				Label = "Height",
+				Value = props.Settings.ImportHeightScale,
+				Unit = " studs",
+				ValueEntered = function(newValue: number)
+					if newValue >= 0 then
+						props.Settings.ImportHeightScale = newValue
+						props.UpdatedSettings()
+						return newValue
+					end
+					return nil
+				end,
+			}),
+			Help = e(HelpGui.BasicTooltip, {
+				HelpRichText = "Maximum vertex height. Pixel brightness maps to height: white = full height, black = 0.",
+			}),
 		}),
 		ImportButton = (function()
 			local session = props.Session
