@@ -16,7 +16,7 @@ export type ImportParams = {
 	OnProgress: ((fraction: number) -> ())?,
 }
 
-local kYieldInterval = 50 -- yield every N rows of triangles
+local kYieldInterval = 5 -- yield every N rows of triangles
 
 local function importHeightmap(params: ImportParams)
 	local imageId = params.ImageId
