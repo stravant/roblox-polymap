@@ -16,7 +16,7 @@ export type ImportParams = {
 	OnProgress: ((fraction: number) -> ())?,
 }
 
-local kYieldInterval = 5 -- yield every N rows of triangles
+local kYieldCellInterval = 200 -- yield every N cells (2 triangles each)
 
 local function importHeightmap(params: ImportParams)
 	local imageId = params.ImageId
@@ -78,6 +78,9 @@ local function importHeightmap(params: ImportParams)
 	end
 
 	-- Each cell produces 2 triangles, colored by averaging vertex colors
+	local totalCells = rows * cols
+	local cellsDone = 0
+	local cellsSinceYield = 0
 	for r = 1, rows do
 		for c = 1, cols do
 			local tl = vertices[r][c]
@@ -107,14 +110,16 @@ local function importHeightmap(params: ImportParams)
 				Color = Color3.new(r2, g2, b2),
 			}
 			fillTriangle(tr, br, bl, thickness, parent, props2)
-		end
 
-		-- Yield periodically to avoid hanging and report progress
-		if r % kYieldInterval == 0 then
-			if onProgress then
-				onProgress(r / rows)
+			cellsDone += 1
+			cellsSinceYield += 1
+			if cellsSinceYield >= kYieldCellInterval then
+				cellsSinceYield = 0
+				if onProgress then
+					onProgress(cellsDone / totalCells)
+				end
+				task.wait()
 			end
-			task.wait()
 		end
 	end
 
