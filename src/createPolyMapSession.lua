@@ -51,7 +51,7 @@ local function mouseRaycastLoose(): RaycastResult?
 	if result then
 		return result
 	end
-	return workspace:Spherecast(ray.Origin, kSpherecastRadius, ray.Direction * 10000, params)
+	return workspace:Spherecast(ray.Origin, kSpherecastRadius, ray.Direction * 1000, params)
 end
 
 local function createCFrameDraggerSchema(isEmptyFunc, getBoundingBoxFunc)
