@@ -92,6 +92,8 @@ local function getStatusText(mode: string, settings: Settings.PolyMapSettings, s
 		return "Click on triangles to apply color and material."
 	elseif mode == "Generate" then
 		return "Configure grid settings and click Generate."
+	elseif mode == "Import" then
+		return "Enter an image asset ID, configure settings, and click Import."
 	elseif mode == "Subdivide" then
 		if count == 0 then
 			return "Select vertices, then click Subdivide to split each triangle into 4."
@@ -247,6 +249,15 @@ local function ModePanel(props: {
 					props.UpdatedSettings()
 				end,
 			}),
+			Import = e(ChipForToggle, {
+				Text = "Imp",
+				IsCurrent = current == "Import",
+				LayoutOrder = 5,
+				OnClick = function()
+					props.Settings.Mode = "Import"
+					props.UpdatedSettings()
+				end,
+			}),
 		}),
 		Row3 = e("Frame", {
 			Size = UDim2.fromScale(1, 0),
@@ -392,6 +403,135 @@ local function GridPanel(props: {
 			OnClick = function()
 				if props.Session then
 					props.Session.GenerateGrid()
+				end
+			end,
+		}),
+	})
+end
+
+local function ImportPanel(props: {
+	Settings: Settings.PolyMapSettings,
+	UpdatedSettings: () -> (),
+	Session: createPolyMapSession.PolyMapSession?,
+	LayoutOrder: number?,
+})
+	local nextOrder = createNextOrder()
+	return e(SubPanel, {
+		Title = "Import Heightmap",
+		LayoutOrder = props.LayoutOrder,
+		Padding = UDim.new(0, 4),
+	}, {
+		ImageIdRow = e("Frame", {
+			Size = UDim2.new(1, 0, 0, 22),
+			BackgroundTransparency = 1,
+			LayoutOrder = nextOrder(),
+		}, {
+			ListLayout = e("UIListLayout", {
+				FillDirection = Enum.FillDirection.Horizontal,
+				SortOrder = Enum.SortOrder.LayoutOrder,
+				Padding = UDim.new(0, 4),
+				VerticalAlignment = Enum.VerticalAlignment.Center,
+			}),
+			Label = e("TextLabel", {
+				Size = UDim2.new(0, 60, 1, 0),
+				BackgroundTransparency = 1,
+				Font = Enum.Font.SourceSans,
+				TextSize = 18,
+				TextColor3 = Colors.WHITE,
+				Text = "Image ID",
+				TextXAlignment = Enum.TextXAlignment.Left,
+				LayoutOrder = 1,
+			}),
+			TextBox = e("TextBox", {
+				Size = UDim2.new(1, -64, 1, 0),
+				BackgroundColor3 = Colors.GREY,
+				BorderSizePixel = 0,
+				Font = Enum.Font.SourceSans,
+				TextSize = 18,
+				TextColor3 = Colors.WHITE,
+				PlaceholderText = "Asset ID...",
+				PlaceholderColor3 = Color3.fromRGB(128, 128, 128),
+				Text = props.Settings.ImportImageId,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				ClearTextOnFocus = false,
+				LayoutOrder = 2,
+				[React.Event.FocusLost] = function(rbx: TextBox)
+					props.Settings.ImportImageId = rbx.Text
+					props.UpdatedSettings()
+				end,
+			}, {
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(0, 4),
+				}),
+				Padding = e("UIPadding", {
+					PaddingLeft = UDim.new(0, 4),
+					PaddingRight = UDim.new(0, 4),
+				}),
+			}),
+		}),
+		Width = e(NumberInput, {
+			Label = "Width",
+			Value = props.Settings.ImportWidth,
+			LayoutOrder = nextOrder(),
+			ValueEntered = function(newValue: number)
+				if newValue >= 1 and newValue == math.floor(newValue) then
+					props.Settings.ImportWidth = newValue
+					props.UpdatedSettings()
+					return newValue
+				end
+				return nil
+			end,
+		}),
+		Height = e(NumberInput, {
+			Label = "Height",
+			Value = props.Settings.ImportHeight,
+			LayoutOrder = nextOrder(),
+			ValueEntered = function(newValue: number)
+				if newValue >= 1 and newValue == math.floor(newValue) then
+					props.Settings.ImportHeight = newValue
+					props.UpdatedSettings()
+					return newValue
+				end
+				return nil
+			end,
+		}),
+		Spacing = e(NumberInput, {
+			Label = "Spacing",
+			Value = props.Settings.ImportSpacing,
+			Unit = " studs",
+			LayoutOrder = nextOrder(),
+			ValueEntered = function(newValue: number)
+				if newValue > 0 then
+					props.Settings.ImportSpacing = newValue
+					props.UpdatedSettings()
+					return newValue
+				end
+				return nil
+			end,
+		}),
+		HeightScale = e(NumberInput, {
+			Label = "Height",
+			Value = props.Settings.ImportHeightScale,
+			Unit = " studs",
+			LayoutOrder = nextOrder(),
+			ValueEntered = function(newValue: number)
+				if newValue >= 0 then
+					props.Settings.ImportHeightScale = newValue
+					props.UpdatedSettings()
+					return newValue
+				end
+				return nil
+			end,
+		}),
+		ImportButton = e(OperationButton, {
+			Text = "Import",
+			Color = Colors.ACTION_BLUE,
+			Disabled = props.Session == nil or props.Settings.ImportImageId == "",
+			Height = 30,
+			LayoutOrder = nextOrder(),
+			OnClick = function()
+				if props.Session then
+					props.Session.ImportHeightmap()
 				end
 			end,
 		}),
@@ -1053,6 +1193,7 @@ local function PolyMapGui(props: {
 	local showDelete = mode == "Delete"
 	local showPaint = mode == "Paint"
 	local showGrid = mode == "Generate"
+	local showImport = mode == "Import"
 	local showSubdivide = mode == "Subdivide"
 	local showSimplify = mode == "Simplify"
 	local showRelax = mode == "Relax"
@@ -1149,6 +1290,12 @@ local function PolyMapGui(props: {
 				LayoutOrder = nextOrder(),
 			}),
 			GridPanel = showGrid and e(GridPanel, {
+				Settings = currentSettings,
+				UpdatedSettings = props.UpdatedSettings,
+				Session = session,
+				LayoutOrder = nextOrder(),
+			}),
+			ImportPanel = showImport and e(ImportPanel, {
 				Settings = currentSettings,
 				UpdatedSettings = props.UpdatedSettings,
 				Session = session,

@@ -20,6 +20,7 @@ local Settings = require("./Settings")
 local createTriangleMesh = require("./TriangleMesh")
 local fillTriangle = require("./fillTriangle")
 local generateGrid = require("./generateGrid")
+local importHeightmap = require("./importHeightmap")
 
 local kSpherecastRadius = 2
 
@@ -1633,6 +1634,45 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		-- Discover the generated grid parts instead of full rescan
 		local gridExtent = math.max(currentSettings.GridWidth, currentSettings.GridHeight)
 			* currentSettings.GridSpacing / 2 + currentSettings.GridSpacing
+		mMesh.discoverRegion(origin.Position, gridExtent)
+		changeSignal:Fire()
+	end
+	session.ImportHeightmap = function()
+		local camera = workspace.CurrentCamera
+		local origin = CFrame.identity
+		if camera then
+			local look = camera.CFrame.LookVector
+			local flatLook = Vector3.new(look.X, 0, look.Z)
+			if flatLook.Magnitude > 0.01 then
+				flatLook = flatLook.Unit
+			else
+				flatLook = Vector3.zAxis
+			end
+			local pos = camera.CFrame.Position + flatLook * 20
+			pos = Vector3.new(pos.X, 0, pos.Z)
+			origin = CFrame.new(pos)
+		end
+
+		pushUndoSnapshot()
+		local recording = ChangeHistoryService:TryBeginRecording("PolyMap Import Heightmap")
+
+		importHeightmap({
+			ImageId = currentSettings.ImportImageId,
+			Width = currentSettings.ImportWidth,
+			Height = currentSettings.ImportHeight,
+			Spacing = currentSettings.ImportSpacing,
+			HeightScale = currentSettings.ImportHeightScale,
+			Origin = origin,
+			Thickness = currentSettings.Thickness,
+			Parent = workspace.Terrain,
+		})
+
+		if recording then
+			ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+		end
+
+		local gridExtent = math.max(currentSettings.ImportWidth, currentSettings.ImportHeight)
+			* currentSettings.ImportSpacing / 2 + currentSettings.ImportSpacing
 		mMesh.discoverRegion(origin.Position, gridExtent)
 		changeSignal:Fire()
 	end

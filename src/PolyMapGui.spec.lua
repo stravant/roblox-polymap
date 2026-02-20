@@ -13,7 +13,7 @@ local TestTypes = require("./TestTypes")
 
 local e = React.createElement
 
-local ALL_MODES = { "Select", "Move", "Rotate", "Add", "Delete", "Paint", "Generate", "Subdivide", "Simplify", "Relax", "Flatten" }
+local ALL_MODES = { "Select", "Move", "Rotate", "Add", "Delete", "Paint", "Generate", "Import", "Subdivide", "Simplify", "Relax", "Flatten" }
 
 local function makeSettings(mode: string): Settings.PolyMapSettings
 	return {
@@ -42,6 +42,11 @@ local function makeSettings(mode: string): Settings.PolyMapSettings
 		RelaxStrength = 0.5,
 		FlattenRadius = 5,
 		FlattenStrength = 0.5,
+		ImportImageId = "",
+		ImportWidth = 50,
+		ImportHeight = 50,
+		ImportSpacing = 4,
+		ImportHeightScale = 50,
 	}
 end
 

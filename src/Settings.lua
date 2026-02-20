@@ -25,6 +25,11 @@ export type PolyMapSettings = PluginGuiTypes.PluginGuiSettings & {
 	RelaxStrength: number,
 	FlattenRadius: number,
 	FlattenStrength: number,
+	ImportImageId: string,
+	ImportWidth: number,
+	ImportHeight: number,
+	ImportSpacing: number,
+	ImportHeightScale: number,
 }
 
 local function loadSettings(plugin: Plugin): PolyMapSettings
@@ -61,6 +66,11 @@ local function loadSettings(plugin: Plugin): PolyMapSettings
 		RelaxStrength = raw.RelaxStrength or 0.5,
 		FlattenRadius = raw.FlattenRadius or 5,
 		FlattenStrength = raw.FlattenStrength or 0.5,
+		ImportImageId = raw.ImportImageId or "",
+		ImportWidth = raw.ImportWidth or 50,
+		ImportHeight = raw.ImportHeight or 50,
+		ImportSpacing = raw.ImportSpacing or 4,
+		ImportHeightScale = raw.ImportHeightScale or 50,
 	}
 end
 
@@ -92,6 +102,11 @@ local function saveSettings(plugin: Plugin, settings: PolyMapSettings)
 		RelaxStrength = settings.RelaxStrength,
 		FlattenRadius = settings.FlattenRadius,
 		FlattenStrength = settings.FlattenStrength,
+		ImportImageId = settings.ImportImageId,
+		ImportWidth = settings.ImportWidth,
+		ImportHeight = settings.ImportHeight,
+		ImportSpacing = settings.ImportSpacing,
+		ImportHeightScale = settings.ImportHeightScale,
 	})
 end
 
