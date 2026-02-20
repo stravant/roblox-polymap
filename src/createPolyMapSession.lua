@@ -148,6 +148,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local mStrokePlanePoint: Vector3? = nil
 	local mStrokePlaneNormal: Vector3? = nil
 
+	-- Paint: original colors at stroke start so partial strength applies correctly.
+	local mPaintOriginalColors: { [BasePart]: Color3 } = {}
+
 	-- Brush tools (Flatten/Relax): snapshot of vertex positions at stroke start,
 	-- and per-vertex accumulated amount (0 to 1) for progressive application.
 	local mBrushSavedPositions: { [number]: Vector3 } = {}
@@ -830,7 +833,11 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				if paintStrength >= 1.0 then
 					part.Color = color
 				else
-					part.Color = part.Color:Lerp(color, paintStrength)
+					-- Save original color on first touch so strength applies correctly
+					if not mPaintOriginalColors[part] then
+						mPaintOriginalColors[part] = part.Color
+					end
+					part.Color = mPaintOriginalColors[part]:Lerp(color, paintStrength)
 				end
 				if mat then
 					part.Material = mat
@@ -1011,6 +1018,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		mStrokeDragging = false
 		mStrokePlanePoint = nil
 		mStrokePlaneNormal = nil
+		mPaintOriginalColors = {}
 		mBrushSavedPositions = {}
 		mBrushAmounts = {}
 	end
