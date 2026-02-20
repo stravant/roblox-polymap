@@ -523,18 +523,54 @@ local function ImportPanel(props: {
 				return nil
 			end,
 		}),
-		ImportButton = e(OperationButton, {
-			Text = "Import",
-			Color = Colors.ACTION_BLUE,
-			Disabled = props.Session == nil or props.Settings.ImportImageId == "",
-			Height = 30,
-			LayoutOrder = nextOrder(),
-			OnClick = function()
-				if props.Session then
-					props.Session.ImportHeightmap()
-				end
-			end,
-		}),
+		ImportButton = (function()
+			local session = props.Session
+			local progress = if session then session.GetImportProgress() else nil
+			local importing = progress ~= nil
+			local buttonOrder = nextOrder()
+			if importing then
+				local pct = math.floor((progress :: number) * 100)
+				return e("Frame", {
+					Size = UDim2.new(1, 0, 0, 30),
+					BackgroundColor3 = Colors.GREY,
+					LayoutOrder = buttonOrder,
+				}, {
+					Corner = e("UICorner", {
+						CornerRadius = UDim.new(0, 4),
+					}),
+					Fill = e("Frame", {
+						Size = UDim2.new(progress :: number, 0, 1, 0),
+						BackgroundColor3 = Colors.ACTION_BLUE,
+						BorderSizePixel = 0,
+					}, {
+						Corner = e("UICorner", {
+							CornerRadius = UDim.new(0, 4),
+						}),
+					}),
+					Label = e("TextLabel", {
+						Size = UDim2.fromScale(1, 1),
+						BackgroundTransparency = 1,
+						Font = Enum.Font.SourceSansBold,
+						TextSize = 18,
+						TextColor3 = Colors.WHITE,
+						Text = `Importing... {pct}%`,
+						ZIndex = 2,
+					}),
+				})
+			end
+			return e(OperationButton, {
+				Text = "Import",
+				Color = Colors.ACTION_BLUE,
+				Disabled = session == nil or props.Settings.ImportImageId == "",
+				Height = 30,
+				LayoutOrder = buttonOrder,
+				OnClick = function()
+					if session then
+						session.ImportHeightmap()
+					end
+				end,
+			})
+		end)(),
 	})
 end
 

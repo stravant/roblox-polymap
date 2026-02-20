@@ -13,7 +13,10 @@ export type ImportParams = {
 	Origin: CFrame, -- center CFrame of the grid
 	Thickness: number,
 	Parent: Instance,
+	OnProgress: ((fraction: number) -> ())?,
 }
+
+local kYieldInterval = 50 -- yield every N rows of triangles
 
 local function importHeightmap(params: ImportParams)
 	local imageId = params.ImageId
@@ -24,8 +27,12 @@ local function importHeightmap(params: ImportParams)
 	local origin = params.Origin
 	local thickness = params.Thickness
 	local parent = params.Parent
+	local onProgress = params.OnProgress
 
 	-- Load the image
+	if onProgress then
+		onProgress(0)
+	end
 	local editableImage = AssetService:CreateEditableImageAsync(Content.fromUri("rbxassetid://" .. imageId))
 	local imageSize = editableImage.Size
 	local imageW = imageSize.X
@@ -101,6 +108,18 @@ local function importHeightmap(params: ImportParams)
 			}
 			fillTriangle(tr, br, bl, thickness, parent, props2)
 		end
+
+		-- Yield periodically to avoid hanging and report progress
+		if r % kYieldInterval == 0 then
+			if onProgress then
+				onProgress(r / rows)
+			end
+			task.wait()
+		end
+	end
+
+	if onProgress then
+		onProgress(1)
 	end
 
 	-- Clean up the editable image

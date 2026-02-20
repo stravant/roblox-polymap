@@ -153,6 +153,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local mBrushSavedPositions: { [number]: Vector3 } = {}
 	local mBrushAmounts: { [number]: number } = {}
 
+	-- Import progress: nil when idle, 0-1 when importing
+	local mImportProgress: number? = nil
+
 	-- Undo/redo: save selected vertex positions so selection survives rescan
 	local mUndoSelections: { { Vector3 } } = {}
 	local mRedoSelections: { { Vector3 } } = {}
@@ -1638,6 +1641,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		changeSignal:Fire()
 	end
 	session.ImportHeightmap = function()
+		if mImportProgress then
+			return -- already importing
+		end
+
 		local camera = workspace.CurrentCamera
 		local origin = CFrame.identity
 		if camera then
@@ -1653,28 +1660,57 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			origin = CFrame.new(pos)
 		end
 
-		pushUndoSnapshot()
-		local recording = ChangeHistoryService:TryBeginRecording("PolyMap Import Heightmap")
+		-- Snapshot settings before spawning so they can't change mid-import
+		local importWidth = currentSettings.ImportWidth
+		local importHeight = currentSettings.ImportHeight
+		local importSpacing = currentSettings.ImportSpacing
 
-		importHeightmap({
-			ImageId = currentSettings.ImportImageId,
-			Width = currentSettings.ImportWidth,
-			Height = currentSettings.ImportHeight,
-			Spacing = currentSettings.ImportSpacing,
-			HeightScale = currentSettings.ImportHeightScale,
-			Origin = origin,
-			Thickness = currentSettings.Thickness,
-			Parent = workspace.Terrain,
-		})
-
-		if recording then
-			ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
-		end
-
-		local gridExtent = math.max(currentSettings.ImportWidth, currentSettings.ImportHeight)
-			* currentSettings.ImportSpacing / 2 + currentSettings.ImportSpacing
-		mMesh.discoverRegion(origin.Position, gridExtent)
+		mImportProgress = 0
 		changeSignal:Fire()
+
+		task.spawn(function()
+			pushUndoSnapshot()
+			local recording = ChangeHistoryService:TryBeginRecording("PolyMap Import Heightmap")
+
+			local ok, err = pcall(function()
+				importHeightmap({
+					ImageId = currentSettings.ImportImageId,
+					Width = importWidth,
+					Height = importHeight,
+					Spacing = importSpacing,
+					HeightScale = currentSettings.ImportHeightScale,
+					Origin = origin,
+					Thickness = currentSettings.Thickness,
+					Parent = workspace.Terrain,
+					OnProgress = function(fraction: number)
+						mImportProgress = fraction
+						changeSignal:Fire()
+					end,
+				})
+			end)
+
+			if recording then
+				if ok then
+					ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+				else
+					ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Cancel)
+				end
+			end
+
+			if ok then
+				local gridExtent = math.max(importWidth, importHeight)
+					* importSpacing / 2 + importSpacing
+				mMesh.discoverRegion(origin.Position, gridExtent)
+			else
+				warn("PolyMap Import failed: " .. tostring(err))
+			end
+
+			mImportProgress = nil
+			changeSignal:Fire()
+		end)
+	end
+	session.GetImportProgress = function(): number?
+		return mImportProgress
 	end
 	session.MoveSelectedVertices = function(delta: Vector3)
 		if getSelectedVertexCount() == 0 then
