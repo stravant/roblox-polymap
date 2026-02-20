@@ -11,6 +11,7 @@ local OperationButton = require("./PluginGui/OperationButton")
 local ChipForToggle = require("./PluginGui/ChipForToggle")
 local NumberInput = require("./PluginGui/NumberInput")
 local HelpGui = require("./PluginGui/HelpGui")
+local MaterialDropdown = require("./PluginGui/MaterialDropdown")
 local Settings = require("./Settings")
 local PluginGuiTypes = require("./PluginGui/Types")
 local MeshOverlay = require("./MeshOverlay")
@@ -684,16 +685,6 @@ local function InfluencePanel(props: {
 	})
 end
 
-local kMaterialRows: { { { name: string, label: string } } } = {
-	{ { name = "Grass", label = "Grass" }, { name = "LeafyGrass", label = "Leafy" }, { name = "Ground", label = "Ground" } },
-	{ { name = "Sand", label = "Sand" }, { name = "Mud", label = "Mud" }, { name = "Rock", label = "Rock" } },
-	{ { name = "Slate", label = "Slate" }, { name = "Basalt", label = "Basalt" }, { name = "Limestone", label = "Limestone" } },
-	{ { name = "Sandstone", label = "Sandstone" }, { name = "Cobblestone", label = "Cobble" }, { name = "Brick", label = "Brick" } },
-	{ { name = "Concrete", label = "Concrete" }, { name = "Asphalt", label = "Asphalt" }, { name = "Pavement", label = "Pavement" } },
-	{ { name = "Plastic", label = "Plastic" }, { name = "SmoothPlastic", label = "Smooth" }, { name = "Ice", label = "Ice" } },
-	{ { name = "Snow", label = "Snow" }, { name = "Neon", label = "Neon" }, { name = "Wood", label = "Wood" } },
-}
-
 local function PaintPanel(props: {
 	Settings: Settings.PolyMapSettings,
 	UpdatedSettings: () -> (),
@@ -735,38 +726,23 @@ local function PaintPanel(props: {
 		})
 	end
 
-	-- Build material row children
-	local materialChildren: { [string]: React.ReactElement<any, any> } = {
-		ListLayout = e("UIListLayout", {
-			SortOrder = Enum.SortOrder.LayoutOrder,
-			Padding = UDim.new(0, 2),
-		}),
-	}
-	for rowIdx, row in kMaterialRows do
-		local rowChildren: { [string]: React.ReactElement<any, any> } = {
-			ListLayout = e("UIListLayout", {
-				FillDirection = Enum.FillDirection.Horizontal,
-				SortOrder = Enum.SortOrder.LayoutOrder,
-				Padding = UDim.new(0, 4),
-			}),
-		}
-		for colIdx, mat in row do
-			rowChildren[mat.name] = e(ChipForToggle, {
-				Text = mat.label,
-				IsCurrent = currentMaterial == mat.name,
-				LayoutOrder = colIdx,
-				OnClick = function()
-					props.Settings.PaintMaterial = mat.name
-					props.UpdatedSettings()
-				end,
-			})
+	local function selectMaterial(name: string)
+		props.Settings.PaintMaterial = name
+		-- Update recent materials: move selected to front, cap at 8
+		local recent = table.clone(props.Settings.RecentMaterials)
+		-- Remove if already present
+		for i = #recent, 1, -1 do
+			if recent[i] == name then
+				table.remove(recent, i)
+			end
 		end
-		materialChildren[`Row{rowIdx}`] = e("Frame", {
-			Size = UDim2.fromScale(1, 0),
-			AutomaticSize = Enum.AutomaticSize.Y,
-			BackgroundTransparency = 1,
-			LayoutOrder = rowIdx,
-		}, rowChildren)
+		table.insert(recent, 1, name)
+		-- Cap length
+		while #recent > 8 do
+			table.remove(recent)
+		end
+		props.Settings.RecentMaterials = recent
+		props.UpdatedSettings()
 	end
 
 	return e(SubPanel, {
@@ -857,12 +833,12 @@ local function PaintPanel(props: {
 				end,
 			}),
 		}),
-		Materials = e("Frame", {
-			Size = UDim2.fromScale(1, 0),
-			AutomaticSize = Enum.AutomaticSize.Y,
-			BackgroundTransparency = 1,
+		Materials = e(MaterialDropdown, {
+			Current = currentMaterial,
+			RecentMaterials = props.Settings.RecentMaterials,
+			OnSelect = selectMaterial,
 			LayoutOrder = nextOrder(),
-		}, materialChildren),
+		}),
 		PaintRadius = e(HelpGui.WithHelpIcon, {
 			LayoutOrder = nextOrder(),
 			Subject = e(NumberInput, {

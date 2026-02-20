@@ -7,6 +7,7 @@ local React = require(Packages.React)
 
 local Colors = require("./Colors")
 local HelpGui = require("./HelpGui")
+local OverlayGui = require("./OverlayGui")
 local OperationButton = require("./OperationButton")
 local Types = require("./Types")
 
@@ -470,6 +471,7 @@ local function MainGuiViewport(props: {
 		HelpDisplay = e(HelpGui.HelpDisplay, {
 			Panelized = false,
 		}),
+		OverlayDisplay = e(OverlayGui.Display, {}),
 	})
 end
 
@@ -561,6 +563,7 @@ local function MainGuiPanelized(props: {
 			HelpDisplay = e(HelpGui.HelpDisplay, {
 				Panelized = true,
 			}),
+			OverlayDisplay = e(OverlayGui.Display, {}),
 		})
 	end
 end
@@ -575,10 +578,12 @@ local function PluginGui(props: {
 		CurrentSettings = state.Settings,
 		UpdatedSettings = state.UpdatedSettings,
 	}, {
-		Viewport = e(state.Panelized and MainGuiPanelized or MainGuiViewport, {
-			Config = props.Config,
-			State = state,
-		}, props.children),
+		OverlayProvider = e(OverlayGui.Provider, nil, {
+			Viewport = e(state.Panelized and MainGuiPanelized or MainGuiViewport, {
+				Config = props.Config,
+				State = state,
+			}, props.children),
+		}),
 	})
 end
 
