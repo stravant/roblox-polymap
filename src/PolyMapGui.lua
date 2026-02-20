@@ -11,6 +11,7 @@ local OperationButton = require("./PluginGui/OperationButton")
 local ChipForToggle = require("./PluginGui/ChipForToggle")
 local NumberInput = require("./PluginGui/NumberInput")
 local HelpGui = require("./PluginGui/HelpGui")
+local OverlayGui = require("./PluginGui/OverlayGui")
 local MaterialDropdown = require("./PluginGui/MaterialDropdown")
 local Settings = require("./Settings")
 local PluginGuiTypes = require("./PluginGui/Types")
@@ -697,17 +698,10 @@ local function InfluencePanel(props: {
 	})
 end
 
-local function PaintPanel(props: {
-	Settings: Settings.PolyMapSettings,
-	UpdatedSettings: () -> (),
-	LayoutOrder: number?,
+local function ColorPalettePopup(props: {
+	Current: { number },
+	OnSelect: (color: { number }) -> (),
 })
-	local c = props.Settings.PaintColor
-	local currentColor = Color3.new(c[1], c[2], c[3])
-	local currentMaterial = props.Settings.PaintMaterial
-	local nextOrder = createNextOrder()
-
-	-- Build palette swatch children
 	local paletteChildren: { [string]: React.ReactElement<any, any> } = {
 		GridLayout = e("UIGridLayout", {
 			CellSize = UDim2.fromOffset(16, 16),
@@ -717,14 +711,14 @@ local function PaintPanel(props: {
 		}),
 	}
 	for i, swatch in kColorPalette do
-		local isSelected = colorsMatch(c, swatch)
+		local isSelected = colorsMatch(props.Current, swatch)
 		paletteChildren[`Swatch{i}`] = e("TextButton", {
 			Text = "",
 			BackgroundColor3 = Color3.new(swatch[1], swatch[2], swatch[3]),
 			LayoutOrder = i,
+			ZIndex = 12,
 			[React.Event.Activated] = function()
-				props.Settings.PaintColor = { swatch[1], swatch[2], swatch[3] }
-				props.UpdatedSettings()
+				props.OnSelect({ swatch[1], swatch[2], swatch[3] })
 			end,
 		}, {
 			Corner = e("UICorner", {
@@ -736,6 +730,60 @@ local function PaintPanel(props: {
 				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
 			}),
 		})
+	end
+
+	return e("Frame", {
+		Size = UDim2.fromScale(1, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundColor3 = Colors.BLACK,
+		BorderSizePixel = 0,
+		ZIndex = 12,
+	}, {
+		Corner = e("UICorner", {
+			CornerRadius = UDim.new(0, 4),
+		}),
+		Stroke = e("UIStroke", {
+			Color = Colors.OFFWHITE,
+			Thickness = 1,
+		}),
+		Padding = e("UIPadding", {
+			PaddingTop = UDim.new(0, 4),
+			PaddingBottom = UDim.new(0, 4),
+			PaddingLeft = UDim.new(0, 4),
+			PaddingRight = UDim.new(0, 4),
+		}),
+		Content = e("Frame", {
+			Size = UDim2.fromScale(1, 0),
+			AutomaticSize = Enum.AutomaticSize.Y,
+			BackgroundTransparency = 1,
+			ZIndex = 12,
+		}, paletteChildren),
+	})
+end
+
+local function PaintPanel(props: {
+	Settings: Settings.PolyMapSettings,
+	UpdatedSettings: () -> (),
+	LayoutOrder: number?,
+})
+	local c = props.Settings.PaintColor
+	local currentColor = Color3.new(c[1], c[2], c[3])
+	local currentMaterial = props.Settings.PaintMaterial
+	local nextOrder = createNextOrder()
+	local overlayContext = OverlayGui.use()
+	local colorTriggerRef = React.useRef(nil)
+
+	local function openColorPalette()
+		if colorTriggerRef.current then
+			overlayContext.SetOverlay(colorTriggerRef.current, e(ColorPalettePopup, {
+				Current = c,
+				OnSelect = function(color: { number })
+					overlayContext.SetOverlay(nil)
+					props.Settings.PaintColor = color
+					props.UpdatedSettings()
+				end,
+			}))
+		end
 	end
 
 	local function selectMaterial(name: string)
@@ -762,8 +810,8 @@ local function PaintPanel(props: {
 		LayoutOrder = props.LayoutOrder,
 		Padding = UDim.new(0, 4),
 	}, {
-		ColorPreviewRow = e("Frame", {
-			Size = UDim2.new(1, 0, 0, 20),
+		ColorRow = e("Frame", {
+			Size = UDim2.new(1, 0, 0, 24),
 			BackgroundTransparency = 1,
 			LayoutOrder = nextOrder(),
 		}, {
@@ -772,10 +820,14 @@ local function PaintPanel(props: {
 				SortOrder = Enum.SortOrder.LayoutOrder,
 				Padding = UDim.new(0, 4),
 			}),
-			ColorPreview = e("Frame", {
-				Size = UDim2.new(1, -28, 0, 20),
+			ColorPreview = e("TextButton", {
+				Size = UDim2.new(1, -64, 0, 24),
 				BackgroundColor3 = currentColor,
+				Text = "",
+				AutoButtonColor = false,
 				LayoutOrder = 1,
+				ref = colorTriggerRef,
+				[React.Event.MouseButton1Click] = openColorPalette,
 			}, {
 				Corner = e("UICorner", {
 					CornerRadius = UDim.new(0, 4),
@@ -791,12 +843,6 @@ local function PaintPanel(props: {
 				end,
 			}),
 		}),
-		PaletteSwatches = e("Frame", {
-			Size = UDim2.fromScale(1, 0),
-			AutomaticSize = Enum.AutomaticSize.Y,
-			BackgroundTransparency = 1,
-			LayoutOrder = nextOrder(),
-		}, paletteChildren),
 		RGBRow = e("Frame", {
 			Size = UDim2.fromScale(1, 0),
 			AutomaticSize = Enum.AutomaticSize.Y,
