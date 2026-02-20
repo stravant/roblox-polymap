@@ -40,7 +40,7 @@ for _, mat in kAllMaterials do
 	kMaterialLabelMap[mat.name] = mat.label
 end
 
-local kMaxRecent = 4
+local kMaxRecent = 8
 
 local function getLabelForMaterial(name: string): string
 	return kMaterialLabelMap[name] or name
@@ -153,6 +153,7 @@ local function MaterialDropdown(props: {
 			FillDirection = Enum.FillDirection.Horizontal,
 			SortOrder = Enum.SortOrder.LayoutOrder,
 			Padding = UDim.new(0, 4),
+			Wraps = true,
 		}),
 	}
 
