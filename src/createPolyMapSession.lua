@@ -342,15 +342,15 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return bestKey
 	end
 
-	local function findNearestBoundaryEdge(worldPos: Vector3, skipEdgeKey: string?, maxDist: number?): string?
+	local function findNearestBoundaryEdge(skipEdgeKey: string?): string?
 		local camera = workspace.CurrentCamera
 		if not camera then
 			return nil
 		end
 
-		local mouseScreen = camera:WorldToScreenPoint(worldPos)
+		local mouseScreen = UserInputService:GetMouseLocation()
 		local bestKey: string? = nil
-		local bestDist = maxDist or 15
+		local bestDist = math.huge
 
 		for key, edge in mMesh.getEdges() do
 			if #edge.triangles ~= 1 then continue end
@@ -503,10 +503,11 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					newHoverTriangles = mMesh.findTrianglesInRadius(worldPos, radius)
 				end
 			end
-			if mode == "Add" and not mAddBoundaryEdge then
-				-- Phase 1: hover boundary edges only (no distance limit)
-				newHoverEdge = findNearestBoundaryEdge(worldPos, nil, 10000)
-			end
+		end
+
+		if mode == "Add" and not mAddBoundaryEdge then
+			-- Phase 1: hover the nearest boundary edge (uses mouse screen pos directly)
+			newHoverEdge = findNearestBoundaryEdge(nil)
 		end
 
 		-- Add mode phase 2 runs even without a raycast hit (plane projection)
@@ -633,7 +634,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		mMesh.discoverRegion(worldPos, 15)
 		if not mAddBoundaryEdge then
 			-- Phase 1: select a boundary edge (no distance limit)
-			local edgeKey = findNearestBoundaryEdge(worldPos, nil, 10000)
+			local edgeKey = findNearestBoundaryEdge(nil)
 			if edgeKey then
 				local edge = mMesh.getEdges()[edgeKey]
 				if edge then
