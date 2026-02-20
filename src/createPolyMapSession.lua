@@ -1695,6 +1695,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				else
 					ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Cancel)
 				end
+			elseif ok then
+				ChangeHistoryService:SetWaypoint("PolyMap Import Heightmap")
 			end
 
 			if ok then
