@@ -241,24 +241,6 @@ local function ModePanel(props: {
 					props.UpdatedSettings()
 				end,
 			}),
-			Generate = e(ChipForToggle, {
-				Text = "Gen",
-				IsCurrent = current == "Generate",
-				LayoutOrder = 4,
-				OnClick = function()
-					props.Settings.Mode = "Generate"
-					props.UpdatedSettings()
-				end,
-			}),
-			Import = e(ChipForToggle, {
-				Text = "Imp",
-				IsCurrent = current == "Import",
-				LayoutOrder = 5,
-				OnClick = function()
-					props.Settings.Mode = "Import"
-					props.UpdatedSettings()
-				end,
-			}),
 		}),
 		Row3 = e("Frame", {
 			Size = UDim2.fromScale(1, 0),
@@ -271,19 +253,49 @@ local function ModePanel(props: {
 				SortOrder = Enum.SortOrder.LayoutOrder,
 				Padding = UDim.new(0, 4),
 			}),
+			Generate = e(ChipForToggle, {
+				Text = "Gen",
+				IsCurrent = current == "Generate",
+				LayoutOrder = 1,
+				OnClick = function()
+					props.Settings.Mode = "Generate"
+					props.UpdatedSettings()
+				end,
+			}),
+			Import = e(ChipForToggle, {
+				Text = "Imp",
+				IsCurrent = current == "Import",
+				LayoutOrder = 2,
+				OnClick = function()
+					props.Settings.Mode = "Import"
+					props.UpdatedSettings()
+				end,
+			}),
 			Subdivide = e(ChipForToggle, {
 				Text = "Sub",
 				IsCurrent = current == "Subdivide",
-				LayoutOrder = 1,
+				LayoutOrder = 3,
 				OnClick = function()
 					props.Settings.Mode = "Subdivide"
 					props.UpdatedSettings()
 				end,
 			}),
+		}),
+		Row4 = e("Frame", {
+			Size = UDim2.fromScale(1, 0),
+			AutomaticSize = Enum.AutomaticSize.Y,
+			BackgroundTransparency = 1,
+			LayoutOrder = 4,
+		}, {
+			ListLayout = e("UIListLayout", {
+				FillDirection = Enum.FillDirection.Horizontal,
+				SortOrder = Enum.SortOrder.LayoutOrder,
+				Padding = UDim.new(0, 4),
+			}),
 			Simplify = e(ChipForToggle, {
 				Text = "Simp",
 				IsCurrent = current == "Simplify",
-				LayoutOrder = 2,
+				LayoutOrder = 1,
 				OnClick = function()
 					props.Settings.Mode = "Simplify"
 					props.UpdatedSettings()
@@ -292,7 +304,7 @@ local function ModePanel(props: {
 			Relax = e(ChipForToggle, {
 				Text = "Rlx",
 				IsCurrent = current == "Relax",
-				LayoutOrder = 3,
+				LayoutOrder = 2,
 				OnClick = function()
 					props.Settings.Mode = "Relax"
 					props.UpdatedSettings()
@@ -301,7 +313,7 @@ local function ModePanel(props: {
 			Flatten = e(ChipForToggle, {
 				Text = "Flat",
 				IsCurrent = current == "Flatten",
-				LayoutOrder = 4,
+				LayoutOrder = 3,
 				OnClick = function()
 					props.Settings.Mode = "Flatten"
 					props.UpdatedSettings()
@@ -947,57 +959,6 @@ local function DeletePanel(props: {
 	})
 end
 
-local function SelectionActionsPanel(props: {
-	Session: createPolyMapSession.PolyMapSession?,
-	LayoutOrder: number?,
-})
-	local session = props.Session
-	local nextOrder = createNextOrder()
-
-	return e(SubPanel, {
-		Title = "Selection",
-		LayoutOrder = props.LayoutOrder,
-		Padding = UDim.new(0, 4),
-	}, {
-		SelectAll = e(OperationButton, {
-			Text = "Select All",
-			Color = Colors.GREY,
-			Disabled = session == nil,
-			Height = 26,
-			LayoutOrder = nextOrder(),
-			OnClick = function()
-				if session then
-					session.SelectAll()
-				end
-			end,
-		}),
-		ClearSelection = e(OperationButton, {
-			Text = "Clear Selection",
-			Color = Colors.GREY,
-			Disabled = session == nil,
-			Height = 26,
-			LayoutOrder = nextOrder(),
-			OnClick = function()
-				if session then
-					session.ClearSelection()
-				end
-			end,
-		}),
-		ScanMesh = e(OperationButton, {
-			Text = "Rescan Mesh",
-			Color = Colors.GREY,
-			Disabled = session == nil,
-			Height = 26,
-			LayoutOrder = nextOrder(),
-			OnClick = function()
-				if session then
-					session.ScanMesh()
-				end
-			end,
-		}),
-	})
-end
-
 local function SubdividePanel(props: {
 	Session: createPolyMapSession.PolyMapSession?,
 	LayoutOrder: number?,
@@ -1200,12 +1161,12 @@ local function PolyMapGui(props: {
 	local session = props.Session
 	local mode = currentSettings.Mode
 	local nextOrder = createNextOrder()
-	local showSelection = mode == "Select" or mode == "Move" or mode == "Rotate" or mode == "Subdivide" or mode == "Simplify"
 	local showInfluence = mode == "Move" or mode == "Rotate"
 	local showDelete = mode == "Delete"
 	local showPaint = mode == "Paint"
 	local showGrid = mode == "Generate"
 	local showImport = mode == "Import"
+	local showThickness = mode == "Add" or mode == "Generate" or mode == "Import"
 	local showSubdivide = mode == "Subdivide"
 	local showSimplify = mode == "Simplify"
 	local showRelax = mode == "Relax"
@@ -1223,6 +1184,7 @@ local function PolyMapGui(props: {
 	}, {
 		Overlay = session and e(MeshOverlay, (function()
 			local mesh = session.GetMesh()
+			local showSelection = mode == "Select" or mode == "Move" or mode == "Rotate" or mode == "Subdivide" or mode == "Simplify"
 			local overlayProps: { [string]: any } = {
 				Mesh = mesh,
 				SelectedVertices = if showSelection then session.GetSelectedVertices() else nil,
@@ -1313,7 +1275,7 @@ local function PolyMapGui(props: {
 				Session = session,
 				LayoutOrder = nextOrder(),
 			}),
-			ThicknessPanel = e(ThicknessPanel, {
+			ThicknessPanel = showThickness and e(ThicknessPanel, {
 				Settings = currentSettings,
 				UpdatedSettings = props.UpdatedSettings,
 				LayoutOrder = nextOrder(),
@@ -1349,10 +1311,6 @@ local function PolyMapGui(props: {
 			FlattenPanel = showFlatten and e(FlattenPanel, {
 				Settings = currentSettings,
 				UpdatedSettings = props.UpdatedSettings,
-				LayoutOrder = nextOrder(),
-			}),
-			SelectionActionsPanel = showSelection and e(SelectionActionsPanel, {
-				Session = session,
 				LayoutOrder = nextOrder(),
 			}),
 			StatusText = e(StatusText, {
