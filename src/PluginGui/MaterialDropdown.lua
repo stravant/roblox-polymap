@@ -114,6 +114,8 @@ local function MaterialPopupContent(props: {
 	})
 end
 
+local kChipsPerRow = 4
+
 local function MaterialDropdown(props: {
 	Current: string,
 	RecentMaterials: { string },
@@ -148,28 +150,32 @@ local function MaterialDropdown(props: {
 		end
 	end
 
-	local chipChildren: { [string]: React.ReactElement<any, any> } = {
-		ListLayout = e("UIListLayout", {
-			FillDirection = Enum.FillDirection.Horizontal,
-			SortOrder = Enum.SortOrder.LayoutOrder,
-			Padding = UDim.new(0, 4),
-			Wraps = true,
-		}),
-	}
-
+	-- Split chips into rows of kChipsPerRow
+	local rows: { { [string]: React.ReactElement<any, any> } } = {}
 	for i, name in shownMaterials do
-		chipChildren[name] = e(ChipForToggle, {
+		local rowIndex = math.ceil(i / kChipsPerRow)
+		if not rows[rowIndex] then
+			rows[rowIndex] = {
+				ListLayout = e("UIListLayout", {
+					FillDirection = Enum.FillDirection.Horizontal,
+					SortOrder = Enum.SortOrder.LayoutOrder,
+					Padding = UDim.new(0, 4),
+				}),
+			}
+		end
+		rows[rowIndex][name] = e(ChipForToggle, {
 			Text = getLabelForMaterial(name),
 			IsCurrent = name == props.Current,
-			LayoutOrder = i,
+			LayoutOrder = ((i - 1) % kChipsPerRow) + 1,
 			OnClick = function()
 				props.OnSelect(name)
 			end,
 		})
 	end
 
-	-- Dropdown trigger button
-	chipChildren.DropdownTrigger = e("TextButton", {
+	-- Add the "..." trigger button to the last row
+	local lastRow = rows[#rows] or {}
+	lastRow.DropdownTrigger = e("TextButton", {
 		Size = UDim2.new(0, 28, 0, 24),
 		BackgroundColor3 = Colors.ACTION_BLUE,
 		Text = "...",
@@ -177,7 +183,7 @@ local function MaterialDropdown(props: {
 		TextSize = 18,
 		TextColor3 = Colors.WHITE,
 		AutoButtonColor = true,
-		LayoutOrder = kMaxRecent + 1,
+		LayoutOrder = kChipsPerRow + 1,
 		ref = triggerRef,
 		[React.Event.MouseButton1Click] = openDropdown,
 	}, {
@@ -185,13 +191,32 @@ local function MaterialDropdown(props: {
 			CornerRadius = UDim.new(0, 4),
 		}),
 	})
+	if #rows == 0 then
+		rows[1] = lastRow
+	end
+
+	-- Build the row frames
+	local children: { [string]: React.ReactElement<any, any> } = {
+		ListLayout = e("UIListLayout", {
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			Padding = UDim.new(0, 4),
+		}),
+	}
+	for rowIndex, rowChildren in rows do
+		children[`Row{rowIndex}`] = e("Frame", {
+			Size = UDim2.fromScale(1, 0),
+			AutomaticSize = Enum.AutomaticSize.Y,
+			BackgroundTransparency = 1,
+			LayoutOrder = rowIndex,
+		}, rowChildren)
+	end
 
 	return e("Frame", {
 		Size = UDim2.fromScale(1, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
 		BackgroundTransparency = 1,
 		LayoutOrder = props.LayoutOrder,
-	}, chipChildren)
+	}, children)
 end
 
 return MaterialDropdown
