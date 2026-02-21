@@ -32,6 +32,7 @@ export type PolyMapSettings = PluginGuiTypes.PluginGuiSettings & {
 	ImportSpacing: number,
 	ImportHeightScale: number,
 	RecentMaterials: { string },
+	RecentColors: { { number } },
 }
 
 local function loadSettings(plugin: Plugin): PolyMapSettings
@@ -75,6 +76,7 @@ local function loadSettings(plugin: Plugin): PolyMapSettings
 		ImportSpacing = raw.ImportSpacing or 4,
 		ImportHeightScale = raw.ImportHeightScale or 50,
 		RecentMaterials = raw.RecentMaterials or { "Grass", "Plastic", "Concrete" },
+		RecentColors = raw.RecentColors or { { 0.294, 0.592, 0.294 } },
 	}
 end
 
@@ -113,6 +115,7 @@ local function saveSettings(plugin: Plugin, settings: PolyMapSettings)
 		ImportSpacing = settings.ImportSpacing,
 		ImportHeightScale = settings.ImportHeightScale,
 		RecentMaterials = settings.RecentMaterials,
+		RecentColors = settings.RecentColors,
 	})
 end
 

@@ -217,7 +217,7 @@ local function ModePanel(props: {
 				Padding = UDim.new(0, 4),
 			}),
 			Add = e(ChipForToggle, {
-				Text = "Add",
+				Text = "Add Poly",
 				IsCurrent = current == "Add",
 				LayoutOrder = 1,
 				OnClick = function()
@@ -256,7 +256,7 @@ local function ModePanel(props: {
 				Padding = UDim.new(0, 4),
 			}),
 			Generate = e(ChipForToggle, {
-				Text = "Gen",
+				Text = "Add Grid",
 				IsCurrent = current == "Generate",
 				LayoutOrder = 1,
 				OnClick = function()
@@ -265,7 +265,7 @@ local function ModePanel(props: {
 				end,
 			}),
 			Import = e(ChipForToggle, {
-				Text = "Imp",
+				Text = "Import",
 				IsCurrent = current == "Import",
 				LayoutOrder = 2,
 				OnClick = function()
@@ -274,7 +274,7 @@ local function ModePanel(props: {
 				end,
 			}),
 			Subdivide = e(ChipForToggle, {
-				Text = "Sub",
+				Text = "Subdiv",
 				IsCurrent = current == "Subdivide",
 				LayoutOrder = 3,
 				OnClick = function()
@@ -295,7 +295,7 @@ local function ModePanel(props: {
 				Padding = UDim.new(0, 4),
 			}),
 			Simplify = e(ChipForToggle, {
-				Text = "Simp",
+				Text = "Simplify",
 				IsCurrent = current == "Simplify",
 				LayoutOrder = 1,
 				OnClick = function()
@@ -304,7 +304,7 @@ local function ModePanel(props: {
 				end,
 			}),
 			Relax = e(ChipForToggle, {
-				Text = "Rlx",
+				Text = "Relax",
 				IsCurrent = current == "Relax",
 				LayoutOrder = 2,
 				OnClick = function()
@@ -313,7 +313,7 @@ local function ModePanel(props: {
 				end,
 			}),
 			Flatten = e(ChipForToggle, {
-				Text = "Flat",
+				Text = "Flatten",
 				IsCurrent = current == "Flatten",
 				LayoutOrder = 3,
 				OnClick = function()
@@ -777,6 +777,23 @@ local function ColorPalettePopup(props: {
 	})
 end
 
+local kMaxRecentColors = 10
+
+local function updateRecentColors(settings: Settings.PolyMapSettings, color: { number })
+	local recent = table.clone(settings.RecentColors)
+	-- Remove if already present
+	for i = #recent, 1, -1 do
+		if colorsMatch(recent[i], color) then
+			table.remove(recent, i)
+		end
+	end
+	table.insert(recent, 1, color)
+	while #recent > kMaxRecentColors do
+		table.remove(recent)
+	end
+	settings.RecentColors = recent
+end
+
 local function ColorPanel(props: {
 	Settings: Settings.PolyMapSettings,
 	UpdatedSettings: () -> (),
@@ -788,17 +805,63 @@ local function ColorPanel(props: {
 	local overlayContext = OverlayGui.use()
 	local colorTriggerRef = React.useRef(nil)
 
+	local function selectColor(color: { number })
+		props.Settings.PaintColor = color
+		updateRecentColors(props.Settings, color)
+		props.UpdatedSettings()
+	end
+
 	local function openColorPalette()
 		if colorTriggerRef.current then
 			overlayContext.SetOverlay(colorTriggerRef.current, e(ColorPalettePopup, {
 				Current = c,
 				OnSelect = function(color: { number })
 					overlayContext.SetOverlay(nil)
-					props.Settings.PaintColor = color
-					props.UpdatedSettings()
+					selectColor(color)
 				end,
 			}))
 		end
+	end
+
+	-- Build recent color swatches (current first, then recents deduped)
+	local shownColors: { { number } } = { c }
+	for _, color in props.Settings.RecentColors do
+		if #shownColors >= kMaxRecentColors then
+			break
+		end
+		if not colorsMatch(color, c) then
+			table.insert(shownColors, color)
+		end
+	end
+
+	local recentChildren: { [string]: React.ReactElement<any, any> } = {
+		ListLayout = e("UIListLayout", {
+			FillDirection = Enum.FillDirection.Horizontal,
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			Padding = UDim.new(0, 2),
+		}),
+	}
+	for i, color in shownColors do
+		local isCurrent = colorsMatch(color, c)
+		recentChildren[`Color{i}`] = e("TextButton", {
+			Size = UDim2.fromOffset(18, 18),
+			BackgroundColor3 = Color3.new(color[1], color[2], color[3]),
+			Text = "",
+			AutoButtonColor = false,
+			LayoutOrder = i,
+			[React.Event.MouseButton1Click] = function()
+				selectColor(color)
+			end,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 3),
+			}),
+			Border = isCurrent and e("UIStroke", {
+				Color = Colors.WHITE,
+				Thickness = 2,
+				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+			}),
+		})
 	end
 
 	return e(SubPanel, {
@@ -806,7 +869,7 @@ local function ColorPanel(props: {
 		LayoutOrder = props.LayoutOrder,
 		Padding = UDim.new(0, 4),
 	}, {
-		ColorRow = e("Frame", {
+		HeroRow = e("Frame", {
 			Size = UDim2.new(1, 0, 0, 24),
 			BackgroundTransparency = 1,
 			LayoutOrder = nextOrder(),
@@ -822,11 +885,13 @@ local function ColorPanel(props: {
 				Text = "",
 				AutoButtonColor = false,
 				LayoutOrder = 1,
-				ref = colorTriggerRef,
 				[React.Event.MouseButton1Click] = openColorPalette,
 			}, {
 				Corner = e("UICorner", {
 					CornerRadius = UDim.new(0, 4),
+				}),
+				Flex = e("UIFlexItem", {
+					FlexMode = Enum.UIFlexMode.Fill,
 				}),
 			}),
 			PickButton = e(ChipForToggle, {
@@ -838,55 +903,29 @@ local function ColorPanel(props: {
 					props.UpdatedSettings()
 				end,
 			}),
+			MoreButton = e("TextButton", {
+				Size = UDim2.fromOffset(28, 24),
+				BackgroundColor3 = Colors.ACTION_BLUE,
+				Text = "...",
+				Font = Enum.Font.SourceSansBold,
+				TextSize = 18,
+				TextColor3 = Colors.WHITE,
+				AutoButtonColor = true,
+				LayoutOrder = 3,
+				ref = colorTriggerRef,
+				[React.Event.MouseButton1Click] = openColorPalette,
+			}, {
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(0, 4),
+				}),
+			}),
 		}),
-		RGBRow = e("Frame", {
+		RecentRow = e("Frame", {
 			Size = UDim2.fromScale(1, 0),
 			AutomaticSize = Enum.AutomaticSize.Y,
 			BackgroundTransparency = 1,
 			LayoutOrder = nextOrder(),
-		}, {
-			ListLayout = e("UIListLayout", {
-				SortOrder = Enum.SortOrder.LayoutOrder,
-				FillDirection = Enum.FillDirection.Horizontal,
-				Padding = UDim.new(0, 4),
-			}),
-			RedInput = e(NumberInput, {
-				Value = math.round(c[1] * 255),
-				Grow = true,
-				ChipColor = Color3.fromRGB(255, 0, 0),
-				LayoutOrder = 1,
-				ValueEntered = function(newValue: number)
-					local v = math.clamp(math.round(newValue), 0, 255)
-					props.Settings.PaintColor = { v / 255, c[2], c[3] }
-					props.UpdatedSettings()
-					return v
-				end,
-			}),
-			GreenInput = e(NumberInput, {
-				Value = math.round(c[2] * 255),
-				Grow = true,
-				ChipColor = Color3.fromRGB(0, 255, 0),
-				LayoutOrder = 2,
-				ValueEntered = function(newValue: number)
-					local v = math.clamp(math.round(newValue), 0, 255)
-					props.Settings.PaintColor = { c[1], v / 255, c[3] }
-					props.UpdatedSettings()
-					return v
-				end,
-			}),
-			BlueInput = e(NumberInput, {
-				Value = math.round(c[3] * 255),
-				Grow = true,
-				ChipColor = Color3.fromRGB(0, 0, 255),
-				LayoutOrder = 3,
-				ValueEntered = function(newValue: number)
-					local v = math.clamp(math.round(newValue), 0, 255)
-					props.Settings.PaintColor = { c[1], c[2], v / 255 }
-					props.UpdatedSettings()
-					return v
-				end,
-			}),
-		}),
+		}, recentChildren),
 	})
 end
 
@@ -895,6 +934,10 @@ local function MaterialPanel(props: {
 	UpdatedSettings: () -> (),
 	LayoutOrder: number?,
 })
+	local nextOrder = createNextOrder()
+	local overlayContext = OverlayGui.use()
+	local materialTriggerRef = React.useRef(nil)
+
 	local function selectMaterial(name: string)
 		props.Settings.PaintMaterial = name
 		-- Update recent materials: move selected to front, cap at 6
@@ -914,16 +957,101 @@ local function MaterialPanel(props: {
 		props.UpdatedSettings()
 	end
 
+	local function openMaterialPopup()
+		if materialTriggerRef.current then
+			overlayContext.SetOverlay(materialTriggerRef.current, e(MaterialDropdown.PopupContent, {
+				Current = props.Settings.PaintMaterial,
+				OnSelect = function(name: string)
+					overlayContext.SetOverlay(nil)
+					selectMaterial(name)
+				end,
+			}))
+		end
+	end
+
+	local materialLabel = MaterialDropdown.GetLabel(props.Settings.PaintMaterial)
+
 	return e(SubPanel, {
 		Title = "Material",
 		LayoutOrder = props.LayoutOrder,
 		Padding = UDim.new(0, 4),
 	}, {
-		Materials = e(MaterialDropdown, {
+		HeroRow = e("Frame", {
+			Size = UDim2.new(1, 0, 0, 24),
+			BackgroundTransparency = 1,
+			LayoutOrder = nextOrder(),
+		}, {
+			ListLayout = e("UIListLayout", {
+				FillDirection = Enum.FillDirection.Horizontal,
+				SortOrder = Enum.SortOrder.LayoutOrder,
+				Padding = UDim.new(0, 4),
+			}),
+			MaterialPreview = e("ViewportFrame", {
+				Size = UDim2.fromOffset(24, 24),
+				BackgroundTransparency = 1,
+				LayoutOrder = 1,
+			}, {
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(0, 4),
+				}),
+				PreviewPart = e("Part", {
+					Size = Vector3.new(4, 4, 4),
+					Position = Vector3.new(0, 0, 0),
+					Material = (Enum.Material :: any)[props.Settings.PaintMaterial] or Enum.Material.Plastic,
+					Color = Color3.fromRGB(163, 163, 163),
+					Anchored = true,
+				}),
+				PreviewCamera = e("Camera", {
+					CFrame = CFrame.new(Vector3.new(4, 3, 4), Vector3.new(0, 0, 0)),
+					ref = function(camera: Camera?)
+						if camera then
+							-- Set as CurrentCamera for the ViewportFrame
+							local vf = camera.Parent :: ViewportFrame?
+							if vf then
+								vf.CurrentCamera = camera
+							end
+						end
+					end,
+				}),
+			}),
+			MaterialLabel = e("TextButton", {
+				Size = UDim2.new(1, -60, 0, 24),
+				BackgroundTransparency = 1,
+				Text = materialLabel,
+				Font = Enum.Font.SourceSansBold,
+				TextSize = 18,
+				TextColor3 = Colors.WHITE,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				AutoButtonColor = false,
+				LayoutOrder = 2,
+				[React.Event.MouseButton1Click] = openMaterialPopup,
+			}, {
+				Flex = e("UIFlexItem", {
+					FlexMode = Enum.UIFlexMode.Fill,
+				}),
+			}),
+			MoreButton = e("TextButton", {
+				Size = UDim2.fromOffset(28, 24),
+				BackgroundColor3 = Colors.ACTION_BLUE,
+				Text = "...",
+				Font = Enum.Font.SourceSansBold,
+				TextSize = 18,
+				TextColor3 = Colors.WHITE,
+				AutoButtonColor = true,
+				LayoutOrder = 3,
+				ref = materialTriggerRef,
+				[React.Event.MouseButton1Click] = openMaterialPopup,
+			}, {
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(0, 4),
+				}),
+			}),
+		}),
+		RecentChips = e(MaterialDropdown.RecentChips, {
 			Current = props.Settings.PaintMaterial,
 			RecentMaterials = props.Settings.RecentMaterials,
 			OnSelect = selectMaterial,
-			LayoutOrder = 1,
+			LayoutOrder = nextOrder(),
 		}),
 	})
 end

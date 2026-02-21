@@ -6,14 +6,13 @@ local React = require(Packages.React)
 
 local Colors = require("./Colors")
 local ChipForToggle = require("./ChipForToggle")
-local OverlayGui = require("./OverlayGui")
 
 local e = React.createElement
 
 -- All available materials with display labels
 local kAllMaterials: { { name: string, label: string } } = {
 	{ name = "Grass", label = "Grass" },
-	{ name = "LeafyGrass", label = "Leafy Grass" },
+	{ name = "LeafyGrass", label = "Leafy G." },
 	{ name = "Ground", label = "Ground" },
 	{ name = "Sand", label = "Sand" },
 	{ name = "Mud", label = "Mud" },
@@ -22,13 +21,13 @@ local kAllMaterials: { { name: string, label: string } } = {
 	{ name = "Basalt", label = "Basalt" },
 	{ name = "Limestone", label = "Limestone" },
 	{ name = "Sandstone", label = "Sandstone" },
-	{ name = "Cobblestone", label = "Cobblestone" },
+	{ name = "Cobblestone", label = "Cobble" },
 	{ name = "Brick", label = "Brick" },
 	{ name = "Concrete", label = "Concrete" },
 	{ name = "Asphalt", label = "Asphalt" },
 	{ name = "Pavement", label = "Pavement" },
 	{ name = "Plastic", label = "Plastic" },
-	{ name = "SmoothPlastic", label = "Smooth Plastic" },
+	{ name = "SmoothPlastic", label = "Smooth P." },
 	{ name = "Ice", label = "Ice" },
 	{ name = "Snow", label = "Snow" },
 	{ name = "Neon", label = "Neon" },
@@ -116,27 +115,13 @@ end
 
 local kChipsPerRow = 2
 
-local function MaterialDropdown(props: {
+-- Recent material chips only (no overlay/"..." button)
+local function MaterialRecentChips(props: {
 	Current: string,
 	RecentMaterials: { string },
 	OnSelect: (name: string) -> (),
 	LayoutOrder: number?,
 })
-	local overlayContext = OverlayGui.use()
-	local triggerRef = React.useRef(nil)
-
-	local function openDropdown()
-		if triggerRef.current then
-			overlayContext.SetOverlay(triggerRef.current, e(MaterialPopupContent, {
-				Current = props.Current,
-				OnSelect = function(name: string)
-					overlayContext.SetOverlay(nil)
-					props.OnSelect(name)
-				end,
-			}))
-		end
-	end
-
 	-- Build the recent chips: current material first, then recents (deduped), capped at kMaxRecent
 	local shownMaterials: { string } = { props.Current }
 	local shownSet: { [string]: boolean } = { [props.Current] = true }
@@ -173,28 +158,6 @@ local function MaterialDropdown(props: {
 		})
 	end
 
-	-- Add the "..." trigger button to the last row
-	local lastRow = rows[#rows] or {}
-	lastRow.DropdownTrigger = e("TextButton", {
-		Size = UDim2.new(0, 28, 0, 24),
-		BackgroundColor3 = Colors.ACTION_BLUE,
-		Text = "...",
-		Font = Enum.Font.SourceSansBold,
-		TextSize = 18,
-		TextColor3 = Colors.WHITE,
-		AutoButtonColor = true,
-		LayoutOrder = kChipsPerRow + 1,
-		ref = triggerRef,
-		[React.Event.MouseButton1Click] = openDropdown,
-	}, {
-		Corner = e("UICorner", {
-			CornerRadius = UDim.new(0, 4),
-		}),
-	})
-	if #rows == 0 then
-		rows[1] = lastRow
-	end
-
 	-- Build the row frames
 	local children: { [string]: React.ReactElement<any, any> } = {
 		ListLayout = e("UIListLayout", {
@@ -219,4 +182,8 @@ local function MaterialDropdown(props: {
 	}, children)
 end
 
-return MaterialDropdown
+return {
+	RecentChips = MaterialRecentChips,
+	PopupContent = MaterialPopupContent,
+	GetLabel = getLabelForMaterial,
+}
