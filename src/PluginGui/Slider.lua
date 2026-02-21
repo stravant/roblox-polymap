@@ -69,95 +69,80 @@ local function Slider(props: {
 	local alpha = if range > 0 then math.clamp((props.Value - min) / range, 0, 1) else 0
 	local displayValue = string.format("%.2f", props.Value)
 
+	local kHitOverlap = 10
+	local labelWidth = if props.Label then 50 else 0
+	local valueWidth = 36
+
 	return e("Frame", {
 		Size = UDim2.new(1, 0, 0, 24),
 		BackgroundTransparency = 1,
 		LayoutOrder = props.LayoutOrder,
+		ClipsDescendants = false,
 	}, {
-		ListLayout = e("UIListLayout", {
-			FillDirection = Enum.FillDirection.Horizontal,
-			SortOrder = Enum.SortOrder.LayoutOrder,
-			VerticalAlignment = Enum.VerticalAlignment.Center,
-			Padding = UDim.new(0, 0),
-		}),
 		Label = props.Label and e("TextLabel", {
 			Text = props.Label,
 			TextColor3 = Colors.WHITE,
 			BackgroundTransparency = 1,
-			Size = UDim2.new(0, 0, 0, 24),
-			AutomaticSize = Enum.AutomaticSize.X,
+			Position = UDim2.fromOffset(0, 0),
+			Size = UDim2.new(0, labelWidth, 1, 0),
 			Font = Enum.Font.SourceSans,
 			TextSize = 18,
-			LayoutOrder = 1,
+			TextXAlignment = Enum.TextXAlignment.Left,
+		}),
+		TrackVisual = e("Frame", {
+			ref = trackVisualRef,
+			AnchorPoint = Vector2.new(0, 0.5),
+			Position = UDim2.new(0, labelWidth + 4, 0.5, 2),
+			Size = UDim2.new(1, -(labelWidth + 4 + valueWidth + 4), 0, 8),
+			BackgroundColor3 = Colors.GREY,
 		}, {
-			Padding = e("UIPadding", {
-				PaddingRight = UDim.new(0, 4),
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 4),
+			}),
+			Fill = e("Frame", {
+				Size = UDim2.new(alpha, 0, 1, 0),
+				BackgroundColor3 = Colors.ACTION_BLUE,
+				BorderSizePixel = 0,
+			}, {
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(0, 4),
+				}),
+			}),
+			Thumb = e("Frame", {
+				AnchorPoint = Vector2.new(0.5, 0.5),
+				Position = UDim2.new(alpha, 0, 0.5, 0),
+				Size = UDim2.fromOffset(12, 12),
+				BackgroundColor3 = Colors.WHITE,
+				ZIndex = 2,
+			}, {
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(0.5, 0),
+				}),
 			}),
 		}),
-		Track = e("TextButton", {
+		HitArea = e("TextButton", {
 			Text = "",
-			Size = UDim2.new(0, 0, 0, 24),
 			BackgroundTransparency = 1,
 			AutoButtonColor = false,
-			LayoutOrder = 2,
+			Position = UDim2.new(0, labelWidth + 4 - kHitOverlap, 0, 0),
+			Size = UDim2.new(1, -(labelWidth + 4 + valueWidth + 4) + kHitOverlap * 2, 1, 0),
+			ZIndex = 3,
 			ref = trackRef,
 			[React.Event.MouseButton1Down] = function(_self: TextButton, x: number, _y: number)
 				valueFromPosition(x)
 				setDragging(true)
 			end,
-		}, {
-			Flex = e("UIFlexItem", {
-				FlexMode = Enum.UIFlexMode.Grow,
-			}),
-			Padding = e("UIPadding", {
-				PaddingLeft = UDim.new(0, 6),
-				PaddingRight = UDim.new(0, 6),
-			}),
-			TrackVisual = e("Frame", {
-				ref = trackVisualRef,
-				AnchorPoint = Vector2.new(0, 0.5),
-				Position = UDim2.new(0, 0, 0.5, 2),
-				Size = UDim2.new(1, 0, 0, 8),
-				BackgroundColor3 = Colors.GREY,
-			}, {
-				Corner = e("UICorner", {
-					CornerRadius = UDim.new(0, 4),
-				}),
-				Fill = e("Frame", {
-					Size = UDim2.new(alpha, 0, 1, 0),
-					BackgroundColor3 = Colors.ACTION_BLUE,
-					BorderSizePixel = 0,
-				}, {
-					Corner = e("UICorner", {
-						CornerRadius = UDim.new(0, 4),
-					}),
-				}),
-				Thumb = e("Frame", {
-					AnchorPoint = Vector2.new(0.5, 0.5),
-					Position = UDim2.new(alpha, 0, 0.5, 0),
-					Size = UDim2.fromOffset(12, 12),
-					BackgroundColor3 = Colors.WHITE,
-					ZIndex = 2,
-					}, {
-					Corner = e("UICorner", {
-						CornerRadius = UDim.new(0.5, 0),
-					}),
-				}),
-			}),
 		}),
 		ValueLabel = e("TextLabel", {
 			Text = displayValue,
 			TextColor3 = Colors.WHITE,
 			BackgroundTransparency = 1,
-			Size = UDim2.new(0, 32, 0, 24),
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.new(1, 0, 0, 0),
+			Size = UDim2.new(0, valueWidth, 1, 0),
 			Font = Enum.Font.RobotoMono,
 			TextSize = 16,
 			TextXAlignment = Enum.TextXAlignment.Right,
-			LayoutOrder = 3,
-		}, {
-			Padding = e("UIPadding", {
-				PaddingLeft = UDim.new(0, 4),
-			}),
 		}),
 	})
 end
