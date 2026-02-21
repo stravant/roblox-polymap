@@ -70,7 +70,7 @@ local function Slider(props: {
 	local alpha = if range > 0 then math.clamp((props.Value - min) / range, 0, 1) else 0
 	local displayValue = string.format("%.2f", props.Value)
 
-	local kHitOverlap = 10
+	local kHitOverlap = 20
 	local labelWidth = if props.Label
 		then TextService:GetTextSize(props.Label, 18, Enum.Font.SourceSans, Vector2.new(1000, 1000)).X
 		else 0
