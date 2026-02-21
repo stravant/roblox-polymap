@@ -1,3 +1,1 @@
-* Treat Block parts as two triangles. When updating these parts, "upgrade" them into Wedges as needed. They do not need to go back to being Block parts when moved back to a planar arangement, the code does not need to figure out how to "downgrade" the coplanar Wedges back into a Block, they can stay Wedges once upgraded.
-
 *

@@ -460,4 +460,150 @@ return function(t: TestTypes.TestContext)
 
 		folder:Destroy()
 	end)
+
+	t.test("discoverPart finds thin Block as two triangles", function()
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		-- Create a thin block part (thin along Y)
+		local block = Instance.new("Part")
+		block.Shape = Enum.PartType.Block
+		block.Size = Vector3.new(4, 0.2, 3)
+		block.CFrame = CFrame.new(300, 10, 0)
+		block.Anchored = true
+		block.Parent = folder
+
+		local triId = mesh.discoverPart(block)
+		t.expect(triId).toBeTruthy()
+
+		-- Should have 2 triangles (Block = quad = 2 triangles)
+		local triCount = 0
+		for _ in mesh.getTriangles() do
+			triCount += 1
+		end
+		t.expect(triCount).toBe(2)
+
+		-- Should have 4 vertices (rectangle corners)
+		local vertCount = 0
+		for _ in mesh.getVertices() do
+			vertCount += 1
+		end
+		t.expect(vertCount).toBe(4)
+
+		-- Block part should be tracked
+		t.expect(mesh.getPartTriangle(block)).toBeTruthy()
+
+		folder:Destroy()
+	end)
+
+	t.test("scanWorkspace finds thin Block parts", function()
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Name = "PolyMapTestBlockScan"
+		folder.Parent = workspace
+
+		-- Create a thin block
+		local block = Instance.new("Part")
+		block.Shape = Enum.PartType.Block
+		block.Size = Vector3.new(4, 0.2, 3)
+		block.CFrame = CFrame.new(310, 10, 0)
+		block.Anchored = true
+		block.Parent = folder
+
+		mesh.scanWorkspace(folder)
+
+		-- Should find 2 triangles from the Block
+		local triCount = 0
+		for _ in mesh.getTriangles() do
+			triCount += 1
+		end
+		t.expect(triCount).toBe(2)
+
+		folder:Destroy()
+	end)
+
+	t.test("moveVertex upgrades Block to Wedges", function()
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		-- Create a thin block part
+		local block = Instance.new("Part")
+		block.Shape = Enum.PartType.Block
+		block.Size = Vector3.new(4, 0.2, 3)
+		block.CFrame = CFrame.new(320, 10, 0)
+		block.Anchored = true
+		block.Parent = folder
+
+		mesh.discoverPart(block)
+
+		-- Find a vertex and move it up (making the quad non-planar)
+		local vid = mesh.findVertexNear(Vector3.new(322, 10.1, 1.5), 1)
+		t.expect(vid).toBeTruthy()
+		assert(vid)
+
+		mesh.moveVertex(vid, Vector3.new(322, 12, 1.5), 0.2)
+
+		-- Block should be destroyed (Parent = nil)
+		t.expect(block.Parent).toBe(nil)
+
+		-- Should still have 2 triangles with Wedge parts
+		local triCount = 0
+		for _ in mesh.getTriangles() do
+			triCount += 1
+		end
+		t.expect(triCount).toBe(2)
+
+		-- All parts should be wedge-shaped
+		for _, tri in mesh.getTriangles() do
+			for _, part in tri.parts do
+				t.expect(part.Parent).toBe(folder)
+				t.expect((part :: Part).Shape).toBe(Enum.PartType.Wedge)
+			end
+		end
+
+		folder:Destroy()
+	end)
+
+	t.test("removeTriangle on Block upgrades sibling to Wedges", function()
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		-- Create a thin block
+		local block = Instance.new("Part")
+		block.Shape = Enum.PartType.Block
+		block.Size = Vector3.new(4, 0.2, 3)
+		block.CFrame = CFrame.new(330, 10, 0)
+		block.Anchored = true
+		block.Parent = folder
+
+		local triId = mesh.discoverPart(block)
+		t.expect(triId).toBeTruthy()
+		assert(triId)
+
+		-- Remove one triangle
+		mesh.removeTriangle(triId)
+
+		-- Block should be destroyed
+		t.expect(block.Parent).toBe(nil)
+
+		-- Should have 1 remaining triangle (the sibling, upgraded to Wedges)
+		local triCount = 0
+		for _ in mesh.getTriangles() do
+			triCount += 1
+		end
+		t.expect(triCount).toBe(1)
+
+		-- The remaining triangle's parts should be Wedge parts
+		for _, tri in mesh.getTriangles() do
+			for _, part in tri.parts do
+				t.expect(part.Parent).toBe(folder)
+				t.expect((part :: Part).Shape).toBe(Enum.PartType.Wedge)
+			end
+		end
+
+		folder:Destroy()
+	end)
 end

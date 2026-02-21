@@ -2,6 +2,7 @@
 
 local fillTriangle = require("./fillTriangle")
 local getWedgeVertices = require("./getWedgeVertices")
+local getBlockVertices = require("./getBlockVertices")
 
 local SNAP_EPSILON = 0.01
 local THIN_MAX_ABSOLUTE = 1.5
@@ -14,6 +15,18 @@ local function isThinWedge(instance: Instance): BasePart?
 		local maxSize = math.max(size.X, size.Y, size.Z)
 		-- Must be thin in absolute terms AND thin relative to the largest dimension.
 		-- This rejects structural wedges (ramps, stairs) that happen to be small.
+		if minSize < THIN_MAX_ABSOLUTE and (maxSize < 0.001 or minSize / maxSize < THIN_MAX_RATIO) then
+			return instance :: BasePart
+		end
+	end
+	return nil
+end
+
+local function isThinBlock(instance: Instance): BasePart?
+	if instance:IsA("Part") and (instance :: Part).Shape == Enum.PartType.Block then
+		local size = (instance :: BasePart).Size
+		local minSize = math.min(size.X, size.Y, size.Z)
+		local maxSize = math.max(size.X, size.Y, size.Z)
 		if minSize < THIN_MAX_ABSOLUTE and (maxSize < 0.001 or minSize / maxSize < THIN_MAX_RATIO) then
 			return instance :: BasePart
 		end
@@ -102,6 +115,9 @@ local function createTriangleMesh(): TriangleMesh
 
 	-- Part -> triangle ID mapping for O(1) discovery cache
 	local mPartToTriangle: { [BasePart]: number } = {}
+
+	-- Block part -> pair of triangle IDs (for Block parts that represent 2 triangles)
+	local mBlockParts: { [BasePart]: { number } } = {}
 
 	local function positionKey(pos: Vector3): string
 		local snapped = snapPosition(pos, SNAP_EPSILON)
@@ -213,9 +229,11 @@ local function createTriangleMesh(): TriangleMesh
 			return
 		end
 
-		-- Remove part tracking
+		-- Remove part tracking (only if this triangle owns the mapping)
 		for _, part in tri.parts do
-			mPartToTriangle[part] = nil
+			if mPartToTriangle[part] == triangleId then
+				mPartToTriangle[part] = nil
+			end
 		end
 
 		-- Remove from vertices
@@ -382,6 +400,49 @@ local function createTriangleMesh(): TriangleMesh
 			return
 		end
 
+		-- If this triangle is part of a Block pair, upgrade the sibling to Wedges
+		for _, part in tri.parts do
+			local blockPair = mBlockParts[part]
+			if blockPair then
+				local siblingTriId = if blockPair[1] == triangleId then blockPair[2] else blockPair[1]
+				local siblingTri = mTriangles[siblingTriId]
+
+				if siblingTri then
+					-- Capture appearance from the block before it's destroyed
+					local parent = part.Parent or workspace
+					local blockThickness = math.min(part.Size.X, part.Size.Y, part.Size.Z)
+					local blockProps: fillTriangle.TriangleProps = {
+						Color = part.Color,
+						Material = part.Material,
+						Transparency = part.Transparency,
+					}
+
+					local sv1 = mVertices[siblingTri.vertices[1]]
+					local sv2 = mVertices[siblingTri.vertices[2]]
+					local sv3 = mVertices[siblingTri.vertices[3]]
+					if sv1 and sv2 and sv3 then
+						local newParts = fillTriangle(
+							sv1.position, sv2.position, sv3.position,
+							blockThickness, parent, blockProps
+						)
+						-- Update sibling's part tracking
+						for _, oldPart in siblingTri.parts do
+							if mPartToTriangle[oldPart] == siblingTriId then
+								mPartToTriangle[oldPart] = nil
+							end
+						end
+						siblingTri.parts = newParts
+						for _, newPart in newParts do
+							mPartToTriangle[newPart] = siblingTriId
+						end
+					end
+				end
+
+				mBlockParts[part] = nil
+				break -- A triangle has at most one block part
+			end
+		end
+
 		-- Remove parts from workspace (Parent=nil instead of Destroy for undo compatibility)
 		for _, part in tri.parts do
 			part.Parent = nil
@@ -426,8 +487,63 @@ local function createTriangleMesh(): TriangleMesh
 			end
 		end
 
-		-- 3. Update each affected triangle in-place
+		-- 2.5. Upgrade any Block parts to Wedges before the main update loop
+		local upgradedTriIds: { [number]: boolean } = {}
+		local blocksProcessed: { [BasePart]: boolean } = {}
 		for triId in affectedTriIds do
+			local tri = mTriangles[triId]
+			if tri then
+				for _, part in tri.parts do
+					if mBlockParts[part] and not blocksProcessed[part] then
+						blocksProcessed[part] = true
+						local pairTriIds = mBlockParts[part]
+						local parent = part.Parent or workspace
+						local blockProps: fillTriangle.TriangleProps = {
+							Color = part.Color,
+							Material = part.Material,
+							Transparency = part.Transparency,
+						}
+
+						-- Destroy the block part
+						part.Parent = nil
+
+						-- Create wedges for each triangle in the pair
+						for _, pairTriId in pairTriIds do
+							local pairTri = mTriangles[pairTriId]
+							if pairTri then
+								local pv1 = mVertices[pairTri.vertices[1]]
+								local pv2 = mVertices[pairTri.vertices[2]]
+								local pv3 = mVertices[pairTri.vertices[3]]
+								if pv1 and pv2 and pv3 then
+									local newParts = fillTriangle(
+										pv1.position, pv2.position, pv3.position,
+										thickness, parent, blockProps
+									)
+									-- Update part tracking
+									for _, oldPart in pairTri.parts do
+										if mPartToTriangle[oldPart] == pairTriId then
+											mPartToTriangle[oldPart] = nil
+										end
+									end
+									pairTri.parts = newParts
+									for _, newPart in newParts do
+										mPartToTriangle[newPart] = pairTriId
+									end
+									pairTri.normal = computeNormal(pv1.position, pv2.position, pv3.position)
+								end
+							end
+							upgradedTriIds[pairTriId] = true
+						end
+
+						mBlockParts[part] = nil
+					end
+				end
+			end
+		end
+
+		-- 3. Update each affected triangle in-place (skip already-upgraded ones)
+		for triId in affectedTriIds do
+			if upgradedTriIds[triId] then continue end
 			local tri = mTriangles[triId]
 			if tri then
 				local v1 = mVertices[tri.vertices[1]]
@@ -444,7 +560,9 @@ local function createTriangleMesh(): TriangleMesh
 					if #newParts > 0 then
 						-- Update part tracking
 						for _, oldPart in tri.parts do
-							mPartToTriangle[oldPart] = nil
+							if mPartToTriangle[oldPart] == triId then
+								mPartToTriangle[oldPart] = nil
+							end
 						end
 						tri.parts = newParts
 						for _, newPart in newParts do
@@ -469,7 +587,7 @@ local function createTriangleMesh(): TriangleMesh
 
 		local scanRoot = root or workspace
 		for _, desc in scanRoot:GetDescendants() do
-			if not mPartToTriangle[desc] and isThinWedge(desc) then
+			if not mPartToTriangle[desc] and (isThinWedge(desc) or isThinBlock(desc)) then
 				mesh.discoverPart(desc :: BasePart)
 			end
 		end
@@ -481,6 +599,7 @@ local function createTriangleMesh(): TriangleMesh
 		mEdges = {}
 		mPositionToVertex = {}
 		mPartToTriangle = {}
+		mBlockParts = {}
 		mNextVertexId = 1
 		mNextTriangleId = 1
 	end
@@ -577,6 +696,31 @@ local function createTriangleMesh(): TriangleMesh
 			return existing
 		end
 
+		-- Thin Block: split into 2 triangles sharing the same Block part
+		if isThinBlock(part) then
+			local va, vb, vc, vd = getBlockVertices(part)
+			local vid1 = findOrCreateVertex(va)
+			local vid2 = findOrCreateVertex(vb)
+			local vid3 = findOrCreateVertex(vc)
+			local vid4 = findOrCreateVertex(vd)
+
+			-- Check for degenerate cases
+			if vid1 == vid2 or vid2 == vid3 or vid3 == vid4 or vid4 == vid1
+				or vid1 == vid3 or vid2 == vid4 then
+				cleanupVertex(vid1)
+				cleanupVertex(vid2)
+				cleanupVertex(vid3)
+				cleanupVertex(vid4)
+				return nil
+			end
+
+			-- Register two triangles: diagonal split (v1,v2,v3) and (v1,v3,v4)
+			local triId1 = registerTriangle({ vid1, vid2, vid3 }, { part })
+			local triId2 = registerTriangle({ vid1, vid3, vid4 }, { part })
+			mBlockParts[part] = { triId1, triId2 }
+			return triId1
+		end
+
 		-- Must be a thin wedge
 		if not isThinWedge(part) then
 			return nil
@@ -644,7 +788,7 @@ local function createTriangleMesh(): TriangleMesh
 	mesh.discoverRegion = function(center: Vector3, radius: number)
 		local candidates = workspace:GetPartBoundsInRadius(center, radius)
 		for _, candidate in candidates do
-			if not mPartToTriangle[candidate] and isThinWedge(candidate) then
+			if not mPartToTriangle[candidate] and (isThinWedge(candidate) or isThinBlock(candidate)) then
 				mesh.discoverPart(candidate)
 			end
 		end
