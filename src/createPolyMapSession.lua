@@ -1066,7 +1066,24 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		if mode == "Paint" and currentSettings.PaintEyedropper ~= "None" and hitPart then
 			if currentSettings.PaintEyedropper == "Color" then
 				local col = hitPart.Color
-				currentSettings.PaintColor = { col.R, col.G, col.B }
+				local picked = { col.R, col.G, col.B }
+				currentSettings.PaintColor = picked
+				-- Add to recents if not already present
+				local found = false
+				for _, rc in currentSettings.RecentColors do
+					if math.abs(rc[1] - picked[1]) < 0.001
+						and math.abs(rc[2] - picked[2]) < 0.001
+						and math.abs(rc[3] - picked[3]) < 0.001 then
+						found = true
+						break
+					end
+				end
+				if not found then
+					table.insert(currentSettings.RecentColors, 1, picked)
+					while #currentSettings.RecentColors > 8 do
+						table.remove(currentSettings.RecentColors)
+					end
+				end
 			elseif currentSettings.PaintEyedropper == "Material" then
 				currentSettings.PaintMaterial = hitPart.Material.Name
 			end
