@@ -777,7 +777,7 @@ local function ColorPalettePopup(props: {
 	})
 end
 
-local kMaxRecentColors = 10
+local kMaxRecentColors = 8
 
 local function updateRecentColors(settings: Settings.PolyMapSettings, color: { number })
 	local recent = table.clone(settings.RecentColors)
@@ -847,7 +847,7 @@ local function ColorPanel(props: {
 	for i, color in shownColors do
 		local isCurrent = colorsMatch(color, c)
 		recentChildren[`Color{i}`] = e("TextButton", {
-			Size = UDim2.fromOffset(18, 18),
+			Size = UDim2.fromOffset(22, 22),
 			BackgroundColor3 = Color3.new(color[1], color[2], color[3]),
 			Text = "",
 			AutoButtonColor = false,
