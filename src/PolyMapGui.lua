@@ -975,7 +975,7 @@ local function MaterialPanel(props: {
 			end
 		end
 		table.insert(recent, 1, name)
-		while #recent > 6 do
+		while #recent > 4 do
 			table.remove(recent)
 		end
 		props.Settings.RecentMaterials = recent
