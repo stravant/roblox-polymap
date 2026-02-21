@@ -1591,17 +1591,17 @@ local function PolyMapGui(props: {
 				UpdatedSettings = props.UpdatedSettings,
 				LayoutOrder = nextOrder(),
 			}),
+			BrushPanel = showPaint and e(BrushPanel, {
+				Settings = currentSettings,
+				UpdatedSettings = props.UpdatedSettings,
+				LayoutOrder = nextOrder(),
+			}),
 			ColorPanel = showPaint and e(ColorPanel, {
 				Settings = currentSettings,
 				UpdatedSettings = props.UpdatedSettings,
 				LayoutOrder = nextOrder(),
 			}),
 			MaterialPanel = showPaint and e(MaterialPanel, {
-				Settings = currentSettings,
-				UpdatedSettings = props.UpdatedSettings,
-				LayoutOrder = nextOrder(),
-			}),
-			BrushPanel = showPaint and e(BrushPanel, {
 				Settings = currentSettings,
 				UpdatedSettings = props.UpdatedSettings,
 				LayoutOrder = nextOrder(),
