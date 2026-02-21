@@ -78,7 +78,7 @@ local function Slider(props: {
 			FillDirection = Enum.FillDirection.Horizontal,
 			SortOrder = Enum.SortOrder.LayoutOrder,
 			VerticalAlignment = Enum.VerticalAlignment.Center,
-			Padding = UDim.new(0, 4),
+			Padding = UDim.new(0, 0),
 		}),
 		Label = props.Label and e("TextLabel", {
 			Text = props.Label,
@@ -89,6 +89,10 @@ local function Slider(props: {
 			Font = Enum.Font.SourceSans,
 			TextSize = 18,
 			LayoutOrder = 1,
+		}, {
+			Padding = e("UIPadding", {
+				PaddingRight = UDim.new(0, 4),
+			}),
 		}),
 		Track = e("TextButton", {
 			Text = "",
@@ -106,8 +110,8 @@ local function Slider(props: {
 				FlexMode = Enum.UIFlexMode.Grow,
 			}),
 			Padding = e("UIPadding", {
-				PaddingLeft = UDim.new(0, 12),
-				PaddingRight = UDim.new(0, 12),
+				PaddingLeft = UDim.new(0, 6),
+				PaddingRight = UDim.new(0, 6),
 			}),
 			TrackVisual = e("Frame", {
 				ref = trackVisualRef,
@@ -150,6 +154,10 @@ local function Slider(props: {
 			TextSize = 16,
 			TextXAlignment = Enum.TextXAlignment.Right,
 			LayoutOrder = 3,
+		}, {
+			Padding = e("UIPadding", {
+				PaddingLeft = UDim.new(0, 4),
+			}),
 		}),
 	})
 end
