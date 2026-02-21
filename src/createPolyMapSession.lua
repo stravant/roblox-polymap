@@ -1085,7 +1085,15 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					end
 				end
 			elseif currentSettings.PaintEyedropper == "Material" then
-				currentSettings.PaintMaterial = hitPart.Material.Name
+				local matName = hitPart.Material.Name
+				currentSettings.PaintMaterial = matName
+				-- Add to recents if not already present
+				if not table.find(currentSettings.RecentMaterials, matName) then
+					table.insert(currentSettings.RecentMaterials, 1, matName)
+					while #currentSettings.RecentMaterials > 4 do
+						table.remove(currentSettings.RecentMaterials)
+					end
+				end
 			end
 			currentSettings.PaintEyedropper = "None"
 			changeSignal:Fire()
