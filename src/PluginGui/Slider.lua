@@ -91,7 +91,7 @@ local function Slider(props: {
 		}),
 		Track = e("TextButton", {
 			Text = "",
-			Size = UDim2.new(0, 0, 1, 0),
+			Size = UDim2.new(0, 0, 0, 24),
 			BackgroundTransparency = 1,
 			AutoButtonColor = false,
 			LayoutOrder = 2,
