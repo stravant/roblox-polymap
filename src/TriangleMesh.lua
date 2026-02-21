@@ -504,6 +504,9 @@ local function createTriangleMesh(): TriangleMesh
 							Transparency = part.Transparency,
 						}
 
+						-- Preserve the block's thickness
+						local blockThickness = math.min(part.Size.X, part.Size.Y, part.Size.Z)
+
 						-- Destroy the block part
 						part.Parent = nil
 
@@ -517,7 +520,7 @@ local function createTriangleMesh(): TriangleMesh
 								if pv1 and pv2 and pv3 then
 									local newParts = fillTriangle(
 										pv1.position, pv2.position, pv3.position,
-										thickness, parent, blockProps
+										blockThickness, parent, blockProps
 									)
 									-- Update part tracking
 									for _, oldPart in pairTri.parts do
@@ -552,9 +555,10 @@ local function createTriangleMesh(): TriangleMesh
 
 				if v1 and v2 and v3 then
 					local parent = tri.parts[1].Parent or workspace
+					local existingThickness = math.min(tri.parts[1].Size.X, tri.parts[1].Size.Y, tri.parts[1].Size.Z)
 					local newParts = fillTriangle(
 						v1.position, v2.position, v3.position,
-						thickness, parent, props, tri.parts
+						existingThickness, parent, props, tri.parts
 					)
 
 					if #newParts > 0 then
