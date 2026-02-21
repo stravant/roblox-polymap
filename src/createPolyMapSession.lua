@@ -766,20 +766,24 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		if not worldPos then return end
 
 		if currentSettings.DeleteTarget == "Vertex" then
-			mMesh.discoverRegion(worldPos, 15)
+			-- Only delete a vertex if the cursor directly hits one of its triangles,
+			-- preventing the delete from "spreading out" during a drag stroke.
 			local hitTriangleId = if result and result.Instance:IsA("BasePart")
 				then mMesh.getPartTriangle(result.Instance :: BasePart)
 				else nil
-			local vid = findNearestVertex(worldPos, hitTriangleId)
-			if vid then
-				local vertex = mMesh.getVertex(vid)
-				if vertex then
-					local triIds = table.clone(vertex.triangles)
-					for _, triId in triIds do
-						mMesh.removeTriangle(triId)
+			if hitTriangleId then
+				mMesh.discoverRegion(worldPos, 15)
+				local vid = findNearestVertex(worldPos, hitTriangleId)
+				if vid then
+					local vertex = mMesh.getVertex(vid)
+					if vertex then
+						local triIds = table.clone(vertex.triangles)
+						for _, triId in triIds do
+							mMesh.removeTriangle(triId)
+						end
+						mSelectedVertices[vid] = nil
+						changeSignal:Fire()
 					end
-					mSelectedVertices[vid] = nil
-					changeSignal:Fire()
 				end
 			end
 		else
