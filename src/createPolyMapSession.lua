@@ -478,7 +478,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				end
 			end
 			if mode == "Paint" then
-				local radius = currentSettings.PaintRadius
+				local radius = if currentSettings.PaintEyedropper ~= "None" then 0 else currentSettings.PaintRadius
 				if radius > 0 then
 					mMesh.discoverRegion(worldPos, radius + 5)
 					newHoverTriangles = mMesh.findTrianglesInRadius(worldPos, radius)
