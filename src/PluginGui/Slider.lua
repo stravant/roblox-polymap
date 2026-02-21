@@ -20,6 +20,7 @@ local function Slider(props: {
 })
 	local dragging, setDragging = React.useState(false)
 	local trackRef = React.useRef(nil :: TextButton?)
+	local trackVisualRef = React.useRef(nil :: Frame?)
 
 	local min = props.Min
 	local max = props.Max
@@ -34,10 +35,10 @@ local function Slider(props: {
 	end
 
 	local function valueFromPosition(absX: number)
-		local track = trackRef.current
-		if not track then return end
-		local trackLeft = track.AbsolutePosition.X
-		local trackWidth = track.AbsoluteSize.X
+		local visual = trackVisualRef.current
+		if not visual then return end
+		local trackLeft = visual.AbsolutePosition.X
+		local trackWidth = visual.AbsoluteSize.X
 		if trackWidth <= 0 then return end
 		local alpha = math.clamp((absX - trackLeft) / trackWidth, 0, 1)
 		local newValue = clampAndStep(min + alpha * range)
@@ -109,6 +110,7 @@ local function Slider(props: {
 				PaddingRight = UDim.new(0, 6),
 			}),
 			TrackVisual = e("Frame", {
+				ref = trackVisualRef,
 				AnchorPoint = Vector2.new(0, 0.5),
 				Position = UDim2.new(0, 0, 0.5, 2),
 				Size = UDim2.new(1, 0, 0, 8),
