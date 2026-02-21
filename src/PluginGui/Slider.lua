@@ -104,6 +104,10 @@ local function Slider(props: {
 			Flex = e("UIFlexItem", {
 				FlexMode = Enum.UIFlexMode.Grow,
 			}),
+			Padding = e("UIPadding", {
+				PaddingLeft = UDim.new(0, 6),
+				PaddingRight = UDim.new(0, 6),
+			}),
 			TrackVisual = e("Frame", {
 				AnchorPoint = Vector2.new(0, 0.5),
 				Position = UDim2.new(0, 0, 0.5, 2),
