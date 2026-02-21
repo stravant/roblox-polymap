@@ -91,8 +91,8 @@ local function Slider(props: {
 		}),
 		Track = e("TextButton", {
 			Text = "",
-			Size = UDim2.new(0, 0, 0, 8),
-			BackgroundColor3 = Colors.GREY,
+			Size = UDim2.new(0, 0, 1, 0),
+			BackgroundTransparency = 1,
 			AutoButtonColor = false,
 			LayoutOrder = 2,
 			ref = trackRef,
@@ -101,29 +101,36 @@ local function Slider(props: {
 				setDragging(true)
 			end,
 		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 4),
-			}),
 			Flex = e("UIFlexItem", {
 				FlexMode = Enum.UIFlexMode.Grow,
 			}),
-			Fill = e("Frame", {
-				Size = UDim2.new(alpha, 0, 1, 0),
-				BackgroundColor3 = Colors.ACTION_BLUE,
-				BorderSizePixel = 0,
+			TrackVisual = e("Frame", {
+				AnchorPoint = Vector2.new(0, 0.5),
+				Position = UDim2.new(0, 0, 0.5, 0),
+				Size = UDim2.new(1, 0, 0, 8),
+				BackgroundColor3 = Colors.GREY,
 			}, {
 				Corner = e("UICorner", {
 					CornerRadius = UDim.new(0, 4),
 				}),
-			}),
-			Thumb = e("Frame", {
-				AnchorPoint = Vector2.new(0.5, 0.5),
-				Position = UDim2.new(alpha, 0, 0.5, 0),
-				Size = UDim2.fromOffset(12, 12),
-				BackgroundColor3 = Colors.WHITE,
-			}, {
-				Corner = e("UICorner", {
-					CornerRadius = UDim.new(0.5, 0),
+				Fill = e("Frame", {
+					Size = UDim2.new(alpha, 0, 1, 0),
+					BackgroundColor3 = Colors.ACTION_BLUE,
+					BorderSizePixel = 0,
+				}, {
+					Corner = e("UICorner", {
+						CornerRadius = UDim.new(0, 4),
+					}),
+				}),
+				Thumb = e("Frame", {
+					AnchorPoint = Vector2.new(0.5, 0.5),
+					Position = UDim2.new(alpha, 0, 0.5, 0),
+					Size = UDim2.fromOffset(12, 12),
+					BackgroundColor3 = Colors.WHITE,
+					}, {
+					Corner = e("UICorner", {
+						CornerRadius = UDim.new(0.5, 0),
+					}),
 				}),
 			}),
 		}),
