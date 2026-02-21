@@ -66,7 +66,7 @@ local function Slider(props: {
 	end, { dragging } :: { any })
 
 	local alpha = if range > 0 then math.clamp((props.Value - min) / range, 0, 1) else 0
-	local displayValue = string.format("%g", props.Value)
+	local displayValue = string.format("%.2f", props.Value)
 
 	return e("Frame", {
 		Size = UDim2.new(1, 0, 0, 24),
