@@ -10,6 +10,7 @@ local PluginGui = require("./PluginGui/PluginGui")
 local OperationButton = require("./PluginGui/OperationButton")
 local ChipForToggle = require("./PluginGui/ChipForToggle")
 local NumberInput = require("./PluginGui/NumberInput")
+local Slider = require("./PluginGui/Slider")
 local HelpGui = require("./PluginGui/HelpGui")
 local OverlayGui = require("./PluginGui/OverlayGui")
 local MaterialDropdown = require("./PluginGui/MaterialDropdown")
@@ -1001,16 +1002,15 @@ local function BrushPanel(props: {
 		}),
 		PaintStrength = e(HelpGui.WithHelpIcon, {
 			LayoutOrder = nextOrder(),
-			Subject = e(NumberInput, {
+			Subject = e(Slider, {
 				Label = "Strength",
 				Value = props.Settings.PaintStrength,
-				ValueEntered = function(newValue: number)
-					if newValue >= 0 and newValue <= 1 then
-						props.Settings.PaintStrength = newValue
-						props.UpdatedSettings()
-						return newValue
-					end
-					return nil
+				Min = 0,
+				Max = 1,
+				Step = 0.05,
+				ValueChanged = function(newValue: number)
+					props.Settings.PaintStrength = newValue
+					props.UpdatedSettings()
 				end,
 			}),
 			Help = e(HelpGui.BasicTooltip, {
