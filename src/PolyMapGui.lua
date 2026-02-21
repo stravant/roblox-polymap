@@ -648,23 +648,6 @@ local function InfluencePanel(props: {
 		LayoutOrder = props.LayoutOrder,
 		Padding = UDim.new(0, 4),
 	}, {
-		RadiusInput = e(HelpGui.WithHelpIcon, {
-			LayoutOrder = nextOrder(),
-			Subject = e(Slider, {
-				Label = "Radius",
-				Value = props.Settings.InfluenceRadius,
-				Min = 0,
-				Max = 50,
-				Step = 1,
-				ValueChanged = function(newValue: number)
-					props.Settings.InfluenceRadius = newValue
-					props.UpdatedSettings()
-				end,
-			}),
-			Help = e(HelpGui.BasicTooltip, {
-				HelpRichText = "How far from the selection vertices are affected. 0 = no falloff.",
-			}),
-		}),
 		FalloffRow = e(HelpGui.WithHelpIcon, {
 			LayoutOrder = nextOrder(),
 			Subject = e("Frame", {
@@ -707,6 +690,23 @@ local function InfluencePanel(props: {
 			}),
 			Help = e(HelpGui.BasicTooltip, {
 				HelpRichText = "How influence decreases with distance.",
+			}),
+		}),
+		RadiusInput = e(HelpGui.WithHelpIcon, {
+			LayoutOrder = nextOrder(),
+			Subject = e(Slider, {
+				Label = "Radius",
+				Value = props.Settings.InfluenceRadius,
+				Min = 0,
+				Max = 50,
+				Step = 1,
+				ValueChanged = function(newValue: number)
+					props.Settings.InfluenceRadius = newValue
+					props.UpdatedSettings()
+				end,
+			}),
+			Help = e(HelpGui.BasicTooltip, {
+				HelpRichText = "How far from the selection vertices are affected. 0 = no falloff.",
 			}),
 		}),
 	})
