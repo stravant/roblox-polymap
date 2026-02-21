@@ -95,8 +95,8 @@ local function Slider(props: {
 		TrackVisual = e("Frame", {
 			ref = trackVisualRef,
 			AnchorPoint = Vector2.new(0, 0.5),
-			Position = UDim2.new(0, labelWidth + 4, 0.5, 2),
-			Size = UDim2.new(1, -(labelWidth + 4 + valueWidth + 4), 0, 8),
+			Position = UDim2.new(0, labelWidth + 8, 0.5, 2),
+			Size = UDim2.new(1, -(labelWidth + 8 + valueWidth + 4), 0, 8),
 			BackgroundColor3 = Colors.GREY,
 		}, {
 			Corner = e("UICorner", {
@@ -127,8 +127,8 @@ local function Slider(props: {
 			Text = "",
 			BackgroundTransparency = 1,
 			AutoButtonColor = false,
-			Position = UDim2.new(0, labelWidth + 4 - kHitOverlap, 0, 0),
-			Size = UDim2.new(1, -(labelWidth + 4 + valueWidth + 4) + kHitOverlap * 2, 1, 0),
+			Position = UDim2.new(0, labelWidth + 8 - kHitOverlap, 0, 0),
+			Size = UDim2.new(1, -(labelWidth + 8 + valueWidth + 4) + kHitOverlap * 2, 1, 0),
 			ZIndex = 3,
 			ref = trackRef,
 			[React.Event.MouseButton1Down] = function(_self: TextButton, x: number, _y: number)
