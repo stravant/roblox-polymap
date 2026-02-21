@@ -776,14 +776,13 @@ local function ColorPalettePopup(props: {
 	})
 end
 
-local function PaintPanel(props: {
+local function ColorPanel(props: {
 	Settings: Settings.PolyMapSettings,
 	UpdatedSettings: () -> (),
 	LayoutOrder: number?,
 })
 	local c = props.Settings.PaintColor
 	local currentColor = Color3.new(c[1], c[2], c[3])
-	local currentMaterial = props.Settings.PaintMaterial
 	local nextOrder = createNextOrder()
 	local overlayContext = OverlayGui.use()
 	local colorTriggerRef = React.useRef(nil)
@@ -801,27 +800,8 @@ local function PaintPanel(props: {
 		end
 	end
 
-	local function selectMaterial(name: string)
-		props.Settings.PaintMaterial = name
-		-- Update recent materials: move selected to front, cap at 8
-		local recent = table.clone(props.Settings.RecentMaterials)
-		-- Remove if already present
-		for i = #recent, 1, -1 do
-			if recent[i] == name then
-				table.remove(recent, i)
-			end
-		end
-		table.insert(recent, 1, name)
-		-- Cap length
-		while #recent > 6 do
-			table.remove(recent)
-		end
-		props.Settings.RecentMaterials = recent
-		props.UpdatedSettings()
-	end
-
 	return e(SubPanel, {
-		Title = "Paint",
+		Title = "Color",
 		LayoutOrder = props.LayoutOrder,
 		Padding = UDim.new(0, 4),
 	}, {
@@ -906,12 +886,59 @@ local function PaintPanel(props: {
 				end,
 			}),
 		}),
+	})
+end
+
+local function MaterialPanel(props: {
+	Settings: Settings.PolyMapSettings,
+	UpdatedSettings: () -> (),
+	LayoutOrder: number?,
+})
+	local function selectMaterial(name: string)
+		props.Settings.PaintMaterial = name
+		-- Update recent materials: move selected to front, cap at 6
+		local recent = table.clone(props.Settings.RecentMaterials)
+		-- Remove if already present
+		for i = #recent, 1, -1 do
+			if recent[i] == name then
+				table.remove(recent, i)
+			end
+		end
+		table.insert(recent, 1, name)
+		-- Cap length
+		while #recent > 6 do
+			table.remove(recent)
+		end
+		props.Settings.RecentMaterials = recent
+		props.UpdatedSettings()
+	end
+
+	return e(SubPanel, {
+		Title = "Material",
+		LayoutOrder = props.LayoutOrder,
+		Padding = UDim.new(0, 4),
+	}, {
 		Materials = e(MaterialDropdown, {
-			Current = currentMaterial,
+			Current = props.Settings.PaintMaterial,
 			RecentMaterials = props.Settings.RecentMaterials,
 			OnSelect = selectMaterial,
-			LayoutOrder = nextOrder(),
+			LayoutOrder = 1,
 		}),
+	})
+end
+
+local function BrushPanel(props: {
+	Settings: Settings.PolyMapSettings,
+	UpdatedSettings: () -> (),
+	LayoutOrder: number?,
+})
+	local nextOrder = createNextOrder()
+
+	return e(SubPanel, {
+		Title = "Brush",
+		LayoutOrder = props.LayoutOrder,
+		Padding = UDim.new(0, 4),
+	}, {
 		PaintRadius = e(HelpGui.WithHelpIcon, {
 			LayoutOrder = nextOrder(),
 			Subject = e(NumberInput, {
@@ -1351,7 +1378,17 @@ local function PolyMapGui(props: {
 				UpdatedSettings = props.UpdatedSettings,
 				LayoutOrder = nextOrder(),
 			}),
-			PaintPanel = showPaint and e(PaintPanel, {
+			ColorPanel = showPaint and e(ColorPanel, {
+				Settings = currentSettings,
+				UpdatedSettings = props.UpdatedSettings,
+				LayoutOrder = nextOrder(),
+			}),
+			MaterialPanel = showPaint and e(MaterialPanel, {
+				Settings = currentSettings,
+				UpdatedSettings = props.UpdatedSettings,
+				LayoutOrder = nextOrder(),
+			}),
+			BrushPanel = showPaint and e(BrushPanel, {
 				Settings = currentSettings,
 				UpdatedSettings = props.UpdatedSettings,
 				LayoutOrder = nextOrder(),
