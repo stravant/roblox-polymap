@@ -813,7 +813,7 @@ local function PaintPanel(props: {
 		end
 		table.insert(recent, 1, name)
 		-- Cap length
-		while #recent > 8 do
+		while #recent > 6 do
 			table.remove(recent)
 		end
 		props.Settings.RecentMaterials = recent

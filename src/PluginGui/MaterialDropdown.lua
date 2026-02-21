@@ -40,7 +40,7 @@ for _, mat in kAllMaterials do
 	kMaterialLabelMap[mat.name] = mat.label
 end
 
-local kMaxRecent = 8
+local kMaxRecent = 6
 
 local function getLabelForMaterial(name: string): string
 	return kMaterialLabelMap[name] or name
@@ -114,7 +114,7 @@ local function MaterialPopupContent(props: {
 	})
 end
 
-local kChipsPerRow = 4
+local kChipsPerRow = 2
 
 local function MaterialDropdown(props: {
 	Current: string,
