@@ -1,7 +1,5 @@
 * Treat Block parts as two triangles. When updating these parts, "upgrade" them into Wedges as needed. They do not need to go back to being Block parts when moved back to a planar arangement, the code does not need to figure out how to "downgrade" the coplanar Wedges back into a Block, they can stay Wedges once upgraded.
 
-* The radius inputs should generally be sliders instead of text inputs.
-
 * Put the slider under the falloff mode for Move / Rotate.
 
 * Delete in vertex mode "spreads out" from the hit point deleting more and more as you hold down the cursor. It should work more like face mode where it deletes vertices near the cursor only.

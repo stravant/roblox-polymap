@@ -650,17 +650,15 @@ local function InfluencePanel(props: {
 	}, {
 		RadiusInput = e(HelpGui.WithHelpIcon, {
 			LayoutOrder = nextOrder(),
-			Subject = e(NumberInput, {
+			Subject = e(Slider, {
 				Label = "Radius",
 				Value = props.Settings.InfluenceRadius,
-				Unit = " studs",
-				ValueEntered = function(newValue: number)
-					if newValue >= 0 then
-						props.Settings.InfluenceRadius = newValue
-						props.UpdatedSettings()
-						return newValue
-					end
-					return nil
+				Min = 0,
+				Max = 50,
+				Step = 1,
+				ValueChanged = function(newValue: number)
+					props.Settings.InfluenceRadius = newValue
+					props.UpdatedSettings()
 				end,
 			}),
 			Help = e(HelpGui.BasicTooltip, {
@@ -1155,17 +1153,15 @@ local function BrushPanel(props: {
 		}),
 		PaintRadius = e(HelpGui.WithHelpIcon, {
 			LayoutOrder = nextOrder(),
-			Subject = e(NumberInput, {
+			Subject = e(Slider, {
 				Label = "Radius",
 				Value = props.Settings.PaintRadius,
-				Unit = " studs",
-				ValueEntered = function(newValue: number)
-					if newValue >= 0 then
-						props.Settings.PaintRadius = newValue
-						props.UpdatedSettings()
-						return newValue
-					end
-					return nil
+				Min = 0,
+				Max = 50,
+				Step = 1,
+				ValueChanged = function(newValue: number)
+					props.Settings.PaintRadius = newValue
+					props.UpdatedSettings()
 				end,
 			}),
 			Help = e(HelpGui.BasicTooltip, {
@@ -1240,17 +1236,15 @@ local function DeletePanel(props: {
 		}),
 		Radius = e(HelpGui.WithHelpIcon, {
 			LayoutOrder = 2,
-			Subject = e(NumberInput, {
+			Subject = e(Slider, {
 				Label = "Radius",
 				Value = props.Settings.DeleteRadius,
-				Unit = " studs",
-				ValueEntered = function(newValue: number)
-					if newValue >= 0 then
-						props.Settings.DeleteRadius = newValue
-						props.UpdatedSettings()
-						return newValue
-					end
-					return nil
+				Min = 0,
+				Max = 50,
+				Step = 1,
+				ValueChanged = function(newValue: number)
+					props.Settings.DeleteRadius = newValue
+					props.UpdatedSettings()
 				end,
 			}),
 			Help = e(HelpGui.BasicTooltip, {
@@ -1327,17 +1321,15 @@ local function RelaxPanel(props: {
 	}, {
 		RadiusInput = e(HelpGui.WithHelpIcon, {
 			LayoutOrder = nextOrder(),
-			Subject = e(NumberInput, {
+			Subject = e(Slider, {
 				Label = "Radius",
 				Value = props.Settings.RelaxRadius,
-				Unit = " studs",
-				ValueEntered = function(newValue: number)
-					if newValue > 0 then
-						props.Settings.RelaxRadius = newValue
-						props.UpdatedSettings()
-						return newValue
-					end
-					return nil
+				Min = 1,
+				Max = 50,
+				Step = 1,
+				ValueChanged = function(newValue: number)
+					props.Settings.RelaxRadius = newValue
+					props.UpdatedSettings()
 				end,
 			}),
 			Help = e(HelpGui.BasicTooltip, {
@@ -1378,17 +1370,15 @@ local function FlattenPanel(props: {
 	}, {
 		RadiusInput = e(HelpGui.WithHelpIcon, {
 			LayoutOrder = nextOrder(),
-			Subject = e(NumberInput, {
+			Subject = e(Slider, {
 				Label = "Radius",
 				Value = props.Settings.FlattenRadius,
-				Unit = " studs",
-				ValueEntered = function(newValue: number)
-					if newValue > 0 then
-						props.Settings.FlattenRadius = newValue
-						props.UpdatedSettings()
-						return newValue
-					end
-					return nil
+				Min = 1,
+				Max = 50,
+				Step = 1,
+				ValueChanged = function(newValue: number)
+					props.Settings.FlattenRadius = newValue
+					props.UpdatedSettings()
 				end,
 			}),
 			Help = e(HelpGui.BasicTooltip, {
