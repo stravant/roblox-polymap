@@ -934,11 +934,52 @@ local function BrushPanel(props: {
 })
 	local nextOrder = createNextOrder()
 
+	local currentTarget = props.Settings.PaintTarget
+
 	return e(SubPanel, {
 		Title = "Brush",
 		LayoutOrder = props.LayoutOrder,
 		Padding = UDim.new(0, 4),
 	}, {
+		TargetRow = e("Frame", {
+			Size = UDim2.fromScale(1, 0),
+			AutomaticSize = Enum.AutomaticSize.Y,
+			BackgroundTransparency = 1,
+			LayoutOrder = nextOrder(),
+		}, {
+			ListLayout = e("UIListLayout", {
+				FillDirection = Enum.FillDirection.Horizontal,
+				SortOrder = Enum.SortOrder.LayoutOrder,
+				Padding = UDim.new(0, 4),
+			}),
+			ColorChip = e(ChipForToggle, {
+				Text = "Color",
+				IsCurrent = currentTarget == "Color",
+				LayoutOrder = 1,
+				OnClick = function()
+					props.Settings.PaintTarget = "Color"
+					props.UpdatedSettings()
+				end,
+			}),
+			MaterialChip = e(ChipForToggle, {
+				Text = "Material",
+				IsCurrent = currentTarget == "Material",
+				LayoutOrder = 2,
+				OnClick = function()
+					props.Settings.PaintTarget = "Material"
+					props.UpdatedSettings()
+				end,
+			}),
+			BothChip = e(ChipForToggle, {
+				Text = "Both",
+				IsCurrent = currentTarget == "Both",
+				LayoutOrder = 3,
+				OnClick = function()
+					props.Settings.PaintTarget = "Both"
+					props.UpdatedSettings()
+				end,
+			}),
+		}),
 		PaintRadius = e(HelpGui.WithHelpIcon, {
 			LayoutOrder = nextOrder(),
 			Subject = e(NumberInput, {

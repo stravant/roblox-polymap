@@ -830,17 +830,22 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			end
 
 			local paintStrength = currentSettings.PaintStrength
+			local paintTarget = currentSettings.PaintTarget
+			local doColor = paintTarget ~= "Material"
+			local doMaterial = paintTarget ~= "Color"
 			for _, part in partsToPaint do
-				if paintStrength >= 1.0 then
-					part.Color = color
-				else
-					-- Save original color on first touch so strength applies correctly
-					if not mPaintOriginalColors[part] then
-						mPaintOriginalColors[part] = part.Color
+				if doColor then
+					if paintStrength >= 1.0 then
+						part.Color = color
+					else
+						-- Save original color on first touch so strength applies correctly
+						if not mPaintOriginalColors[part] then
+							mPaintOriginalColors[part] = part.Color
+						end
+						part.Color = mPaintOriginalColors[part]:Lerp(color, paintStrength)
 					end
-					part.Color = mPaintOriginalColors[part]:Lerp(color, paintStrength)
 				end
-				if mat then
+				if doMaterial and mat then
 					part.Material = mat
 				end
 			end
