@@ -122,17 +122,13 @@ local function MaterialRecentChips(props: {
 	OnSelect: (name: string) -> (),
 	LayoutOrder: number?,
 })
-	-- Build the recent chips: current material first, then recents (deduped), capped at kMaxRecent
-	local shownMaterials: { string } = { props.Current }
-	local shownSet: { [string]: boolean } = { [props.Current] = true }
+	-- Build the recent chips (in stored order, highlight current)
+	local shownMaterials: { string } = {}
 	for _, name in props.RecentMaterials do
 		if #shownMaterials >= kMaxRecent then
 			break
 		end
-		if not shownSet[name] then
-			table.insert(shownMaterials, name)
-			shownSet[name] = true
-		end
+		table.insert(shownMaterials, name)
 	end
 
 	-- Split chips into rows of kChipsPerRow

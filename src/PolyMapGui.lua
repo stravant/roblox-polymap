@@ -828,15 +828,13 @@ local function ColorPanel(props: {
 		end
 	end
 
-	-- Build recent color swatches (current first, then recents deduped)
-	local shownColors: { { number } } = { c }
+	-- Build recent color swatches (in stored order, highlight current)
+	local shownColors: { { number } } = {}
 	for _, color in props.Settings.RecentColors do
 		if #shownColors >= kMaxRecentColors then
 			break
 		end
-		if not colorsMatch(color, c) then
-			table.insert(shownColors, color)
-		end
+		table.insert(shownColors, color)
 	end
 
 	local recentChildren: { [string]: React.ReactElement<any, any> } = {
@@ -1024,14 +1022,15 @@ local function MaterialPanel(props: {
 						CornerRadius = UDim.new(0, 4),
 					}),
 					PreviewPart = e("Part", {
-						Size = Vector3.new(10, 10, 0.1),
+						Size = Vector3.new(100, 100, 0.1),
 						Position = Vector3.new(0, 0, 0),
 						Material = (Enum.Material :: any)[props.Settings.PaintMaterial] or Enum.Material.Plastic,
 						Color = Color3.fromRGB(163, 163, 163),
 						Anchored = true,
 					}),
 					PreviewCamera = e("Camera", {
-						CFrame = CFrame.new(Vector3.new(0, 0, 6), Vector3.new(0, 0, 0)),
+						CFrame = CFrame.new(Vector3.new(0, 0, 3), Vector3.new(0, 0, 0)),
+						FieldOfView = 5,
 						ref = function(camera: Camera?)
 							if camera then
 								local vf = camera.Parent :: ViewportFrame?
