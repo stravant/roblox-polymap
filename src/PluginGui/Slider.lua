@@ -1,4 +1,5 @@
 --!strict
+local TextService = game:GetService("TextService")
 local UserInputService = game:GetService("UserInputService")
 
 local Plugin = script.Parent.Parent.Parent
@@ -70,7 +71,9 @@ local function Slider(props: {
 	local displayValue = string.format("%.2f", props.Value)
 
 	local kHitOverlap = 10
-	local labelWidth = if props.Label then 50 else 0
+	local labelWidth = if props.Label
+		then TextService:GetTextSize(props.Label, 18, Enum.Font.SourceSans, Vector2.new(1000, 1000)).X
+		else 0
 	local valueWidth = 36
 
 	return e("Frame", {
