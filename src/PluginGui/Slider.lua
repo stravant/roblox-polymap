@@ -92,6 +92,7 @@ local function Slider(props: {
 		Track = e("Frame", {
 			Size = UDim2.new(0, 0, 0, 8),
 			BackgroundColor3 = Colors.GREY,
+			Active = true,
 			LayoutOrder = 2,
 			ref = trackRef,
 			[React.Event.InputBegan] = function(_self: Frame, input: InputObject)
