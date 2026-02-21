@@ -1007,7 +1007,7 @@ local function BrushPanel(props: {
 				Value = props.Settings.PaintStrength,
 				Min = 0,
 				Max = 1,
-				Step = 0.05,
+				Step = 0.01,
 				ValueChanged = function(newValue: number)
 					props.Settings.PaintStrength = newValue
 					props.UpdatedSettings()
