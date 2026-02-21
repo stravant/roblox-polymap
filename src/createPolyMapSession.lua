@@ -1058,12 +1058,15 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 		local hitPart = if result.Instance:IsA("BasePart") then result.Instance :: BasePart else nil
 
-		-- Eyedropper intercept: sample color+material from clicked part
-		if mode == "Paint" and currentSettings.PaintEyedropper and hitPart then
-			local col = hitPart.Color
-			currentSettings.PaintColor = { col.R, col.G, col.B }
-			currentSettings.PaintMaterial = hitPart.Material.Name
-			currentSettings.PaintEyedropper = false
+		-- Eyedropper intercept: sample color or material from clicked part
+		if mode == "Paint" and currentSettings.PaintEyedropper ~= "None" and hitPart then
+			if currentSettings.PaintEyedropper == "Color" then
+				local col = hitPart.Color
+				currentSettings.PaintColor = { col.R, col.G, col.B }
+			elseif currentSettings.PaintEyedropper == "Material" then
+				currentSettings.PaintMaterial = hitPart.Material.Name
+			end
+			currentSettings.PaintEyedropper = "None"
 			changeSignal:Fire()
 			return
 		end

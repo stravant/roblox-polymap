@@ -21,7 +21,7 @@ export type PolyMapSettings = PluginGuiTypes.PluginGuiSettings & {
 	PaintMaterial: string,
 	PaintStrength: number,
 	PaintTarget: string,
-	PaintEyedropper: boolean,
+	PaintEyedropper: string, -- "None" | "Color" | "Material"
 	RelaxRadius: number,
 	RelaxStrength: number,
 	FlattenRadius: number,
@@ -65,7 +65,7 @@ local function loadSettings(plugin: Plugin): PolyMapSettings
 		PaintMaterial = raw.PaintMaterial or "Grass",
 		PaintStrength = raw.PaintStrength or 1.0,
 		PaintTarget = raw.PaintTarget or "Both",
-		PaintEyedropper = false,
+		PaintEyedropper = "None",
 		RelaxRadius = raw.RelaxRadius or 5,
 		RelaxStrength = raw.RelaxStrength or 0.5,
 		FlattenRadius = raw.FlattenRadius or 5,

@@ -906,20 +906,20 @@ local function ColorPanel(props: {
 				Size = UDim2.fromOffset(48, 24),
 				BackgroundColor3 = Colors.ACTION_BLUE,
 				Text = "Pick",
-				Font = if props.Settings.PaintEyedropper then Enum.Font.SourceSansBold else Enum.Font.SourceSans,
-				TextSize = if props.Settings.PaintEyedropper then 20 else 18,
+				Font = if props.Settings.PaintEyedropper == "Color" then Enum.Font.SourceSansBold else Enum.Font.SourceSans,
+				TextSize = if props.Settings.PaintEyedropper == "Color" then 20 else 18,
 				TextColor3 = Colors.WHITE,
-				AutoButtonColor = not props.Settings.PaintEyedropper,
+				AutoButtonColor = props.Settings.PaintEyedropper ~= "Color",
 				LayoutOrder = 2,
 				[React.Event.MouseButton1Click] = function()
-					props.Settings.PaintEyedropper = not props.Settings.PaintEyedropper
+					props.Settings.PaintEyedropper = if props.Settings.PaintEyedropper == "Color" then "None" else "Color"
 					props.UpdatedSettings()
 				end,
 			}, {
 				Corner = e("UICorner", {
 					CornerRadius = UDim.new(0, 4),
 				}),
-				Border = props.Settings.PaintEyedropper and e("UIStroke", {
+				Border = (props.Settings.PaintEyedropper == "Color") and e("UIStroke", {
 					Color = Colors.WHITE,
 					Thickness = 2,
 					ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
@@ -1055,20 +1055,20 @@ local function MaterialPanel(props: {
 				Size = UDim2.fromOffset(48, 24),
 				BackgroundColor3 = Colors.ACTION_BLUE,
 				Text = "Pick",
-				Font = if props.Settings.PaintEyedropper then Enum.Font.SourceSansBold else Enum.Font.SourceSans,
-				TextSize = if props.Settings.PaintEyedropper then 20 else 18,
+				Font = if props.Settings.PaintEyedropper == "Material" then Enum.Font.SourceSansBold else Enum.Font.SourceSans,
+				TextSize = if props.Settings.PaintEyedropper == "Material" then 20 else 18,
 				TextColor3 = Colors.WHITE,
-				AutoButtonColor = not props.Settings.PaintEyedropper,
+				AutoButtonColor = props.Settings.PaintEyedropper ~= "Material",
 				LayoutOrder = 2,
 				[React.Event.MouseButton1Click] = function()
-					props.Settings.PaintEyedropper = not props.Settings.PaintEyedropper
+					props.Settings.PaintEyedropper = if props.Settings.PaintEyedropper == "Material" then "None" else "Material"
 					props.UpdatedSettings()
 				end,
 			}, {
 				Corner = e("UICorner", {
 					CornerRadius = UDim.new(0, 4),
 				}),
-				Border = props.Settings.PaintEyedropper and e("UIStroke", {
+				Border = (props.Settings.PaintEyedropper == "Material") and e("UIStroke", {
 					Color = Colors.WHITE,
 					Thickness = 2,
 					ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
