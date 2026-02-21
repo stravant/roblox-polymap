@@ -127,6 +127,7 @@ local function Slider(props: {
 					Position = UDim2.new(alpha, 0, 0.5, 0),
 					Size = UDim2.fromOffset(12, 12),
 					BackgroundColor3 = Colors.WHITE,
+					ZIndex = 2,
 					}, {
 					Corner = e("UICorner", {
 						CornerRadius = UDim.new(0.5, 0),
