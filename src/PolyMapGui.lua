@@ -896,6 +896,11 @@ local function ColorPanel(props: {
 				Flex = e("UIFlexItem", {
 					FlexMode = Enum.UIFlexMode.Fill,
 				}),
+				DarkBorder = (c[1] + c[2] + c[3] < 0.6) and e("UIStroke", {
+					Color = Colors.OFFWHITE,
+					Thickness = 1,
+					ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+				}) or nil,
 			}),
 			PickButton = e("TextButton", {
 				Size = UDim2.fromOffset(48, 24),
