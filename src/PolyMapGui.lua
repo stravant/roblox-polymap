@@ -805,7 +805,12 @@ local function ColorPanel(props: {
 	local overlayContext = OverlayGui.use()
 	local colorTriggerRef = React.useRef(nil)
 
-	local function selectColor(color: { number })
+	local function setColor(color: { number })
+		props.Settings.PaintColor = color
+		props.UpdatedSettings()
+	end
+
+	local function selectColorFromPicker(color: { number })
 		props.Settings.PaintColor = color
 		updateRecentColors(props.Settings, color)
 		props.UpdatedSettings()
@@ -817,7 +822,7 @@ local function ColorPanel(props: {
 				Current = c,
 				OnSelect = function(color: { number })
 					overlayContext.SetOverlay(nil)
-					selectColor(color)
+					selectColorFromPicker(color)
 				end,
 			}))
 		end
@@ -850,7 +855,7 @@ local function ColorPanel(props: {
 			AutoButtonColor = false,
 			LayoutOrder = i,
 			[React.Event.MouseButton1Click] = function()
-				selectColor(color)
+				setColor(color)
 			end,
 		}, {
 			Corner = e("UICorner", {
@@ -880,7 +885,7 @@ local function ColorPanel(props: {
 				Padding = UDim.new(0, 4),
 			}),
 			ColorPreview = e("TextButton", {
-				Size = UDim2.new(1, -64, 0, 24),
+				Size = UDim2.new(1, -84, 0, 24),
 				BackgroundColor3 = currentColor,
 				Text = "",
 				AutoButtonColor = false,
@@ -894,14 +899,28 @@ local function ColorPanel(props: {
 					FlexMode = Enum.UIFlexMode.Fill,
 				}),
 			}),
-			PickButton = e(ChipForToggle, {
+			PickButton = e("TextButton", {
+				Size = UDim2.fromOffset(48, 24),
+				BackgroundColor3 = Colors.ACTION_BLUE,
 				Text = "Pick",
-				IsCurrent = props.Settings.PaintEyedropper == true,
+				Font = if props.Settings.PaintEyedropper then Enum.Font.SourceSansBold else Enum.Font.SourceSans,
+				TextSize = if props.Settings.PaintEyedropper then 20 else 18,
+				TextColor3 = Colors.WHITE,
+				AutoButtonColor = not props.Settings.PaintEyedropper,
 				LayoutOrder = 2,
-				OnClick = function()
+				[React.Event.MouseButton1Click] = function()
 					props.Settings.PaintEyedropper = not props.Settings.PaintEyedropper
 					props.UpdatedSettings()
 				end,
+			}, {
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(0, 4),
+				}),
+				Border = props.Settings.PaintEyedropper and e("UIStroke", {
+					Color = Colors.WHITE,
+					Thickness = 2,
+					ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+				}),
 			}),
 			MoreButton = e("TextButton", {
 				Size = UDim2.fromOffset(28, 24),
@@ -938,18 +957,21 @@ local function MaterialPanel(props: {
 	local overlayContext = OverlayGui.use()
 	local materialTriggerRef = React.useRef(nil)
 
-	local function selectMaterial(name: string)
+	local function setMaterial(name: string)
+		props.Settings.PaintMaterial = name
+		props.UpdatedSettings()
+	end
+
+	local function selectMaterialFromPicker(name: string)
 		props.Settings.PaintMaterial = name
 		-- Update recent materials: move selected to front, cap at 6
 		local recent = table.clone(props.Settings.RecentMaterials)
-		-- Remove if already present
 		for i = #recent, 1, -1 do
 			if recent[i] == name then
 				table.remove(recent, i)
 			end
 		end
 		table.insert(recent, 1, name)
-		-- Cap length
 		while #recent > 6 do
 			table.remove(recent)
 		end
@@ -963,13 +985,11 @@ local function MaterialPanel(props: {
 				Current = props.Settings.PaintMaterial,
 				OnSelect = function(name: string)
 					overlayContext.SetOverlay(nil)
-					selectMaterial(name)
+					selectMaterialFromPicker(name)
 				end,
 			}))
 		end
 	end
-
-	local materialLabel = MaterialDropdown.GetLabel(props.Settings.PaintMaterial)
 
 	return e(SubPanel, {
 		Title = "Material",
@@ -986,48 +1006,64 @@ local function MaterialPanel(props: {
 				SortOrder = Enum.SortOrder.LayoutOrder,
 				Padding = UDim.new(0, 4),
 			}),
-			MaterialPreview = e("ViewportFrame", {
-				Size = UDim2.fromOffset(24, 24),
+			MaterialPreview = e("TextButton", {
+				Size = UDim2.new(1, -84, 0, 24),
 				BackgroundTransparency = 1,
+				Text = "",
 				LayoutOrder = 1,
-			}, {
-				Corner = e("UICorner", {
-					CornerRadius = UDim.new(0, 4),
-				}),
-				PreviewPart = e("Part", {
-					Size = Vector3.new(4, 4, 4),
-					Position = Vector3.new(0, 0, 0),
-					Material = (Enum.Material :: any)[props.Settings.PaintMaterial] or Enum.Material.Plastic,
-					Color = Color3.fromRGB(163, 163, 163),
-					Anchored = true,
-				}),
-				PreviewCamera = e("Camera", {
-					CFrame = CFrame.new(Vector3.new(4, 3, 4), Vector3.new(0, 0, 0)),
-					ref = function(camera: Camera?)
-						if camera then
-							-- Set as CurrentCamera for the ViewportFrame
-							local vf = camera.Parent :: ViewportFrame?
-							if vf then
-								vf.CurrentCamera = camera
-							end
-						end
-					end,
-				}),
-			}),
-			MaterialLabel = e("TextButton", {
-				Size = UDim2.new(1, -60, 0, 24),
-				BackgroundTransparency = 1,
-				Text = materialLabel,
-				Font = Enum.Font.SourceSansBold,
-				TextSize = 18,
-				TextColor3 = Colors.WHITE,
-				TextXAlignment = Enum.TextXAlignment.Left,
-				AutoButtonColor = false,
-				LayoutOrder = 2,
 				[React.Event.MouseButton1Click] = openMaterialPopup,
 			}, {
 				Flex = e("UIFlexItem", {
 					FlexMode = Enum.UIFlexMode.Fill,
+				}),
+				Viewport = e("ViewportFrame", {
+					Size = UDim2.fromScale(1, 1),
+					BackgroundColor3 = Colors.BLACK,
+				}, {
+					Corner = e("UICorner", {
+						CornerRadius = UDim.new(0, 4),
+					}),
+					PreviewPart = e("Part", {
+						Size = Vector3.new(10, 10, 0.1),
+						Position = Vector3.new(0, 0, 0),
+						Material = (Enum.Material :: any)[props.Settings.PaintMaterial] or Enum.Material.Plastic,
+						Color = Color3.fromRGB(163, 163, 163),
+						Anchored = true,
+					}),
+					PreviewCamera = e("Camera", {
+						CFrame = CFrame.new(Vector3.new(0, 0, 6), Vector3.new(0, 0, 0)),
+						ref = function(camera: Camera?)
+							if camera then
+								local vf = camera.Parent :: ViewportFrame?
+								if vf then
+									vf.CurrentCamera = camera
+								end
+							end
+						end,
+					}),
+				}),
+			}),
+			PickButton = e("TextButton", {
+				Size = UDim2.fromOffset(48, 24),
+				BackgroundColor3 = Colors.ACTION_BLUE,
+				Text = "Pick",
+				Font = if props.Settings.PaintEyedropper then Enum.Font.SourceSansBold else Enum.Font.SourceSans,
+				TextSize = if props.Settings.PaintEyedropper then 20 else 18,
+				TextColor3 = Colors.WHITE,
+				AutoButtonColor = not props.Settings.PaintEyedropper,
+				LayoutOrder = 2,
+				[React.Event.MouseButton1Click] = function()
+					props.Settings.PaintEyedropper = not props.Settings.PaintEyedropper
+					props.UpdatedSettings()
+				end,
+			}, {
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(0, 4),
+				}),
+				Border = props.Settings.PaintEyedropper and e("UIStroke", {
+					Color = Colors.WHITE,
+					Thickness = 2,
+					ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
 				}),
 			}),
 			MoreButton = e("TextButton", {
@@ -1050,7 +1086,7 @@ local function MaterialPanel(props: {
 		RecentChips = e(MaterialDropdown.RecentChips, {
 			Current = props.Settings.PaintMaterial,
 			RecentMaterials = props.Settings.RecentMaterials,
-			OnSelect = selectMaterial,
+			OnSelect = setMaterial,
 			LayoutOrder = nextOrder(),
 		}),
 	})
