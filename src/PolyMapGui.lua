@@ -1025,7 +1025,11 @@ local function MaterialPanel(props: {
 						Size = Vector3.new(100, 100, 0.1),
 						Position = Vector3.new(0, 0, 0),
 						Material = (Enum.Material :: any)[props.Settings.PaintMaterial] or Enum.Material.Plastic,
-						Color = Color3.fromRGB(163, 163, 163),
+						Color = Color3.new(
+							props.Settings.PaintColor[1],
+							props.Settings.PaintColor[2],
+							props.Settings.PaintColor[3]
+						),
 						Anchored = true,
 					}),
 					PreviewCamera = e("Camera", {
