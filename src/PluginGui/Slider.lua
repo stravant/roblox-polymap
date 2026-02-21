@@ -19,7 +19,7 @@ local function Slider(props: {
 	LayoutOrder: number?,
 })
 	local dragging, setDragging = React.useState(false)
-	local trackRef = React.useRef(nil :: Frame?)
+	local trackRef = React.useRef(nil :: TextButton?)
 
 	local min = props.Min
 	local max = props.Max
@@ -89,17 +89,16 @@ local function Slider(props: {
 			TextSize = 18,
 			LayoutOrder = 1,
 		}),
-		Track = e("Frame", {
+		Track = e("TextButton", {
+			Text = "",
 			Size = UDim2.new(0, 0, 0, 8),
 			BackgroundColor3 = Colors.GREY,
-			Active = true,
+			AutoButtonColor = false,
 			LayoutOrder = 2,
 			ref = trackRef,
-			[React.Event.InputBegan] = function(_self: Frame, input: InputObject)
-				if input.UserInputType == Enum.UserInputType.MouseButton1 then
-					valueFromPosition(input.Position.X)
-					setDragging(true)
-				end
+			[React.Event.MouseButton1Down] = function(_self: TextButton, x: number, _y: number)
+				valueFromPosition(x)
+				setDragging(true)
 			end,
 		}, {
 			Corner = e("UICorner", {
