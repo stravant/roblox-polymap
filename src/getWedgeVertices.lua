@@ -13,6 +13,30 @@
 --
 -- The thin axis is identified as the smallest Size component.
 -- The triangle vertices are computed in the plane perpendicular to the thin axis.
+
+-- Pick a consistent sign for a direction vector to select which face of a
+-- wedge part to use. This is an odd function: f(-dir) = -f(dir), which
+-- ensures both parts of a fillTriangle pair extract from the same face
+-- even though their thin axes point in opposite directions.
+-- Y is checked first because fillTriangle guarantees normal.Y > 0, so the
+-- thin axis direction always has a nonzero Y component for non-vertical
+-- triangles. For vertical walls (Y ≈ 0), Z then X break the tie.
+local function consistentSign(dir: Vector3): number
+	if dir.Y > 0.0001 then
+		return 1
+	elseif dir.Y < -0.0001 then
+		return -1
+	elseif dir.Z > 0.0001 then
+		return 1
+	elseif dir.Z < -0.0001 then
+		return -1
+	elseif dir.X > 0.0001 then
+		return 1
+	else
+		return -1
+	end
+end
+
 local function getWedgeVertices(wedge: BasePart, hitNormal: Vector3?): (Vector3, Vector3, Vector3)
 	local size = wedge.Size
 	local cf = wedge.CFrame
@@ -31,7 +55,7 @@ local function getWedgeVertices(wedge: BasePart, hitNormal: Vector3?): (Vector3,
 	--   +1 = face at +halfThinAxis, -1 = face at -halfThinAxis.
 	-- When hitNormal is provided, we pick the face whose outward normal is
 	-- most aligned with the hit normal (i.e., the face the raycast hit).
-	-- Otherwise we use the _pmSurfaceSign attribute or Y-heuristic fallback.
+	-- Otherwise we use consistentSign to pick a face deterministically.
 	local minAxis: string
 	local topSign: number
 	if size.X <= size.Y and size.X <= size.Z then
@@ -39,24 +63,14 @@ local function getWedgeVertices(wedge: BasePart, hitNormal: Vector3?): (Vector3,
 		if hitNormal then
 			topSign = if hitNormal:Dot(cf.RightVector) > 0 then 1 else -1
 		else
-			local surfaceSignAttr = (wedge :: any):GetAttribute("_pmSurfaceSign")
-			if surfaceSignAttr then
-				topSign = surfaceSignAttr
-			else
-				topSign = if cf.RightVector.Y > 0.01 then 1 else -1
-			end
+			topSign = consistentSign(cf.RightVector)
 		end
 	elseif size.Y <= size.X and size.Y <= size.Z then
 		minAxis = "Y"
 		if hitNormal then
 			topSign = if hitNormal:Dot(cf.UpVector) > 0 then 1 else -1
 		else
-			local surfaceSignAttr = (wedge :: any):GetAttribute("_pmSurfaceSign")
-			if surfaceSignAttr then
-				topSign = surfaceSignAttr
-			else
-				topSign = if cf.UpVector.Y > 0.01 then 1 else -1
-			end
+			topSign = consistentSign(cf.UpVector)
 		end
 	else
 		minAxis = "Z"
@@ -64,12 +78,7 @@ local function getWedgeVertices(wedge: BasePart, hitNormal: Vector3?): (Vector3,
 			-- LookVector points along -Z, so negate
 			topSign = if hitNormal:Dot(-cf.LookVector) > 0 then 1 else -1
 		else
-			local surfaceSignAttr = (wedge :: any):GetAttribute("_pmSurfaceSign")
-			if surfaceSignAttr then
-				topSign = surfaceSignAttr
-			else
-				topSign = if -cf.LookVector.Y > 0.01 then 1 else -1
-			end
+			topSign = consistentSign(-cf.LookVector)
 		end
 	end
 

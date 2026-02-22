@@ -865,14 +865,21 @@ return function(t: TestTypes.TestContext)
 			end
 		end
 
-		-- Two adjacent vertical wall triangles
+		-- Two adjacent vertical wall triangles sharing edge a-b
 		local a = Vector3.new(1100, 0, 1100)
 		local b = Vector3.new(1104, 0, 1100)
 		local c = Vector3.new(1102, 3, 1100)
 		local d = Vector3.new(1102, -3, 1100)
-		fillTriangle(a, b, c, 0.2, folder)
+		local parts1 = fillTriangle(a, b, c, 0.2, folder)
 		fillTriangle(a, b, d, 0.2, folder)
 
+		-- Discover the first triangle with a hitNormal to anchor the correct
+		-- face (the Z=1100 surface). This mirrors actual usage where the user
+		-- clicks on a part. The second triangle is then discovered via
+		-- discoverRegion and snaps to the first triangle's shared vertices.
+		-- Triangle 1's normal is +Z, so parts extend to Z=1100.2. The
+		-- surface face at Z=1100 has outward normal (0,0,-1).
+		mesh.discoverPart(parts1[1], Vector3.new(0, 0, -1))
 		mesh.discoverRegion(Vector3.new(1102, 0, 1100), 20)
 
 		local triCount = 0

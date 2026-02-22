@@ -108,6 +108,41 @@ local function edgeKey(v1: number, v2: number): string
 	return `{a}_{b}`
 end
 
+-- Pick a consistent sign for a direction vector to select which face of a
+-- wedge part to use. This is an odd function: f(-dir) = -f(dir), which
+-- ensures both parts of a fillTriangle pair extract from the same face
+-- even though their thin axes point in opposite directions.
+-- Y is checked first because fillTriangle guarantees normal.Y > 0, so the
+-- thin axis direction always has a nonzero Y component for non-vertical
+-- triangles. For vertical walls (Y ≈ 0), Z then X break the tie.
+local function consistentSign(dir: Vector3): number
+	if dir.Y > 0.0001 then
+		return 1
+	elseif dir.Y < -0.0001 then
+		return -1
+	elseif dir.Z > 0.0001 then
+		return 1
+	elseif dir.Z < -0.0001 then
+		return -1
+	elseif dir.X > 0.0001 then
+		return 1
+	else
+		return -1
+	end
+end
+
+local function getThinAxisDir(part: BasePart): Vector3
+	local size = part.Size
+	local cf = part.CFrame
+	if size.X <= size.Y and size.X <= size.Z then
+		return cf.RightVector
+	elseif size.Y <= size.X and size.Y <= size.Z then
+		return cf.UpVector
+	else
+		return -cf.LookVector
+	end
+end
+
 local function createTriangleMesh(): TriangleMesh
 	local mVertices: { [number]: Vertex } = {}
 	local mTriangles: { [number]: Triangle } = {}
@@ -818,15 +853,8 @@ local function createTriangleMesh(): TriangleMesh
 			thinAxisDir = -cf.LookVector
 		end
 
-		-- The front face was discovered using _pmSurfaceSign or Y-heuristic.
-		-- Determine which sign it used.
-		local frontSign: number
-		local surfaceSignAttr = (part :: any):GetAttribute("_pmSurfaceSign")
-		if surfaceSignAttr then
-			frontSign = surfaceSignAttr
-		else
-			frontSign = if thinAxisDir.Y > 0.01 then 1 else -1
-		end
+		-- The front face was discovered using consistentSign (same as getWedgeVertices default).
+		local frontSign = consistentSign(thinAxisDir)
 
 		-- hitNormal aligns with +thinAxisDir means sign=+1, else sign=-1
 		local hitSign = if hitNormal:Dot(thinAxisDir) > 0 then 1 else -1
@@ -903,8 +931,6 @@ local function createTriangleMesh(): TriangleMesh
 		local maxDim = math.max(part.Size.X, part.Size.Y, part.Size.Z)
 		local candidates = workspace:GetPartBoundsInRadius(part.CFrame.Position, maxDim * 2)
 
-		local partSurfaceSign = (part :: any):GetAttribute("_pmSurfaceSign")
-
 		for _, candidate in candidates do
 			if candidate == part then continue end
 			if not isThinWedge(candidate) then continue end
@@ -918,18 +944,45 @@ local function createTriangleMesh(): TriangleMesh
 				end
 			end
 
-			-- fillTriangle pairs always have opposite surface signs (-1 and +1).
-			-- If both parts have the same sign, they're from different triangles.
-			local candidateSurfaceSign = (candidate :: any):GetAttribute("_pmSurfaceSign")
-			if partSurfaceSign and candidateSurfaceSign and partSurfaceSign == candidateSurfaceSign then
-				continue
-			end
-
 			local v2a, v2b, v2c = getWedgeVertices(candidate)
 			local verts2 = { v2a, v2b, v2c }
 
 			local corners = tryPairWedges(verts1, verts2)
 			if corners then
+				-- If not all corners snap to existing vertices, try the
+				-- opposite face. This handles adjacent vertical wall triangles
+				-- with opposite normals, where the heuristic picks different
+				-- faces for the two triangles.
+				if next(mVertices) then
+					local snapCount = 0
+					for _, c in corners do
+						if mPositionToVertex[positionKey(c)] then
+							snapCount += 1
+						end
+					end
+					if snapCount < 3 then
+						local dir1 = getThinAxisDir(part)
+						local dir2 = getThinAxisDir(candidate)
+						local altV1a, altV1b, altV1c = getWedgeVertices(part, dir1 * -consistentSign(dir1))
+						local altV2a, altV2b, altV2c = getWedgeVertices(candidate, dir2 * -consistentSign(dir2))
+						local altCorners = tryPairWedges(
+							{ altV1a, altV1b, altV1c },
+							{ altV2a, altV2b, altV2c }
+						)
+						if altCorners then
+							local altSnapCount = 0
+							for _, c in altCorners do
+								if mPositionToVertex[positionKey(c)] then
+									altSnapCount += 1
+								end
+							end
+							if altSnapCount > snapCount then
+								corners = altCorners
+							end
+						end
+					end
+				end
+
 				-- If candidate was a single-wedge triangle, unregister it
 				if candidateTriId then
 					local oldTri = mTriangles[candidateTriId]
@@ -971,6 +1024,7 @@ local function createTriangleMesh(): TriangleMesh
 				mesh.discoverPart(candidate)
 			end
 		end
+
 	end
 
 	mesh.refreshFromParts = function()

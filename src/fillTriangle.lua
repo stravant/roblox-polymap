@@ -154,7 +154,6 @@ local function fillTriangle(
 		end
 		part1.Size = Vector3.new(depth, width, len1)
 		part1.CFrame = maincf * CFrame.Angles(math.pi, 0, math.pi / 2) * CFrame.new(depth / 2, width / 2, len1 / 2)
-		part1:SetAttribute("_pmSurfaceSign", -1)
 		table.insert(createdParts, part1)
 	end
 	if len2 > 0.001 then
@@ -175,7 +174,6 @@ local function fillTriangle(
 		end
 		part2.Size = Vector3.new(depth, width, len2)
 		part2.CFrame = maincf * CFrame.Angles(math.pi, math.pi, -math.pi / 2) * CFrame.new(-depth / 2, width / 2, -len1 - len2 / 2)
-		part2:SetAttribute("_pmSurfaceSign", 1)
 		table.insert(createdParts, part2)
 	end
 
