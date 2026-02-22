@@ -27,19 +27,36 @@ local function getWedgeVertices(wedge: BasePart): (Vector3, Vector3, Vector3)
 	-- Identify the thin axis (the thickness/depth direction) as the smallest
 	-- Size component. fillTriangle always puts depth in Size.X, but foreign
 	-- parts may use any axis, so we check all three.
-	-- topSign picks the triangular face that faces upward (positive Y).
+	-- topSign picks which triangular end-face to extract vertices from:
+	--   +1 = face at +halfThinAxis, -1 = face at -halfThinAxis.
+	-- fillTriangle stores "_pmSurfaceSign" on each part to indicate which
+	-- face is the surface. For foreign parts we fall back to a Y-heuristic
+	-- that picks the face whose outward normal has the larger Y component.
+	local surfaceSignAttr = (wedge :: any):GetAttribute("_pmSurfaceSign")
 	local minAxis: string
 	local topSign: number
 	if size.X <= size.Y and size.X <= size.Z then
 		minAxis = "X"
-		topSign = if cf.RightVector.Y >= 0 then 1 else -1
+		if surfaceSignAttr then
+			topSign = surfaceSignAttr
+		else
+			topSign = if cf.RightVector.Y > 0.01 then 1 else -1
+		end
 	elseif size.Y <= size.X and size.Y <= size.Z then
 		minAxis = "Y"
-		topSign = if cf.UpVector.Y >= 0 then 1 else -1
+		if surfaceSignAttr then
+			topSign = surfaceSignAttr
+		else
+			topSign = if cf.UpVector.Y > 0.01 then 1 else -1
+		end
 	else
 		minAxis = "Z"
-		-- LookVector points along -Z, so negate
-		topSign = if -cf.LookVector.Y >= 0 then 1 else -1
+		if surfaceSignAttr then
+			topSign = surfaceSignAttr
+		else
+			-- LookVector points along -Z, so negate
+			topSign = if -cf.LookVector.Y > 0.01 then 1 else -1
+		end
 	end
 
 	local v1, v2, v3: Vector3

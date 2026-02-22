@@ -90,6 +90,9 @@ export type TriangleMesh = {
 local function snapPosition(position: Vector3, epsilon: number): Vector3
 	local function snapComponent(v: number): number
 		local rounded = math.round(v / epsilon) * epsilon
+		if rounded == 0 then
+			return 0
+		end
 		return rounded
 	end
 	return Vector3.new(
@@ -827,6 +830,8 @@ local function createTriangleMesh(): TriangleMesh
 		local maxDim = math.max(part.Size.X, part.Size.Y, part.Size.Z)
 		local candidates = workspace:GetPartBoundsInRadius(part.CFrame.Position, maxDim * 2)
 
+		local partSurfaceSign = (part :: any):GetAttribute("_pmSurfaceSign")
+
 		for _, candidate in candidates do
 			if candidate == part then continue end
 			if not isThinWedge(candidate) then continue end
@@ -838,6 +843,13 @@ local function createTriangleMesh(): TriangleMesh
 				if candidateTri and #candidateTri.parts == 2 then
 					continue
 				end
+			end
+
+			-- fillTriangle pairs always have opposite surface signs (-1 and +1).
+			-- If both parts have the same sign, they're from different triangles.
+			local candidateSurfaceSign = (candidate :: any):GetAttribute("_pmSurfaceSign")
+			if partSurfaceSign and candidateSurfaceSign and partSurfaceSign == candidateSurfaceSign then
+				continue
 			end
 
 			local v2a, v2b, v2c = getWedgeVertices(candidate)

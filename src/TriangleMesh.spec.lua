@@ -719,4 +719,182 @@ return function(t: TestTypes.TestContext)
 
 		folder:Destroy()
 	end)
+
+	t.test("discoverPart recovers correct vertices for underhanging triangle", function()
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		-- Create an underhanging triangle (normal pointing down) via fillTriangle directly
+		local a = Vector3.new(480, 10, 0)
+		local b = Vector3.new(482, 10, 3)
+		local c = Vector3.new(484, 10, 0)
+		local parts = fillTriangle(a, b, c, 0.2, folder)
+		t.expect(#parts > 0).toBeTruthy()
+
+		-- Discover the parts
+		local triId = mesh.discoverPart(parts[1])
+		t.expect(triId).toBeTruthy()
+		assert(triId)
+
+		-- The discovered triangle's vertices should match the original positions
+		local tri = mesh.getTriangle(triId)
+		assert(tri)
+		local discoveredPositions: { Vector3 } = {}
+		for _, vid in tri.vertices do
+			local v = mesh.getVertex(vid)
+			assert(v)
+			table.insert(discoveredPositions, v.position)
+		end
+
+		-- Check that each original vertex has a match in the discovered positions
+		local EPSILON = 0.05
+		for _, original in { a, b, c } do
+			local found = false
+			for _, discovered in discoveredPositions do
+				if (original - discovered).Magnitude < EPSILON then
+					found = true
+					break
+				end
+			end
+			t.expect(found).toBeTruthy()
+		end
+
+		folder:Destroy()
+	end)
+
+	t.test("discoverPart recovers correct vertices for vertical wall triangle", function()
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		-- Create a vertical wall triangle (normal pointing in Z direction)
+		local a = Vector3.new(600, 0, 600)
+		local b = Vector3.new(604, 0, 600)
+		local c = Vector3.new(602, 3, 600)
+		local parts = fillTriangle(a, b, c, 0.2, folder)
+		t.expect(#parts > 0).toBeTruthy()
+
+		local triId = mesh.discoverPart(parts[1])
+		t.expect(triId).toBeTruthy()
+		assert(triId)
+
+		local tri = mesh.getTriangle(triId)
+		assert(tri)
+		local discoveredPositions: { Vector3 } = {}
+		for _, vid in tri.vertices do
+			local v = mesh.getVertex(vid)
+			assert(v)
+			table.insert(discoveredPositions, v.position)
+		end
+
+		local EPSILON = 0.05
+		for _, original in { a, b, c } do
+			local found = false
+			for _, discovered in discoveredPositions do
+				if (original - discovered).Magnitude < EPSILON then
+					found = true
+					break
+				end
+			end
+			t.expect(found).toBeTruthy()
+		end
+
+		folder:Destroy()
+	end)
+
+	t.test("walkSurface connects adjacent underhanging triangles", function()
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		-- Clean up any leftover parts from previous test runs
+		for _, p in workspace:GetPartBoundsInRadius(Vector3.new(1002, 10, 1000), 30) do
+			if p:IsA("BasePart") then
+				p:Destroy()
+			end
+		end
+
+		-- Create two adjacent underhanging triangles via fillTriangle
+		-- (sharing edge a-c, with normals pointing down)
+		local a = Vector3.new(1000, 10, 1000)
+		local b = Vector3.new(1002, 10, 1003)
+		local c = Vector3.new(1004, 10, 1000)
+		local d = Vector3.new(1002, 10, 997)
+		fillTriangle(a, b, c, 0.2, folder)
+		fillTriangle(a, c, d, 0.2, folder)
+
+		-- Discover all parts in the region
+		mesh.discoverRegion(Vector3.new(1002, 10, 1000), 20)
+
+		-- Should have 2 triangles with 4 vertices (a, b, c, d)
+		local triCount = 0
+		local firstTriId: number? = nil
+		for triId in mesh.getTriangles() do
+			triCount += 1
+			if not firstTriId then
+				firstTriId = triId
+			end
+		end
+		t.expect(triCount).toBe(2)
+
+		local vertCount = 0
+		for _ in mesh.getVertices() do
+			vertCount += 1
+		end
+		t.expect(vertCount).toBe(4)
+
+		-- Walk from one triangle should reach both
+		assert(firstTriId)
+		local triangles = mesh.walkSurface(firstTriId, Vector3.new(1002, 10, 1000), 20)
+		t.expect(#triangles).toBe(2)
+
+		folder:Destroy()
+	end)
+
+	t.test("walkSurface connects adjacent vertical wall triangles", function()
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		-- Clean up any leftover parts from previous test runs
+		local center = Vector3.new(1102, 0, 1100)
+		for _, p in workspace:GetPartBoundsInRadius(center, 30) do
+			if p:IsA("BasePart") then
+				p:Destroy()
+			end
+		end
+
+		-- Two adjacent vertical wall triangles
+		local a = Vector3.new(1100, 0, 1100)
+		local b = Vector3.new(1104, 0, 1100)
+		local c = Vector3.new(1102, 3, 1100)
+		local d = Vector3.new(1102, -3, 1100)
+		fillTriangle(a, b, c, 0.2, folder)
+		fillTriangle(a, b, d, 0.2, folder)
+
+		mesh.discoverRegion(Vector3.new(1102, 0, 1100), 20)
+
+		local triCount = 0
+		local firstTriId: number? = nil
+		for triId in mesh.getTriangles() do
+			triCount += 1
+			if not firstTriId then
+				firstTriId = triId
+			end
+		end
+		t.expect(triCount).toBe(2)
+
+		local vertCount = 0
+		for _ in mesh.getVertices() do
+			vertCount += 1
+		end
+		t.expect(vertCount).toBe(4)
+
+		assert(firstTriId)
+		local triangles = mesh.walkSurface(firstTriId, Vector3.new(1102, 0, 1100), 20)
+		t.expect(#triangles).toBe(2)
+
+		folder:Destroy()
+	end)
 end
