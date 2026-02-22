@@ -76,6 +76,7 @@ export type TriangleMesh = {
 	-- Queries (topology)
 	getAdjacentTriangles: (triangleId: number) -> { number },
 	findTrianglesInRadius: (center: Vector3, radius: number) -> { number },
+	walkSurface: (seedTriangleId: number, center: Vector3, radius: number) -> ({ number }, { number }),
 
 	-- Discovery / Scanning
 	discoverPart: (part: BasePart) -> number?,
@@ -351,6 +352,95 @@ local function createTriangleMesh(): TriangleMesh
 			end
 		end
 		return result
+	end
+
+	-- Walk the mesh surface starting from a seed triangle, discovering adjacent
+	-- parts via small per-vertex spatial queries. Returns only geometry reachable
+	-- by walking connectivity, so it stays on the intended surface.
+	mesh.walkSurface = function(seedTriangleId: number, center: Vector3, radius: number): ({ number }, { number })
+		local seedTri = mTriangles[seedTriangleId]
+		if not seedTri then
+			return {}, {}
+		end
+
+		local visitedVertices: { [number]: boolean } = {}
+		local visitedTriangles: { [number]: boolean } = {}
+		local queue: { number } = {} -- vertex id queue
+		local queueHead = 1
+
+		-- Seed with the seed triangle's vertices
+		for _, vid in seedTri.vertices do
+			if not visitedVertices[vid] then
+				visitedVertices[vid] = true
+				table.insert(queue, vid)
+			end
+		end
+		visitedTriangles[seedTriangleId] = true
+
+		-- BFS over vertices
+		while queueHead <= #queue do
+			local vid = queue[queueHead]
+			queueHead += 1
+
+			local vertex = mVertices[vid]
+			if not vertex then continue end
+
+			-- Discover undiscovered adjacent parts via small spatial query
+			local candidates = workspace:GetPartBoundsInRadius(vertex.position, 5)
+			for _, candidate in candidates do
+				if not mPartToTriangle[candidate] and (isThinWedge(candidate) or isThinBlock(candidate)) then
+					mesh.discoverPart(candidate)
+				end
+			end
+
+			-- Visit all triangles touching this vertex
+			for _, triId in vertex.triangles do
+				if visitedTriangles[triId] then continue end
+				visitedTriangles[triId] = true
+
+				local tri = mTriangles[triId]
+				if not tri then continue end
+
+				-- Enqueue unvisited vertices from this triangle if within extended radius
+				for _, triVid in tri.vertices do
+					if not visitedVertices[triVid] then
+						local triVertex = mVertices[triVid]
+						if triVertex and (triVertex.position - center).Magnitude <= radius + 5 then
+							visitedVertices[triVid] = true
+							table.insert(queue, triVid)
+						end
+					end
+				end
+			end
+		end
+
+		-- Final filter: only include triangles with at least one vertex within radius,
+		-- and only vertices within radius
+		local resultTriangles: { number } = {}
+		local resultVertices: { number } = {}
+		local vertexInRadius: { [number]: boolean } = {}
+
+		for vid in visitedVertices do
+			local vertex = mVertices[vid]
+			if vertex and (vertex.position - center).Magnitude <= radius then
+				vertexInRadius[vid] = true
+				table.insert(resultVertices, vid)
+			end
+		end
+
+		for triId in visitedTriangles do
+			local tri = mTriangles[triId]
+			if tri then
+				for _, vid in tri.vertices do
+					if vertexInRadius[vid] then
+						table.insert(resultTriangles, triId)
+						break
+					end
+				end
+			end
+		end
+
+		return resultTriangles, resultVertices
 	end
 
 	mesh.findVertexNear = function(position: Vector3, radius: number): number?

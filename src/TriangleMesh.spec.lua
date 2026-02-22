@@ -606,4 +606,117 @@ return function(t: TestTypes.TestContext)
 
 		folder:Destroy()
 	end)
+
+	t.test("walkSurface returns seed triangle with small radius", function()
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		-- Use far-away positions to avoid picking up other test geometry
+		local triId = mesh.addTriangle(
+			Vector3.new(400, 0, 0),
+			Vector3.new(404, 0, 0),
+			Vector3.new(402, 0, 3),
+			0.2, folder
+		)
+		assert(triId)
+
+		-- Radius of 3 centered on the centroid should return the seed triangle
+		local center = (Vector3.new(400, 0, 0) + Vector3.new(404, 0, 0) + Vector3.new(402, 0, 3)) / 3
+		local triangles, vertices = mesh.walkSurface(triId, center, 3)
+
+		t.expect(#triangles).toBe(1)
+		t.expect(triangles[1]).toBe(triId)
+		t.expect(#vertices).toBe(3)
+
+		folder:Destroy()
+	end)
+
+	t.test("walkSurface walks connected triangles within radius", function()
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		-- Create two adjacent triangles far from other test geometry
+		local tri1 = mesh.addTriangle(
+			Vector3.new(420, 0, 0),
+			Vector3.new(424, 0, 0),
+			Vector3.new(422, 0, 3),
+			0.2, folder
+		)
+		local tri2 = mesh.addTriangle(
+			Vector3.new(420, 0, 0),
+			Vector3.new(424, 0, 0),
+			Vector3.new(422, 0, -3),
+			0.2, folder
+		)
+		assert(tri1)
+		assert(tri2)
+
+		-- Walk from tri1 with a large enough radius to include both
+		local triangles, vertices = mesh.walkSurface(tri1, Vector3.new(422, 0, 0), 10)
+
+		t.expect(#triangles).toBe(2)
+		t.expect(#vertices).toBe(4)
+
+		folder:Destroy()
+	end)
+
+	t.test("walkSurface does NOT include disconnected triangles at same position", function()
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		-- Create two disconnected triangles at nearby positions (no shared vertices)
+		local tri1 = mesh.addTriangle(
+			Vector3.new(440, 0, 0),
+			Vector3.new(444, 0, 0),
+			Vector3.new(442, 0, 3),
+			0.2, folder
+		)
+		-- This triangle is 10 units above, nearby but shares no vertices/edges
+		local tri2 = mesh.addTriangle(
+			Vector3.new(440, 10, 0),
+			Vector3.new(444, 10, 0),
+			Vector3.new(442, 10, 3),
+			0.2, folder
+		)
+		assert(tri1)
+		assert(tri2)
+
+		-- Walk from tri1 — should not cross to tri2 even though it's in the mesh
+		local triangles = mesh.walkSurface(tri1, Vector3.new(442, 0, 1), 10)
+
+		t.expect(#triangles).toBe(1)
+		t.expect(triangles[1]).toBe(tri1)
+
+		folder:Destroy()
+	end)
+
+	t.test("walkSurface returns correct vertex IDs", function()
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		local triId = mesh.addTriangle(
+			Vector3.new(460, 0, 0),
+			Vector3.new(464, 0, 0),
+			Vector3.new(462, 0, 3),
+			0.2, folder
+		)
+		assert(triId)
+
+		-- Large radius to include all vertices
+		local triangles, vertices = mesh.walkSurface(triId, Vector3.new(462, 0, 1), 20)
+
+		t.expect(#triangles).toBe(1)
+		t.expect(#vertices).toBe(3)
+
+		-- All returned vertex IDs should be valid
+		for _, vid in vertices do
+			t.expect(mesh.getVertex(vid)).toBeTruthy()
+		end
+
+		folder:Destroy()
+	end)
 end

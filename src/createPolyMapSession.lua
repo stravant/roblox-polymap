@@ -148,6 +148,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local mStrokePlanePoint: Vector3? = nil
 	local mStrokePlaneNormal: Vector3? = nil
 
+	-- Surface-walk seed: the triangle under the cursor at stroke start, persists
+	-- during a stroke so plane-fallback frames still have a seed to walk from.
+	local mStrokeSeedTriangleId: number? = nil
+
 	-- Paint: original colors at stroke start so partial strength applies correctly.
 	local mPaintOriginalColors: { [BasePart]: Color3 } = {}
 
@@ -466,9 +470,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				else
 					-- Face mode: hover the triangle(s) that would be affected
 					local radius = currentSettings.DeleteRadius
-					if radius > 0 then
-						mMesh.discoverRegion(worldPos, radius + 5)
-						newHoverTriangles = mMesh.findTrianglesInRadius(worldPos, radius)
+					if radius > 0 and hitTriangleId then
+						newHoverTriangles = mMesh.walkSurface(hitTriangleId, worldPos, radius)
 					elseif result and result.Instance:IsA("BasePart") then
 						local triId = mMesh.getPartTriangle(result.Instance :: BasePart)
 						if triId then
@@ -479,9 +482,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			end
 			if mode == "Paint" then
 				local radius = if currentSettings.PaintEyedropper ~= "None" then 0 else currentSettings.PaintRadius
-				if radius > 0 then
-					mMesh.discoverRegion(worldPos, radius + 5)
-					newHoverTriangles = mMesh.findTrianglesInRadius(worldPos, radius)
+				if radius > 0 and hitTriangleId then
+					newHoverTriangles = mMesh.walkSurface(hitTriangleId, worldPos, radius)
 				elseif result and result.Instance:IsA("BasePart") then
 					local triId = mMesh.getPartTriangle(result.Instance :: BasePart)
 					if triId then
@@ -491,16 +493,14 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			end
 			if mode == "Relax" then
 				local radius = currentSettings.RelaxRadius
-				if radius > 0 then
-					mMesh.discoverRegion(worldPos, radius + 5)
-					newHoverTriangles = mMesh.findTrianglesInRadius(worldPos, radius)
+				if radius > 0 and hitTriangleId then
+					newHoverTriangles = mMesh.walkSurface(hitTriangleId, worldPos, radius)
 				end
 			end
 			if mode == "Flatten" then
 				local radius = currentSettings.FlattenRadius
-				if radius > 0 then
-					mMesh.discoverRegion(worldPos, radius + 5)
-					newHoverTriangles = mMesh.findTrianglesInRadius(worldPos, radius)
+				if radius > 0 and hitTriangleId then
+					newHoverTriangles = mMesh.walkSurface(hitTriangleId, worldPos, radius)
 				end
 			end
 		end
@@ -733,6 +733,14 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		if result then
 			mStrokePlanePoint = result.Position
 			mStrokePlaneNormal = result.Normal
+			-- Track seed triangle for surface walking
+			if result.Instance:IsA("BasePart") then
+				mMesh.discoverPart(result.Instance :: BasePart)
+				local hitTriId = mMesh.getPartTriangle(result.Instance :: BasePart)
+				if hitTriId then
+					mStrokeSeedTriangleId = hitTriId
+				end
+			end
 			return result.Position
 		end
 		-- Raycast missed — project onto the remembered stroke plane
@@ -765,6 +773,15 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 		if not worldPos then return end
 
+		-- Track seed triangle for surface walking
+		if result and result.Instance:IsA("BasePart") then
+			mMesh.discoverPart(result.Instance :: BasePart)
+			local hitTriId = mMesh.getPartTriangle(result.Instance :: BasePart)
+			if hitTriId then
+				mStrokeSeedTriangleId = hitTriId
+			end
+		end
+
 		if currentSettings.DeleteTarget == "Vertex" then
 			-- Only delete a vertex if the cursor directly hits one of its triangles,
 			-- preventing the delete from "spreading out" during a drag stroke.
@@ -790,9 +807,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			-- Face mode
 			local radius = currentSettings.DeleteRadius
 			local toRemove: { number }
-			if radius > 0 then
-				mMesh.discoverRegion(worldPos, radius + 5)
-				toRemove = mMesh.findTrianglesInRadius(worldPos, radius)
+			if radius > 0 and mStrokeSeedTriangleId then
+				toRemove = mMesh.walkSurface(mStrokeSeedTriangleId, worldPos, radius)
 			else
 				-- Zero radius: use exact part mapping (no plane fallback)
 				if result and result.Instance:IsA("BasePart") then
@@ -814,6 +830,13 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local function applyPaintAtCursor()
 		local result = mouseRaycast()
 		if result and result.Instance:IsA("BasePart") then
+			-- Track seed triangle for surface walking
+			mMesh.discoverPart(result.Instance :: BasePart)
+			local hitTriId = mMesh.getPartTriangle(result.Instance :: BasePart)
+			if hitTriId then
+				mStrokeSeedTriangleId = hitTriId
+			end
+
 			local c = currentSettings.PaintColor
 			local color = Color3.new(c[1], c[2], c[3])
 			local mat = (Enum.Material :: any)[currentSettings.PaintMaterial]
@@ -821,9 +844,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			-- Collect all parts to paint
 			local partsToPaint: { BasePart } = { result.Instance :: BasePart }
 			local radius = currentSettings.PaintRadius
-			if radius > 0 then
-				mMesh.discoverRegion(result.Position, radius + 5)
-				for _, nearTriId in mMesh.findTrianglesInRadius(result.Position, radius) do
+			if radius > 0 and mStrokeSeedTriangleId then
+				for _, nearTriId in mMesh.walkSurface(mStrokeSeedTriangleId, result.Position, radius) do
 					local tri = mMesh.getTriangle(nearTriId)
 					if tri then
 						for _, part in tri.parts do
@@ -865,23 +887,52 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local strength = currentSettings.RelaxStrength
 		if radius <= 0 or strength <= 0 then return end
 
-		mMesh.discoverRegion(worldPos, radius + 5)
+		-- Use surface walk if we have a seed, otherwise discover region
+		local walkVertexIds: { number }?
+		if mStrokeSeedTriangleId then
+			_, walkVertexIds = mMesh.walkSurface(mStrokeSeedTriangleId, worldPos, radius)
+		else
+			mMesh.discoverRegion(worldPos, radius + 5)
+		end
 
-		-- Save all vertex positions on first encounter during this stroke
-		for vid, vertex in mMesh.getVertices() do
-			if not mBrushSavedPositions[vid] then
-				mBrushSavedPositions[vid] = vertex.position
+		-- Save vertex positions on first encounter during this stroke
+		if walkVertexIds then
+			for _, vid in walkVertexIds do
+				if not mBrushSavedPositions[vid] then
+					local vertex = mMesh.getVertex(vid)
+					if vertex then
+						mBrushSavedPositions[vid] = vertex.position
+					end
+				end
+			end
+		else
+			for vid, vertex in mMesh.getVertices() do
+				if not mBrushSavedPositions[vid] then
+					mBrushSavedPositions[vid] = vertex.position
+				end
 			end
 		end
 
 		-- Find all vertices within radius using saved positions
 		local verticesInRadius: { { id: number, savedPos: Vector3, dist: number } } = {}
-		for vid in mMesh.getVertices() do
-			local savedPos = mBrushSavedPositions[vid]
-			if not savedPos then continue end
-			local dist = (savedPos - worldPos).Magnitude
-			if dist <= radius then
-				table.insert(verticesInRadius, { id = vid, savedPos = savedPos, dist = dist })
+		local vidsToCheck = walkVertexIds or {}
+		if walkVertexIds then
+			for _, vid in vidsToCheck do
+				local savedPos = mBrushSavedPositions[vid]
+				if not savedPos then continue end
+				local dist = (savedPos - worldPos).Magnitude
+				if dist <= radius then
+					table.insert(verticesInRadius, { id = vid, savedPos = savedPos, dist = dist })
+				end
+			end
+		else
+			for vid in mMesh.getVertices() do
+				local savedPos = mBrushSavedPositions[vid]
+				if not savedPos then continue end
+				local dist = (savedPos - worldPos).Magnitude
+				if dist <= radius then
+					table.insert(verticesInRadius, { id = vid, savedPos = savedPos, dist = dist })
+				end
 			end
 		end
 		if #verticesInRadius == 0 then return end
@@ -946,14 +997,32 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local strength = currentSettings.FlattenStrength
 		if radius <= 0 or strength <= 0 then return end
 
-		mMesh.discoverRegion(worldPos, radius + 5)
+		-- Use surface walk if we have a seed, otherwise discover region
+		local walkVertexIds: { number }?
+		if mStrokeSeedTriangleId then
+			_, walkVertexIds = mMesh.walkSurface(mStrokeSeedTriangleId, worldPos, radius)
+		else
+			mMesh.discoverRegion(worldPos, radius + 5)
+		end
 
 		-- Find all vertices within radius using current positions
 		local verticesInRadius: { { id: number, pos: Vector3, dist: number } } = {}
-		for vid, vertex in mMesh.getVertices() do
-			local dist = (vertex.position - worldPos).Magnitude
-			if dist <= radius then
-				table.insert(verticesInRadius, { id = vid, pos = vertex.position, dist = dist })
+		if walkVertexIds then
+			for _, vid in walkVertexIds do
+				local vertex = mMesh.getVertex(vid)
+				if vertex then
+					local dist = (vertex.position - worldPos).Magnitude
+					if dist <= radius then
+						table.insert(verticesInRadius, { id = vid, pos = vertex.position, dist = dist })
+					end
+				end
+			end
+		else
+			for vid, vertex in mMesh.getVertices() do
+				local dist = (vertex.position - worldPos).Magnitude
+				if dist <= radius then
+					table.insert(verticesInRadius, { id = vid, pos = vertex.position, dist = dist })
+				end
 			end
 		end
 		if #verticesInRadius == 0 then return end
@@ -1028,6 +1097,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		mStrokeDragging = false
 		mStrokePlanePoint = nil
 		mStrokePlaneNormal = nil
+		mStrokeSeedTriangleId = nil
 		mPaintOriginalColors = {}
 		mBrushSavedPositions = {}
 		mBrushAmounts = {}
