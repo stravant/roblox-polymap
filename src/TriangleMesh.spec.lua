@@ -958,4 +958,86 @@ return function(t: TestTypes.TestContext)
 
 		folder:Destroy()
 	end)
+
+	t.test("moveVertex on back-face triangle preserves face direction", function()
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		-- Create a horizontal triangle at Y=5. fillTriangle makes thickness
+		-- extend downward, so surface is at Y=5, bottom at Y≈4.8.
+		local a = Vector3.new(1300, 5, 0)
+		local b = Vector3.new(1304, 5, 0)
+		local c = Vector3.new(1302, 5, 3)
+		local frontTriId = mesh.addTriangle(a, b, c, 0.2, folder)
+		assert(frontTriId)
+
+		local frontTri = mesh.getTriangle(frontTriId)
+		assert(frontTri)
+		local part = frontTri.parts[1]
+
+		-- Select the bottom (back) face via downward hitNormal
+		local backTriId = mesh.getPartTriangle(part, Vector3.new(0, -1, 0))
+		assert(backTriId)
+		t.expect(backTriId ~= frontTriId).toBeTruthy()
+
+		-- Identify which vertex of the back-face triangle corresponds to 'c'
+		local backTri = mesh.getTriangle(backTriId)
+		assert(backTri)
+		local moveVid: number? = nil
+		for _, vid in backTri.vertices do
+			local v = mesh.getVertex(vid)
+			assert(v)
+			-- c is at (1302, 5, 3), back face should be at Y≈4.8
+			if math.abs(v.position.X - 1302) < 0.1 and math.abs(v.position.Z - 3) < 0.1 then
+				moveVid = vid
+				break
+			end
+		end
+		assert(moveVid, "Should find back-face vertex near c")
+
+		-- Move the vertex slightly in Y
+		local oldV = mesh.getVertex(moveVid :: number)
+		assert(oldV)
+		local oldPosition = oldV.position
+		mesh.moveVertex(moveVid :: number, oldPosition + Vector3.new(0, -0.5, 0), 0.2)
+
+		-- After the move, the back-face triangle should still exist and have
+		-- its vertices on the BOTTOM side (Y < 5). The bug is that moveVertex
+		-- calls fillTriangle which flips winding to face up, putting the
+		-- surface face at ~Y=4.3 with thickness extending further down to
+		-- ~Y=4.1, when it should keep thickness extending UP.
+		local movedBackTri = mesh.getTriangle(backTriId)
+		assert(movedBackTri, "Back-face triangle should still exist after move")
+
+		-- Check that the moved vertex actually moved
+		local movedV = mesh.getVertex(moveVid :: number)
+		assert(movedV)
+		t.expect(math.abs(movedV.position.Y - (oldPosition.Y - 0.5)) < 0.05).toBeTruthy()
+
+		-- The key check: the back-face triangle's parts should still have their
+		-- surface on the bottom side. Verify by checking that getWedgeVertices
+		-- with downward hitNormal returns vertices matching the back-face
+		-- triangle's registered vertices (not the top-face vertices).
+		local getWedgeVertices = require("./getWedgeVertices")
+		local movedPart = movedBackTri.parts[1]
+		local wv1, wv2, wv3 = getWedgeVertices(movedPart, Vector3.new(0, -1, 0))
+
+		-- These wedge vertices (from the downward-facing side) should include
+		-- vertices with Y values matching the back-face triangle, NOT the
+		-- front-face triangle
+		local wedgeAvgY = (wv1.Y + wv2.Y + wv3.Y) / 3
+		local backAvgY = 0
+		for _, vid in movedBackTri.vertices do
+			local v = mesh.getVertex(vid)
+			assert(v)
+			backAvgY += v.position.Y
+		end
+		backAvgY /= 3
+
+		-- The wedge's downward face should match the back triangle's vertices
+		t.expect(math.abs(wedgeAvgY - backAvgY) < 0.15).toBeTruthy()
+
+		folder:Destroy()
+	end)
 end

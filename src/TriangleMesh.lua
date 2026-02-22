@@ -45,6 +45,7 @@ export type Triangle = {
 	vertices: { number }, -- 3 vertex ids
 	parts: { BasePart }, -- 1-2 wedge parts
 	normal: Vector3,
+	invertNormal: boolean,
 }
 
 export type Edge = {
@@ -197,7 +198,7 @@ local function createTriangleMesh(): TriangleMesh
 		return cross.Unit
 	end
 
-	local function registerTriangle(vertexIds: { number }, parts: { BasePart }, isBackFace: boolean?): number
+	local function registerTriangle(vertexIds: { number }, parts: { BasePart }, isBackFace: boolean?, invertNormal: boolean?): number
 		local triangleId = mNextTriangleId
 		mNextTriangleId += 1
 
@@ -210,6 +211,7 @@ local function createTriangleMesh(): TriangleMesh
 			vertices = { vertexIds[1], vertexIds[2], vertexIds[3] },
 			parts = parts,
 			normal = computeNormal(v1Pos, v2Pos, v3Pos),
+			invertNormal = invertNormal or false,
 		}
 
 		-- Add triangle reference to vertices
@@ -523,7 +525,7 @@ local function createTriangleMesh(): TriangleMesh
 					if sv1 and sv2 and sv3 then
 						local newParts = fillTriangle(
 							sv1.position, sv2.position, sv3.position,
-							blockThickness, parent, blockProps
+							blockThickness, parent, blockProps, nil, siblingTri.invertNormal
 						)
 						-- Update sibling's part tracking
 						for _, oldPart in siblingTri.parts do
@@ -621,7 +623,7 @@ local function createTriangleMesh(): TriangleMesh
 								if pv1 and pv2 and pv3 then
 									local newParts = fillTriangle(
 										pv1.position, pv2.position, pv3.position,
-										blockThickness, parent, blockProps
+										blockThickness, parent, blockProps, nil, pairTri.invertNormal
 									)
 									-- Update part tracking
 									for _, oldPart in pairTri.parts do
@@ -660,7 +662,7 @@ local function createTriangleMesh(): TriangleMesh
 					local existingThickness = math.min(tri.parts[1].Size.X, tri.parts[1].Size.Y, tri.parts[1].Size.Z)
 					local newParts = fillTriangle(
 						v1.position, v2.position, v3.position,
-						existingThickness, parent, props, tri.parts
+						existingThickness, parent, props, tri.parts, tri.invertNormal
 					)
 
 					if #newParts > 0 then
@@ -846,7 +848,7 @@ local function createTriangleMesh(): TriangleMesh
 		local bvid2 = findOrCreateVertex(bv2)
 		local bvid3 = findOrCreateVertex(bv3)
 		if bvid1 ~= bvid2 and bvid2 ~= bvid3 and bvid1 ~= bvid3 then
-			backTriId = registerTriangle({ bvid1, bvid2, bvid3 }, { part }, true)
+			backTriId = registerTriangle({ bvid1, bvid2, bvid3 }, { part }, true, true)
 			return backTriId
 		end
 

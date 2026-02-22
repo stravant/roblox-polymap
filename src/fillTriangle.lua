@@ -14,7 +14,8 @@ local function fillTriangle(
 	thickness: number,
 	parent: Instance,
 	props: TriangleProps?,
-	existingParts: { BasePart }?
+	existingParts: { BasePart }?,
+	invertNormal: boolean?
 ): { BasePart }
 	--[[       edg1
 		A ------|------>B  --.
@@ -41,7 +42,9 @@ local function fillTriangle(
 	end
 
 	-- Ensure thickness extends downward: flip winding if normal points down
-	if ab:Cross(bc).Y < 0 then
+	local shouldFlip = ab:Cross(bc).Y < 0
+	if invertNormal then shouldFlip = not shouldFlip end
+	if shouldFlip then
 		b, c = c, b
 		ab, bc, ca = b - a, c - b, a - c
 		abm, bcm, cam = ab.Magnitude, bc.Magnitude, ca.Magnitude
