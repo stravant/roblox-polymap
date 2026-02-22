@@ -4,7 +4,7 @@ local COMBINE_TOOLBAR = false
 local createSharedToolbar = require(script.Parent.Packages.createSharedToolbar)
 local Signal = require(script.Parent.Packages.Signal)
 
-local RIBBON_ICON = "rbxassetid://98256996626224"
+local RIBBON_ICON = "rbxassetid://77027297360382"
 local TOOLTIP = "Activate PolyMap plugin, opening the settings panel and activating the terrain mesh editor."
 
 local setButtonActive: (active: boolean) -> () = nil
