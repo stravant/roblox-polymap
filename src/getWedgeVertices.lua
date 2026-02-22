@@ -13,7 +13,7 @@
 --
 -- The thin axis is identified as the smallest Size component.
 -- The triangle vertices are computed in the plane perpendicular to the thin axis.
-local function getWedgeVertices(wedge: BasePart): (Vector3, Vector3, Vector3)
+local function getWedgeVertices(wedge: BasePart, hitNormal: Vector3?): (Vector3, Vector3, Vector3)
 	local size = wedge.Size
 	local cf = wedge.CFrame
 
@@ -29,33 +29,47 @@ local function getWedgeVertices(wedge: BasePart): (Vector3, Vector3, Vector3)
 	-- parts may use any axis, so we check all three.
 	-- topSign picks which triangular end-face to extract vertices from:
 	--   +1 = face at +halfThinAxis, -1 = face at -halfThinAxis.
-	-- fillTriangle stores "_pmSurfaceSign" on each part to indicate which
-	-- face is the surface. For foreign parts we fall back to a Y-heuristic
-	-- that picks the face whose outward normal has the larger Y component.
-	local surfaceSignAttr = (wedge :: any):GetAttribute("_pmSurfaceSign")
+	-- When hitNormal is provided, we pick the face whose outward normal is
+	-- most aligned with the hit normal (i.e., the face the raycast hit).
+	-- Otherwise we use the _pmSurfaceSign attribute or Y-heuristic fallback.
 	local minAxis: string
 	local topSign: number
 	if size.X <= size.Y and size.X <= size.Z then
 		minAxis = "X"
-		if surfaceSignAttr then
-			topSign = surfaceSignAttr
+		if hitNormal then
+			topSign = if hitNormal:Dot(cf.RightVector) > 0 then 1 else -1
 		else
-			topSign = if cf.RightVector.Y > 0.01 then 1 else -1
+			local surfaceSignAttr = (wedge :: any):GetAttribute("_pmSurfaceSign")
+			if surfaceSignAttr then
+				topSign = surfaceSignAttr
+			else
+				topSign = if cf.RightVector.Y > 0.01 then 1 else -1
+			end
 		end
 	elseif size.Y <= size.X and size.Y <= size.Z then
 		minAxis = "Y"
-		if surfaceSignAttr then
-			topSign = surfaceSignAttr
+		if hitNormal then
+			topSign = if hitNormal:Dot(cf.UpVector) > 0 then 1 else -1
 		else
-			topSign = if cf.UpVector.Y > 0.01 then 1 else -1
+			local surfaceSignAttr = (wedge :: any):GetAttribute("_pmSurfaceSign")
+			if surfaceSignAttr then
+				topSign = surfaceSignAttr
+			else
+				topSign = if cf.UpVector.Y > 0.01 then 1 else -1
+			end
 		end
 	else
 		minAxis = "Z"
-		if surfaceSignAttr then
-			topSign = surfaceSignAttr
-		else
+		if hitNormal then
 			-- LookVector points along -Z, so negate
-			topSign = if -cf.LookVector.Y > 0.01 then 1 else -1
+			topSign = if hitNormal:Dot(-cf.LookVector) > 0 then 1 else -1
+		else
+			local surfaceSignAttr = (wedge :: any):GetAttribute("_pmSurfaceSign")
+			if surfaceSignAttr then
+				topSign = surfaceSignAttr
+			else
+				topSign = if -cf.LookVector.Y > 0.01 then 1 else -1
+			end
 		end
 	end
 

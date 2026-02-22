@@ -196,6 +196,96 @@ return function(t: TestTypes.TestContext)
 		folder:Destroy()
 	end)
 
+	t.test("can select top or bottom face based on hit normal", function()
+		-- Create a thin wedge lying flat (thin along X)
+		local wedge = Instance.new("Part")
+		wedge.Shape = Enum.PartType.Wedge
+		wedge.Size = Vector3.new(0.2, 3, 4)
+		wedge.CFrame = CFrame.new(5, 5, 5)
+		wedge.Anchored = true
+		wedge.Parent = workspace
+
+		-- The wedge's thin axis is X. RightVector is the thin axis direction.
+		local rightVec = wedge.CFrame.RightVector
+
+		-- Hitting from the +X side should give the +X face
+		local topV1, topV2, topV3 = getWedgeVertices(wedge, rightVec)
+		-- Hitting from the -X side should give the -X face
+		local botV1, botV2, botV3 = getWedgeVertices(wedge, -rightVec)
+
+		-- Both should return valid triangles (3 distinct vertices)
+		t.expect(fuzzyEqVec3(topV1, topV2)).toBeFalsy()
+		t.expect(fuzzyEqVec3(topV2, topV3)).toBeFalsy()
+		t.expect(fuzzyEqVec3(topV1, topV3)).toBeFalsy()
+		t.expect(fuzzyEqVec3(botV1, botV2)).toBeFalsy()
+		t.expect(fuzzyEqVec3(botV2, botV3)).toBeFalsy()
+		t.expect(fuzzyEqVec3(botV1, botV3)).toBeFalsy()
+
+		-- The two faces should be at different positions (offset by thickness)
+		local topCenter = (topV1 + topV2 + topV3) / 3
+		local botCenter = (botV1 + botV2 + botV3) / 3
+		local diff = topCenter - botCenter
+
+		-- Offset should be ~0.2 (the thickness) along the thin axis
+		t.expect(math.abs(diff.Magnitude - 0.2) < 0.05).toBeTruthy()
+		t.expect(diff.Unit:Dot(rightVec) > 0.99).toBeTruthy()
+
+		wedge:Destroy()
+	end)
+
+	t.test("hit normal selects correct face for fillTriangle parts", function()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		-- Create a horizontal triangle with known normal direction
+		local a = Vector3.new(520, 5, 0)
+		local b = Vector3.new(524, 5, 0)
+		local c = Vector3.new(522, 5, 3)
+		local parts = fillTriangle(a, b, c, 0.2, folder)
+
+		-- Hit from above (normal pointing up = toward the surface)
+		local upNormal = Vector3.new(0, 1, 0)
+		local allVertsUp: { Vector3 } = {}
+		for _, part in parts do
+			local v1, v2, v3 = getWedgeVertices(part, upNormal)
+			table.insert(allVertsUp, v1)
+			table.insert(allVertsUp, v2)
+			table.insert(allVertsUp, v3)
+		end
+
+		-- Hit from below (normal pointing down = toward the other face)
+		local downNormal = Vector3.new(0, -1, 0)
+		local allVertsDown: { Vector3 } = {}
+		for _, part in parts do
+			local v1, v2, v3 = getWedgeVertices(part, downNormal)
+			table.insert(allVertsDown, v1)
+			table.insert(allVertsDown, v2)
+			table.insert(allVertsDown, v3)
+		end
+
+		-- Hit from above → gets the upward-facing face (at Y ≈ 5.0, the surface)
+		-- Hit from below → gets the downward-facing face (at Y ≈ 4.8, thickness extends down)
+		local foundUpAtSurface = false
+		local foundDownOffset = false
+		for _, v in allVertsUp do
+			if math.abs(v.Y - 5.0) < ROUND_TRIP_EPSILON then
+				foundUpAtSurface = true
+				break
+			end
+		end
+		for _, v in allVertsDown do
+			if math.abs(v.Y - 4.8) < ROUND_TRIP_EPSILON then
+				foundDownOffset = true
+				break
+			end
+		end
+
+		t.expect(foundUpAtSurface).toBeTruthy()
+		t.expect(foundDownOffset).toBeTruthy()
+
+		folder:Destroy()
+	end)
+
 	t.test("single wedge part returns exactly 3 vertices", function()
 		-- Create a simple wedge part manually
 		local wedge = Instance.new("Part")
