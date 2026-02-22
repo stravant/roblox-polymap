@@ -456,8 +456,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local hitTriangleId: number? = nil
 		if result and result.Instance:IsA("BasePart") then
 			-- Discover the part under the cursor (O(1) for already-tracked parts)
-			mMesh.discoverPart(result.Instance)
-			hitTriangleId = mMesh.getPartTriangle(result.Instance :: BasePart)
+			mMesh.discoverPart(result.Instance, result.Normal)
+			hitTriangleId = mMesh.getPartTriangle(result.Instance :: BasePart, result.Normal)
 		end
 
 		if worldPos then
@@ -473,7 +473,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					if radius > 0 and hitTriangleId then
 						newHoverTriangles = mMesh.walkSurface(hitTriangleId, worldPos, radius)
 					elseif result and result.Instance:IsA("BasePart") then
-						local triId = mMesh.getPartTriangle(result.Instance :: BasePart)
+						local triId = mMesh.getPartTriangle(result.Instance :: BasePart, result.Normal)
 						if triId then
 							newHoverTriangles = { triId }
 						end
@@ -485,7 +485,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				if radius > 0 and hitTriangleId then
 					newHoverTriangles = mMesh.walkSurface(hitTriangleId, worldPos, radius)
 				elseif result and result.Instance:IsA("BasePart") then
-					local triId = mMesh.getPartTriangle(result.Instance :: BasePart)
+					local triId = mMesh.getPartTriangle(result.Instance :: BasePart, result.Normal)
 					if triId then
 						newHoverTriangles = { triId }
 					end
@@ -608,9 +608,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 	end
 
-	local function handleSelectClick(worldPos: Vector3, hitPart: BasePart?)
+	local function handleSelectClick(worldPos: Vector3, hitPart: BasePart?, hitNormal: Vector3?)
 		mMesh.discoverRegion(worldPos, 15)
-		local hitTriangleId = if hitPart then mMesh.getPartTriangle(hitPart) else nil
+		local hitTriangleId = if hitPart then mMesh.getPartTriangle(hitPart, hitNormal) else nil
 		local vid = findNearestVertex(worldPos, hitTriangleId)
 		if vid then
 			if isShiftHeld() then
@@ -735,8 +735,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			mStrokePlaneNormal = result.Normal
 			-- Track seed triangle for surface walking
 			if result.Instance:IsA("BasePart") then
-				mMesh.discoverPart(result.Instance :: BasePart)
-				local hitTriId = mMesh.getPartTriangle(result.Instance :: BasePart)
+				mMesh.discoverPart(result.Instance :: BasePart, result.Normal)
+				local hitTriId = mMesh.getPartTriangle(result.Instance :: BasePart, result.Normal)
 				if hitTriId then
 					mStrokeSeedTriangleId = hitTriId
 				end
@@ -774,9 +774,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		if not worldPos then return end
 
 		-- Track seed triangle for surface walking
+		local hitNormal = if result then result.Normal else nil
 		if result and result.Instance:IsA("BasePart") then
-			mMesh.discoverPart(result.Instance :: BasePart)
-			local hitTriId = mMesh.getPartTriangle(result.Instance :: BasePart)
+			mMesh.discoverPart(result.Instance :: BasePart, hitNormal)
+			local hitTriId = mMesh.getPartTriangle(result.Instance :: BasePart, hitNormal)
 			if hitTriId then
 				mStrokeSeedTriangleId = hitTriId
 			end
@@ -786,7 +787,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			-- Only delete a vertex if the cursor directly hits one of its triangles,
 			-- preventing the delete from "spreading out" during a drag stroke.
 			local hitTriangleId = if result and result.Instance:IsA("BasePart")
-				then mMesh.getPartTriangle(result.Instance :: BasePart)
+				then mMesh.getPartTriangle(result.Instance :: BasePart, hitNormal)
 				else nil
 			if hitTriangleId then
 				mMesh.discoverRegion(worldPos, 15)
@@ -812,7 +813,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			else
 				-- Zero radius: use exact part mapping (no plane fallback)
 				if result and result.Instance:IsA("BasePart") then
-					local triId = mMesh.getPartTriangle(result.Instance :: BasePart)
+					local triId = mMesh.getPartTriangle(result.Instance :: BasePart, hitNormal)
 					toRemove = if triId then { triId } else {}
 				else
 					toRemove = {}
@@ -831,8 +832,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local result = mouseRaycast()
 		if result and result.Instance:IsA("BasePart") then
 			-- Track seed triangle for surface walking
-			mMesh.discoverPart(result.Instance :: BasePart)
-			local hitTriId = mMesh.getPartTriangle(result.Instance :: BasePart)
+			mMesh.discoverPart(result.Instance :: BasePart, result.Normal)
+			local hitTriId = mMesh.getPartTriangle(result.Instance :: BasePart, result.Normal)
 			if hitTriId then
 				mStrokeSeedTriangleId = hitTriId
 			end
@@ -1171,7 +1172,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 
 		if mode == "Select" or mode == "Move" or mode == "Rotate" or mode == "Subdivide" or mode == "Simplify" then
-			handleSelectClick(result.Position, hitPart)
+			handleSelectClick(result.Position, hitPart, result.Normal)
 		elseif mode == "Add" then
 			handleAddClick(result.Position)
 		elseif mode == "Delete" or mode == "Paint" or mode == "Relax" or mode == "Flatten" then

@@ -897,4 +897,65 @@ return function(t: TestTypes.TestContext)
 
 		folder:Destroy()
 	end)
+
+	t.test("getPartTriangle with hitNormal selects correct face", function()
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		-- Create a horizontal triangle at Y=5
+		local a = Vector3.new(1200, 5, 0)
+		local b = Vector3.new(1204, 5, 0)
+		local c = Vector3.new(1202, 5, 3)
+		local triId = mesh.addTriangle(a, b, c, 0.2, folder)
+		assert(triId)
+
+		-- Get the parts of this triangle
+		local tri = mesh.getTriangle(triId)
+		assert(tri)
+		local part = tri.parts[1]
+
+		-- Without hitNormal, should return the front face (same as triId)
+		local frontId = mesh.getPartTriangle(part)
+		t.expect(frontId).toBe(triId)
+
+		-- Opposite hit normals should return different triangle IDs
+		local upId = mesh.getPartTriangle(part, Vector3.new(0, 1, 0))
+		local downId = mesh.getPartTriangle(part, Vector3.new(0, -1, 0))
+		t.expect(upId).toBeTruthy()
+		t.expect(downId).toBeTruthy()
+		assert(upId)
+		assert(downId)
+		t.expect(upId ~= downId).toBeTruthy()
+
+		-- Both should be valid triangles
+		local upTri = mesh.getTriangle(upId)
+		local downTri = mesh.getTriangle(downId)
+		t.expect(upTri).toBeTruthy()
+		t.expect(downTri).toBeTruthy()
+		assert(upTri)
+		assert(downTri)
+
+		-- Collect Y values for each face's vertices
+		local upYs: { number } = {}
+		local downYs: { number } = {}
+		for _, vid in upTri.vertices do
+			local v = mesh.getVertex(vid)
+			assert(v)
+			table.insert(upYs, v.position.Y)
+		end
+		for _, vid in downTri.vertices do
+			local v = mesh.getVertex(vid)
+			assert(v)
+			table.insert(downYs, v.position.Y)
+		end
+
+		-- One face should have vertices at Y≈5.0, the other at Y≈4.8
+		-- (thickness 0.2 extends downward from Y=5)
+		local upAvgY = (upYs[1] + upYs[2] + upYs[3]) / 3
+		local downAvgY = (downYs[1] + downYs[2] + downYs[3]) / 3
+		t.expect(math.abs(upAvgY - downAvgY) > 0.1).toBeTruthy()
+
+		folder:Destroy()
+	end)
 end

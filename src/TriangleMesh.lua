@@ -79,9 +79,9 @@ export type TriangleMesh = {
 	walkSurface: (seedTriangleId: number, center: Vector3, radius: number) -> ({ number }, { number }),
 
 	-- Discovery / Scanning
-	discoverPart: (part: BasePart) -> number?,
+	discoverPart: (part: BasePart, hitNormal: Vector3?) -> number?,
 	discoverRegion: (center: Vector3, radius: number) -> (),
-	getPartTriangle: (part: BasePart) -> number?,
+	getPartTriangle: (part: BasePart, hitNormal: Vector3?) -> number?,
 	scanWorkspace: (root: Instance?) -> (),
 	refreshFromParts: () -> (),
 	clear: () -> (),
@@ -119,6 +119,9 @@ local function createTriangleMesh(): TriangleMesh
 
 	-- Part -> triangle ID mapping for O(1) discovery cache
 	local mPartToTriangle: { [BasePart]: number } = {}
+
+	-- Part -> triangle ID for the opposite (back) face of the wedge
+	local mPartToTriangleBack: { [BasePart]: number } = {}
 
 	-- Block part -> pair of triangle IDs (for Block parts that represent 2 triangles)
 	local mBlockParts: { [BasePart]: { number } } = {}
@@ -194,7 +197,7 @@ local function createTriangleMesh(): TriangleMesh
 		return cross.Unit
 	end
 
-	local function registerTriangle(vertexIds: { number }, parts: { BasePart }): number
+	local function registerTriangle(vertexIds: { number }, parts: { BasePart }, isBackFace: boolean?): number
 		local triangleId = mNextTriangleId
 		mNextTriangleId += 1
 
@@ -219,9 +222,10 @@ local function createTriangleMesh(): TriangleMesh
 		addEdge(vertexIds[2], vertexIds[3], triangleId)
 		addEdge(vertexIds[3], vertexIds[1], triangleId)
 
-		-- Track parts
+		-- Track parts in front or back face mapping
+		local mapping = if isBackFace then mPartToTriangleBack else mPartToTriangle
 		for _, part in parts do
-			mPartToTriangle[part] = triangleId
+			mapping[part] = triangleId
 		end
 
 		return triangleId
@@ -237,6 +241,9 @@ local function createTriangleMesh(): TriangleMesh
 		for _, part in tri.parts do
 			if mPartToTriangle[part] == triangleId then
 				mPartToTriangle[part] = nil
+			end
+			if mPartToTriangleBack[part] == triangleId then
+				mPartToTriangleBack[part] = nil
 			end
 		end
 
@@ -523,6 +530,7 @@ local function createTriangleMesh(): TriangleMesh
 							if mPartToTriangle[oldPart] == siblingTriId then
 								mPartToTriangle[oldPart] = nil
 							end
+							mPartToTriangleBack[oldPart] = nil
 						end
 						siblingTri.parts = newParts
 						for _, newPart in newParts do
@@ -620,6 +628,7 @@ local function createTriangleMesh(): TriangleMesh
 										if mPartToTriangle[oldPart] == pairTriId then
 											mPartToTriangle[oldPart] = nil
 										end
+										mPartToTriangleBack[oldPart] = nil
 									end
 									pairTri.parts = newParts
 									for _, newPart in newParts do
@@ -660,6 +669,7 @@ local function createTriangleMesh(): TriangleMesh
 							if mPartToTriangle[oldPart] == triId then
 								mPartToTriangle[oldPart] = nil
 							end
+							mPartToTriangleBack[oldPart] = nil
 						end
 						tri.parts = newParts
 						for _, newPart in newParts do
@@ -696,6 +706,7 @@ local function createTriangleMesh(): TriangleMesh
 		mEdges = {}
 		mPositionToVertex = {}
 		mPartToTriangle = {}
+		mPartToTriangleBack = {}
 		mBlockParts = {}
 		mNextVertexId = 1
 		mNextTriangleId = 1
@@ -782,14 +793,74 @@ local function createTriangleMesh(): TriangleMesh
 		return nil
 	end
 
-	mesh.getPartTriangle = function(part: BasePart): number?
-		return mPartToTriangle[part]
+	mesh.getPartTriangle = function(part: BasePart, hitNormal: Vector3?): number?
+		local frontTriId = mPartToTriangle[part]
+		if not frontTriId or not hitNormal then
+			return frontTriId
+		end
+
+		if not isThinWedge(part) then
+			return frontTriId
+		end
+
+		-- Determine which face the hitNormal aligns with by checking the
+		-- part's thin axis direction directly (not the stored triangle normal).
+		local size = part.Size
+		local cf = part.CFrame
+		local thinAxisDir: Vector3
+		if size.X <= size.Y and size.X <= size.Z then
+			thinAxisDir = cf.RightVector
+		elseif size.Y <= size.X and size.Y <= size.Z then
+			thinAxisDir = cf.UpVector
+		else
+			thinAxisDir = -cf.LookVector
+		end
+
+		-- The front face was discovered using _pmSurfaceSign or Y-heuristic.
+		-- Determine which sign it used.
+		local frontSign: number
+		local surfaceSignAttr = (part :: any):GetAttribute("_pmSurfaceSign")
+		if surfaceSignAttr then
+			frontSign = surfaceSignAttr
+		else
+			frontSign = if thinAxisDir.Y > 0.01 then 1 else -1
+		end
+
+		-- hitNormal aligns with +thinAxisDir means sign=+1, else sign=-1
+		local hitSign = if hitNormal:Dot(thinAxisDir) > 0 then 1 else -1
+
+		-- If the hit selects the same face as the front, return front
+		if hitSign == frontSign then
+			return frontTriId
+		end
+
+		-- Want the back face
+		local backTriId = mPartToTriangleBack[part]
+		if backTriId then
+			return backTriId
+		end
+
+		-- Lazily create the back face triangle using hitNormal to select opposite face
+		local bv1, bv2, bv3 = getWedgeVertices(part, hitNormal)
+		local bvid1 = findOrCreateVertex(bv1)
+		local bvid2 = findOrCreateVertex(bv2)
+		local bvid3 = findOrCreateVertex(bv3)
+		if bvid1 ~= bvid2 and bvid2 ~= bvid3 and bvid1 ~= bvid3 then
+			backTriId = registerTriangle({ bvid1, bvid2, bvid3 }, { part }, true)
+			return backTriId
+		end
+
+		return frontTriId
 	end
 
-	mesh.discoverPart = function(part: BasePart): number?
+	mesh.discoverPart = function(part: BasePart, hitNormal: Vector3?): number?
 		-- Cache hit: already tracked
 		local existing = mPartToTriangle[part]
 		if existing then
+			-- If hitNormal provided, delegate to getPartTriangle for face selection
+			if hitNormal then
+				return mesh.getPartTriangle(part, hitNormal)
+			end
 			return existing
 		end
 
