@@ -69,7 +69,7 @@ export type TriangleMesh = {
 	findVertexNear: (position: Vector3, radius: number) -> number?,
 
 	-- Mutations
-	addTriangle: (v1Pos: Vector3, v2Pos: Vector3, v3Pos: Vector3, thickness: number, parent: Instance, props: fillTriangle.TriangleProps?) -> number?,
+	addTriangle: (v1Pos: Vector3, v2Pos: Vector3, v3Pos: Vector3, thickness: number, parent: Instance, props: fillTriangle.TriangleProps?, invertNormal: boolean?) -> number?,
 	removeTriangle: (triangleId: number) -> (),
 	moveVertex: (vertexId: number, newPosition: Vector3, thickness: number, props: fillTriangle.TriangleProps?) -> (),
 	moveVertices: (moves: { [number]: Vector3 }, thickness: number, props: fillTriangle.TriangleProps?) -> (),
@@ -468,7 +468,7 @@ local function createTriangleMesh(): TriangleMesh
 		return bestId
 	end
 
-	mesh.addTriangle = function(v1Pos: Vector3, v2Pos: Vector3, v3Pos: Vector3, thickness: number, parent: Instance, props: fillTriangle.TriangleProps?): number?
+	mesh.addTriangle = function(v1Pos: Vector3, v2Pos: Vector3, v3Pos: Vector3, thickness: number, parent: Instance, props: fillTriangle.TriangleProps?, invertNormal: boolean?): number?
 		local vid1 = findOrCreateVertex(v1Pos)
 		local vid2 = findOrCreateVertex(v2Pos)
 		local vid3 = findOrCreateVertex(v3Pos)
@@ -482,7 +482,7 @@ local function createTriangleMesh(): TriangleMesh
 			mVertices[vid1].position,
 			mVertices[vid2].position,
 			mVertices[vid3].position,
-			thickness, parent, props
+			thickness, parent, props, nil, invertNormal
 		)
 
 		if #parts == 0 then
@@ -493,7 +493,7 @@ local function createTriangleMesh(): TriangleMesh
 			return nil
 		end
 
-		return registerTriangle({ vid1, vid2, vid3 }, parts)
+		return registerTriangle({ vid1, vid2, vid3 }, parts, nil, invertNormal)
 	end
 
 	mesh.removeTriangle = function(triangleId: number)

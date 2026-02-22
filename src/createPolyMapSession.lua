@@ -126,6 +126,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local mAddPlaneNormal: Vector3? = nil
 	local mAddHoverTarget: { type: string, vertexId: number?, edgeKey: string?, position: Vector3? }? = nil
 	local mAddTriangleProps: fillTriangle.TriangleProps? = nil
+	local mAddInvertNormal: boolean = false
 
 	-- Marquee state
 	local mMarqueeStart: Vector2? = nil
@@ -209,6 +210,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		mAddPlaneNormal = nil
 		mAddHoverTarget = nil
 		mAddTriangleProps = nil
+		mAddInvertNormal = false
 	end
 
 	local function scanMesh()
@@ -649,6 +651,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 								mAddPlanePoint = tv.position
 							end
 							mAddPlaneNormal = tri.normal
+							mAddInvertNormal = tri.invertNormal
 							local part = tri.parts[1]
 							if part then
 								mAddTriangleProps = {
@@ -683,7 +686,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					if tv then
 						mMesh.addTriangle(
 							v1.position, v2.position, tv.position,
-							currentSettings.Thickness, workspace.Terrain, addProps
+							currentSettings.Thickness, workspace.Terrain, addProps, mAddInvertNormal
 						)
 					end
 				elseif target.type == "edge" and target.edgeKey then
@@ -701,18 +704,18 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 							end
 							mMesh.addTriangle(
 								v1.position, v2.position, ta.position,
-								currentSettings.Thickness, workspace.Terrain, addProps
+								currentSettings.Thickness, workspace.Terrain, addProps, mAddInvertNormal
 							)
 							mMesh.addTriangle(
 								v2.position, tb.position, ta.position,
-								currentSettings.Thickness, workspace.Terrain, addProps
+								currentSettings.Thickness, workspace.Terrain, addProps, mAddInvertNormal
 							)
 						end
 					end
 				elseif target.type == "plane" and target.position then
 					mMesh.addTriangle(
 						v1.position, v2.position, target.position,
-						currentSettings.Thickness, workspace.Terrain, addProps
+						currentSettings.Thickness, workspace.Terrain, addProps, mAddInvertNormal
 					)
 				end
 			end
