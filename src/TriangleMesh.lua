@@ -32,6 +32,7 @@ export type Vertex = {
 
 export type Triangle = {
 	id: number,
+	thickness: number,
 	vertices: { number }, -- 3 vertex ids
 	parts: { BasePart }, -- 1-2 wedge parts
 	normal: Vector3,
@@ -59,7 +60,7 @@ export type TriangleMesh = {
 	findVertexNear: (position: Vector3, radius: number) -> number?,
 
 	-- Mutations
-	addTriangle: (v1Pos: Vector3, v2Pos: Vector3, v3Pos: Vector3, thickness: number, parent: Instance, props: fillTriangle.TriangleProps?, targetNormal: Vector3) -> number?,
+	addTriangle: (v1Pos: Vector3, v2Pos: Vector3, v3Pos: Vector3, thickness: number, parent: Instance, props: fillTriangle.TriangleProps?, hintPoint: Vector3) -> number?,
 	removeTriangle: (triangleId: number) -> (),
 	moveVertex: (vertexId: number, newPosition: Vector3, thickness: number, props: fillTriangle.TriangleProps?) -> (),
 	moveVertices: (moves: { [number]: Vector3 }, thickness: number, props: fillTriangle.TriangleProps?) -> (),
@@ -70,9 +71,9 @@ export type TriangleMesh = {
 	walkSurface: (seedTriangleId: number, center: Vector3, radius: number) -> ({ number }, { number }),
 
 	-- Discovery / Scanning
-	discoverPart: (part: BasePart, hitNormal: Vector3) -> number?,
-	discoverRegion: (center: Vector3, radius: number, hitNormal: Vector3) -> (),
-	getPartTriangle: (part: BasePart, hitNormal: Vector3) -> number?,
+	discoverPart: (part: BasePart, hintPoint: Vector3) -> number?,
+	discoverRegion: (center: Vector3, radius: number, hintPoint: Vector3) -> (),
+	getPartTriangle: (part: BasePart, hintPoint: Vector3) -> number?,
 	refreshFromParts: () -> (),
 	clear: () -> (),
 }
@@ -97,41 +98,6 @@ local function edgeKey(v1: number, v2: number): string
 	return `{a}_{b}`
 end
 
--- Pick a consistent sign for a direction vector to select which face of a
--- wedge part to use. This is an odd function: f(-dir) = -f(dir), which
--- ensures both parts of a fillTriangle pair extract from the same face
--- even though their thin axes point in opposite directions.
--- Y is checked first because fillTriangle guarantees normal.Y > 0, so the
--- thin axis direction always has a nonzero Y component for non-vertical
--- triangles. For vertical walls (Y ≈ 0), Z then X break the tie.
-local function consistentSign(dir: Vector3): number
-	if dir.Y > 0.0001 then
-		return 1
-	elseif dir.Y < -0.0001 then
-		return -1
-	elseif dir.Z > 0.0001 then
-		return 1
-	elseif dir.Z < -0.0001 then
-		return -1
-	elseif dir.X > 0.0001 then
-		return 1
-	else
-		return -1
-	end
-end
-
-local function getThinAxisDir(part: BasePart): Vector3
-	local size = part.Size
-	local cf = part.CFrame
-	if size.X <= size.Y and size.X <= size.Z then
-		return cf.RightVector
-	elseif size.Y <= size.X and size.Y <= size.Z then
-		return cf.UpVector
-	else
-		return -cf.LookVector
-	end
-end
-
 local function createTriangleMesh(): TriangleMesh
 	local mVertices: { [number]: Vertex } = {}
 	local mTriangles: { [number]: Triangle } = {}
@@ -143,7 +109,8 @@ local function createTriangleMesh(): TriangleMesh
 	local mPositionToVertex: { [string]: number } = {}
 
 	-- Part -> triangle ID mapping for O(1) discovery cache
-	-- Front triangles have vertices: (1->2) cross (2->3) = 
+	-- Front triangles have vertices: (1->2) cross (2->3) = normal
+	-- Back triangles have the opposite
 	local mPartToTriangleFront: { [BasePart]: number } = {}
 	local mPartToTriangleBack: { [BasePart]: number } = {}
 
@@ -221,29 +188,29 @@ local function createTriangleMesh(): TriangleMesh
 		return cross.Unit
 	end
 
-	local function getPartTriangle(part: BasePart, hitNormal: Vector3): (number?, { [BasePart]: number })
+	local function getPartTriangle(part: BasePart, hintPoint: Vector3): (number?, { [BasePart]: number })
 		local frontTriId = mPartToTriangleFront[part]
 		if frontTriId then
-			if mTriangles[frontTriId].normal:Dot(hitNormal) > 0 then
+			local tri = mTriangles[frontTriId]
+			local dir = hintPoint - mVertices[tri.vertices[1]].position
+			if dir:Dot(tri.normal) > -0.5 * tri.thickness - 0.001 then
 				return frontTriId, mPartToTriangleFront
-			else
-				return nil, mPartToTriangleFront
 			end
 		end
-		
+
 		local backTriId = mPartToTriangleBack[part]
 		if backTriId then
-			if mTriangles[backTriId].normal:Dot(hitNormal) > 0 then
+			local tri = mTriangles[backTriId]
+			local dir = hintPoint - mVertices[tri.vertices[1]].position
+			if dir:Dot(tri.normal) > -0.5 * tri.thickness - 0.001 then
 				return backTriId, mPartToTriangleBack
-			else
-				return nil, mPartToTriangleBack
 			end
 		end
 
 		return nil, mPartToTriangleFront
 	end
 
-	local function registerTriangle(vertexIds: { number }, parts: { BasePart }, targetNormal: Vector3): number
+	local function registerTriangle(vertexIds: { number }, parts: { BasePart }, thickness: number): number
 		local triangleId = mNextTriangleId
 		mNextTriangleId += 1
 
@@ -252,11 +219,15 @@ local function createTriangleMesh(): TriangleMesh
 		local v3Pos = mVertices[vertexIds[3]].position
 
 		local naturalNormal = computeNormal(v1Pos, v2Pos, v3Pos)
-		local isBackFace = naturalNormal:Dot(targetNormal) < 0
+		local centroid = (v1Pos + v2Pos + v3Pos) / 3
+		local partCenter = parts[1].CFrame.Position
+		local faceOutward = centroid - partCenter
+		local isBackFace = naturalNormal:Dot(faceOutward) < 0
 		local normal = if isBackFace then -naturalNormal else naturalNormal
 
 		mTriangles[triangleId] = {
 			id = triangleId,
+			thickness = thickness,
 			vertices = { vertexIds[1], vertexIds[2], vertexIds[3] },
 			parts = parts,
 			normal = normal,
@@ -309,6 +280,7 @@ local function createTriangleMesh(): TriangleMesh
 				if idx then
 					table.remove(vertex.triangles, idx)
 				end
+				cleanupVertex(vid)
 			end
 		end
 
@@ -450,10 +422,11 @@ local function createTriangleMesh(): TriangleMesh
 			if not vertex then continue end
 
 			-- Discover undiscovered adjacent parts via small spatial query
+			-- Use vertex position as hintPoint — vertex IS on the surface face
 			local candidates = workspace:GetPartBoundsInRadius(vertex.position, 1)
 			for _, candidate in candidates do
-				if not getPartTriangle(candidate, seedTri.normal) then
-					mesh.discoverPart(candidate, seedTri.normal)
+				if not getPartTriangle(candidate, vertex.position) then
+					mesh.discoverPart(candidate, vertex.position)
 				end
 			end
 
@@ -520,7 +493,7 @@ local function createTriangleMesh(): TriangleMesh
 		return bestId
 	end
 
-	mesh.addTriangle = function(v1Pos: Vector3, v2Pos: Vector3, v3Pos: Vector3, thickness: number, parent: Instance, props: fillTriangle.TriangleProps?, targetNormal: Vector3): number?
+	mesh.addTriangle = function(v1Pos: Vector3, v2Pos: Vector3, v3Pos: Vector3, thickness: number, parent: Instance, props: fillTriangle.TriangleProps?, hintPoint: Vector3): number?
 		local vid1 = findOrCreateVertex(v1Pos)
 		local vid2 = findOrCreateVertex(v2Pos)
 		local vid3 = findOrCreateVertex(v3Pos)
@@ -530,7 +503,8 @@ local function createTriangleMesh(): TriangleMesh
 			return nil
 		end
 
-		local inverted = computeNormal(v1Pos, v2Pos, v3Pos):Dot(targetNormal) < 0
+		local centroid = (v1Pos + v2Pos + v3Pos) / 3
+		local inverted = computeNormal(v1Pos, v2Pos, v3Pos):Dot(hintPoint - centroid) < 0
 
 		local parts = fillTriangle(
 			mVertices[vid1].position,
@@ -547,7 +521,7 @@ local function createTriangleMesh(): TriangleMesh
 			return nil
 		end
 
-		return registerTriangle({ vid1, vid2, vid3 }, parts, targetNormal)
+		return registerTriangle({ vid1, vid2, vid3 }, parts, thickness)
 	end
 
 	mesh.removeTriangle = function(triangleId: number)
@@ -566,7 +540,6 @@ local function createTriangleMesh(): TriangleMesh
 				if siblingTri then
 					-- Capture appearance from the block before it's destroyed
 					local parent = part.Parent or workspace
-					local blockThickness = math.min(part.Size.X, part.Size.Y, part.Size.Z)
 					local blockProps: fillTriangle.TriangleProps = {
 						Color = part.Color,
 						Material = part.Material,
@@ -579,7 +552,7 @@ local function createTriangleMesh(): TriangleMesh
 					if sv1 and sv2 and sv3 then
 						local newParts = fillTriangle(
 							sv1.position, sv2.position, sv3.position,
-							blockThickness, parent, blockProps, nil, siblingTri.invertedNormal
+							siblingTri.thickness, parent, blockProps, nil, siblingTri.invertedNormal
 						)
 						-- Update sibling's part tracking
 						for _, oldPart in siblingTri.parts do
@@ -634,6 +607,25 @@ local function createTriangleMesh(): TriangleMesh
 			end
 		end
 
+		-- 1.5 Clear the opposite face for any of the affected triangles
+		-- because we won't be updating the opposite face.
+		for triId in affectedTriIds do
+			local oppositeTri = mTriangles[triId]
+			if oppositeTri then
+				if oppositeTri.invertedNormal then
+					local oppositeTriId = mPartToTriangleFront[oppositeTri.parts[1]]
+					if oppositeTriId then
+						unregisterTriangle(oppositeTriId)
+					end
+				else
+					local oppositeTriId = mPartToTriangleBack[oppositeTri.parts[1]]
+					if oppositeTriId then
+						unregisterTriangle(oppositeTriId)
+					end
+				end
+			end
+		end
+
 		-- 2. Update all vertex positions at once
 		for vid, newPosition in moves do
 			local vertex = mVertices[vid]
@@ -663,9 +655,6 @@ local function createTriangleMesh(): TriangleMesh
 							Transparency = part.Transparency,
 						}
 
-						-- Preserve the block's thickness
-						local blockThickness = math.min(part.Size.X, part.Size.Y, part.Size.Z)
-
 						-- Destroy the block part
 						part.Parent = nil
 
@@ -679,7 +668,7 @@ local function createTriangleMesh(): TriangleMesh
 								if pv1 and pv2 and pv3 then
 									local newParts = fillTriangle(
 										pv1.position, pv2.position, pv3.position,
-										blockThickness, parent, blockProps, nil, pairTri.invertedNormal
+										pairTri.thickness, parent, blockProps, nil, pairTri.invertedNormal
 									)
 									-- Update part tracking
 									for _, oldPart in pairTri.parts do
@@ -717,10 +706,9 @@ local function createTriangleMesh(): TriangleMesh
 
 				if v1 and v2 and v3 then
 					local parent = tri.parts[1].Parent or workspace
-					local existingThickness = math.min(tri.parts[1].Size.X, tri.parts[1].Size.Y, tri.parts[1].Size.Z)
 					local newParts = fillTriangle(
 						v1.position, v2.position, v3.position,
-						existingThickness, parent, props, tri.parts, tri.invertedNormal
+						tri.thickness, parent, props, tri.parts, tri.invertedNormal
 					)
 
 					if #newParts > 0 then
@@ -844,30 +832,40 @@ local function createTriangleMesh(): TriangleMesh
 		return nil
 	end
 
-	mesh.getPartTriangle = function(part: BasePart, hitNormal: Vector3): number?
-		return getPartTriangle(part, hitNormal)
+	mesh.getPartTriangle = function(part: BasePart, hintPoint: Vector3): number?
+		return getPartTriangle(part, hintPoint)
 	end
 
-	mesh.discoverPart = function(part: BasePart, hitNormal: Vector3): number?
+	mesh.discoverPart = function(part: BasePart, hintPoint: Vector3): number?
+		if part.Locked then
+			return nil
+		end
+
+		--print("Discover part:", part:GetFullName())
 		-- Cache hit: already tracked
-		local existing = getPartTriangle(part, hitNormal)
+		local existing = getPartTriangle(part, hintPoint)
 		if existing then
-			-- If hitNormal provided, delegate to getPartTriangle for face selection
-			if hitNormal then
-				return mesh.getPartTriangle(part, hitNormal)
-			end
 			return existing
+		else
+			print("No existing triangle for part")
 		end
 
 		-- If this part already has one face registered but getPartTriangle
-		-- returned nil (hitNormal doesn't match that face), we're
+		-- returned nil (hintPoint doesn't match that face), we're
 		-- discovering the opposite face. Skip the snap fallback to avoid
 		-- snapping back to the already-registered face's vertices.
 		local alreadyHasOneFace = mPartToTriangleFront[part] ~= nil or mPartToTriangleBack[part] ~= nil
 
+		-- Helper: flip local X to get opposite hintPoint for a part
+		local function getOppositeHint(targetPart: BasePart, hp: Vector3): Vector3
+			local cf = targetPart.CFrame
+			local lh = cf:PointToObjectSpace(hp)
+			return cf:PointToWorldSpace(Vector3.new(-lh.X, lh.Y, lh.Z))
+		end
+
 		-- Thin Block: split into 2 triangles sharing the same Block part
 		if isThinBlock(part) then
-			local va, vb, vc, vd = getBlockVertices(part)
+			local va, vb, vc, vd, thickness = getBlockVertices(part, hintPoint)
 			local vid1 = findOrCreateVertex(va)
 			local vid2 = findOrCreateVertex(vb)
 			local vid3 = findOrCreateVertex(vc)
@@ -884,8 +882,8 @@ local function createTriangleMesh(): TriangleMesh
 			end
 
 			-- Register two triangles: diagonal split (v1,v2,v3) and (v1,v3,v4)
-			local triId1 = registerTriangle({ vid1, vid2, vid3 }, { part }, hitNormal)
-			local triId2 = registerTriangle({ vid1, vid3, vid4 }, { part }, hitNormal)
+			local triId1 = registerTriangle({ vid1, vid2, vid3 }, { part }, thickness)
+			local triId2 = registerTriangle({ vid1, vid3, vid4 }, { part }, thickness)
 			mBlockParts[part] = { triId1, triId2 }
 			return triId1
 		end
@@ -895,7 +893,7 @@ local function createTriangleMesh(): TriangleMesh
 			return nil
 		end
 
-		local v1a, v1b, v1c = getWedgeVertices(part, hitNormal)
+		local v1a, v1b, v1c, thickness = getWedgeVertices(part, hintPoint)
 		local verts1 = { v1a, v1b, v1c }
 
 		-- Spatial query to find candidate partners
@@ -907,7 +905,7 @@ local function createTriangleMesh(): TriangleMesh
 			if not isWedge(candidate) then continue end
 
 			-- Skip already-paired parts (part of a 2-wedge triangle)
-			local candidateTriId = getPartTriangle(candidate, hitNormal)
+			local candidateTriId = getPartTriangle(candidate, hintPoint)
 			if candidateTriId then
 				local candidateTri = mTriangles[candidateTriId]
 				if candidateTri and #candidateTri.parts == 2 then
@@ -915,7 +913,7 @@ local function createTriangleMesh(): TriangleMesh
 				end
 			end
 
-			local v2a, v2b, v2c = getWedgeVertices(candidate, hitNormal)
+			local v2a, v2b, v2c = getWedgeVertices(candidate, hintPoint)
 			local verts2 = { v2a, v2b, v2c }
 
 			local corners = tryPairWedges(verts1, verts2)
@@ -925,7 +923,7 @@ local function createTriangleMesh(): TriangleMesh
 				-- with opposite normals, where the heuristic picks different
 				-- faces for the two triangles.
 				-- Skip when we're discovering the second face of an already-
-				-- registered part, since hitNormal already selects the correct
+				-- registered part, since hintPoint already selects the correct
 				-- opposite face and the snap would switch back to the existing one.
 				if next(mVertices) and not alreadyHasOneFace then
 					local snapCount = 0
@@ -935,12 +933,10 @@ local function createTriangleMesh(): TriangleMesh
 						end
 					end
 					if snapCount < 3 then
-						-- Use -hitNormal to select the opposite face from what
-						-- hitNormal chose. This is more reliable than using
-						-- consistentSign, which can give the same face as hitNormal
-						-- when the thin axis direction aligns with -hitNormal.
-						local altV1a, altV1b, altV1c = getWedgeVertices(part, -hitNormal)
-						local altV2a, altV2b, altV2c = getWedgeVertices(candidate, -hitNormal)
+						local altPartHint = getOppositeHint(part, hintPoint)
+						local altCandHint = getOppositeHint(candidate, hintPoint)
+						local altV1a, altV1b, altV1c = getWedgeVertices(part, altPartHint)
+						local altV2a, altV2b, altV2c = getWedgeVertices(candidate, altCandHint)
 						local altCorners = tryPairWedges(
 							{ altV1a, altV1b, altV1c },
 							{ altV2a, altV2b, altV2c }
@@ -976,7 +972,7 @@ local function createTriangleMesh(): TriangleMesh
 				local vid3 = findOrCreateVertex(corners[3])
 
 				if vid1 ~= vid2 and vid2 ~= vid3 and vid1 ~= vid3 then
-					return registerTriangle({ vid1, vid2, vid3 }, { part, candidate }, hitNormal)
+					return registerTriangle({ vid1, vid2, vid3 }, { part, candidate }, thickness)
 				end
 			end
 		end
@@ -987,45 +983,48 @@ local function createTriangleMesh(): TriangleMesh
 		local vid3 = findOrCreateVertex(v1c)
 
 		if vid1 ~= vid2 and vid2 ~= vid3 and vid1 ~= vid3 then
-			return registerTriangle({ vid1, vid2, vid3 }, { part }, hitNormal)
+			return registerTriangle({ vid1, vid2, vid3 }, { part }, thickness)
 		end
 
 		return nil
 	end
 
-	mesh.discoverRegion = function(center: Vector3, radius: number, hitNormal: Vector3)
+	mesh.discoverRegion = function(center: Vector3, radius: number, hintPoint: Vector3)
 		local candidates = workspace:GetPartBoundsInRadius(center, radius)
 		for _, candidate in candidates do
-			if not getPartTriangle(candidate, hitNormal) and (isWedge(candidate) or isThinBlock(candidate)) then
-				mesh.discoverPart(candidate, hitNormal)
+			if not getPartTriangle(candidate, hintPoint) and (isWedge(candidate) or isThinBlock(candidate)) then
+				mesh.discoverPart(candidate, hintPoint)
 			end
 		end
 	end
 
 	mesh.refreshFromParts = function()
+		-- Save vertex centroid as hintPoint per face (centroid is on the face surface)
 		local aliveTop: { [BasePart]: Vector3 } = {}
-		for part in mPartToTriangleFront do
+		for part, id in mPartToTriangleFront do
 			if part.Parent then
-				aliveTop[part] = mTriangles[mPartToTriangleFront[part]].normal
+				local tri = mTriangles[id]
+				aliveTop[part] = mVertices[tri.vertices[1]].position
 			end
 		end
-		local aliveBack: { [BasePart]: Vector3  } = {}
-		for part in mPartToTriangleBack do
+		local aliveBack: { [BasePart]: Vector3 } = {}
+		for part, id in mPartToTriangleBack do
 			if part.Parent then
-				aliveBack[part] = mTriangles[mPartToTriangleBack[part]].normal
+				local tri = mTriangles[id]
+				aliveBack[part] = mVertices[tri.vertices[1]].position
 			end
 		end
 
 		mesh.clear()
-		
-		for part, normal in aliveTop do
-			if not getPartTriangle(part, normal) then
-				mesh.discoverPart(part, normal)
+
+		for part, hint in aliveTop do
+			if not getPartTriangle(part, hint) then
+				mesh.discoverPart(part, hint)
 			end
 		end
-		for part, normal in aliveBack do
-			if not getPartTriangle(part, normal) then
-				mesh.discoverPart(part, normal)
+		for part, hint in aliveBack do
+			if not getPartTriangle(part, hint) then
+				mesh.discoverPart(part, hint)
 			end
 		end
 	end

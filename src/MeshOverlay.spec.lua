@@ -47,11 +47,11 @@ local function buildTestGrid(): (createTriangleMesh.TriangleMesh, Folder)
 			mesh.addTriangle(tl, tr, bl, THICKNESS, folder, {
 				Color = Color3.fromRGB(75, 151, 75),
 				Material = Enum.Material.Grass,
-			}, Vector3.yAxis)
+			}, Vector3.new(0, 1, 0))
 			mesh.addTriangle(tr, br, bl, THICKNESS, folder, {
 				Color = Color3.fromRGB(75, 151, 75),
 				Material = Enum.Material.Grass,
-			}, Vector3.yAxis)
+			}, Vector3.new(0, 1, 0))
 		end
 	end
 

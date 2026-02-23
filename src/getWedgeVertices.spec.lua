@@ -23,10 +23,12 @@ return function(t: TestTypes.TestContext)
 		local c = Vector3.new(2, 0, 3)
 		local parts = fillTriangle(a, b, c, 0.2, folder)
 
+		-- Use a point on the bottom face (below part center) as hintPoint
+		local hintPoint = Vector3.new(2, -0.2, 1)
 		-- Collect all vertices from all wedge parts
 		local allVerts: { Vector3 } = {}
 		for _, part in parts do
-			local v1, v2, v3 = getWedgeVertices(part, -Vector3.yAxis)
+			local v1, v2, v3 = getWedgeVertices(part, hintPoint)
 			table.insert(allVerts, v1)
 			table.insert(allVerts, v2)
 			table.insert(allVerts, v3)
@@ -56,9 +58,11 @@ return function(t: TestTypes.TestContext)
 		local c = Vector3.new(2, 5, 4 * math.sqrt(3) / 2)
 		local parts = fillTriangle(a, b, c, 0.2, folder)
 
+		-- Point below center picks the bottom face (surface at Y=5)
+		local hintPoint = Vector3.new(2, 4.8, 1)
 		local allVerts: { Vector3 } = {}
 		for _, part in parts do
-			local v1, v2, v3 = getWedgeVertices(part, -Vector3.yAxis)
+			local v1, v2, v3 = getWedgeVertices(part, hintPoint)
 			table.insert(allVerts, v1)
 			table.insert(allVerts, v2)
 			table.insert(allVerts, v3)
@@ -88,9 +92,11 @@ return function(t: TestTypes.TestContext)
 		local c = Vector3.new(2, 8, 1)
 		local parts = fillTriangle(a, b, c, 0.2, folder)
 
+		-- Point on the +Z side of the face surface
+		local hintPoint = Vector3.new(2, 2, 0.5)
 		local allVerts: { Vector3 } = {}
 		for _, part in parts do
-			local v1, v2, v3 = getWedgeVertices(part, Vector3.zAxis)
+			local v1, v2, v3 = getWedgeVertices(part, hintPoint)
 			table.insert(allVerts, v1)
 			table.insert(allVerts, v2)
 			table.insert(allVerts, v3)
@@ -120,9 +126,11 @@ return function(t: TestTypes.TestContext)
 		local c = Vector3.new(504, 10, 0)
 		local parts = fillTriangle(a, b, c, 0.2, folder)
 
+		-- Point above center picks the top face (at Y≈10.2 for this inverted triangle)
+		local hintPoint = Vector3.new(502, 10.3, 1)
 		local allVerts: { Vector3 } = {}
 		for _, part in parts do
-			local v1, v2, v3 = getWedgeVertices(part, Vector3.yAxis)
+			local v1, v2, v3 = getWedgeVertices(part, hintPoint)
 			table.insert(allVerts, v1)
 			table.insert(allVerts, v2)
 			table.insert(allVerts, v3)
@@ -152,9 +160,11 @@ return function(t: TestTypes.TestContext)
 		local c = Vector3.new(512, 3, 0)
 		local parts = fillTriangle(a, b, c, 0.2, folder)
 
+		-- Point on the +Z face surface
+		local hintPoint = Vector3.new(512, 1, 0.2)
 		local allVerts: { Vector3 } = {}
 		for _, part in parts do
-			local v1, v2, v3 = getWedgeVertices(part, Vector3.zAxis)
+			local v1, v2, v3 = getWedgeVertices(part, hintPoint)
 			table.insert(allVerts, v1)
 			table.insert(allVerts, v2)
 			table.insert(allVerts, v3)
@@ -174,7 +184,7 @@ return function(t: TestTypes.TestContext)
 		folder:Destroy()
 	end)
 
-	t.test("can select top or bottom face based on hit normal", function()
+	t.test("can select top or bottom face based on hintPoint", function()
 		-- Create a thin wedge lying flat (thin along X)
 		local wedge = Instance.new("Part")
 		wedge.Shape = Enum.PartType.Wedge
@@ -185,11 +195,12 @@ return function(t: TestTypes.TestContext)
 
 		-- The wedge's thin axis is X. RightVector is the thin axis direction.
 		local rightVec = wedge.CFrame.RightVector
+		local center = wedge.CFrame.Position
 
-		-- Hitting from the +X side should give the +X face
-		local topV1, topV2, topV3 = getWedgeVertices(wedge, rightVec)
-		-- Hitting from the -X side should give the -X face
-		local botV1, botV2, botV3 = getWedgeVertices(wedge, -rightVec)
+		-- Point on the +X side should give the +X face
+		local topV1, topV2, topV3 = getWedgeVertices(wedge, center + rightVec)
+		-- Point on the -X side should give the -X face
+		local botV1, botV2, botV3 = getWedgeVertices(wedge, center - rightVec)
 
 		-- Both should return valid triangles (3 distinct vertices)
 		t.expect(fuzzyEqVec3(topV1, topV2)).toBeFalsy()
@@ -211,7 +222,7 @@ return function(t: TestTypes.TestContext)
 		wedge:Destroy()
 	end)
 
-	t.test("hit normal selects correct face for fillTriangle parts", function()
+	t.test("hintPoint selects correct face for fillTriangle parts", function()
 		local folder = Instance.new("Folder")
 		folder.Parent = workspace
 
@@ -221,21 +232,21 @@ return function(t: TestTypes.TestContext)
 		local c = Vector3.new(522, 5, 3)
 		local parts = fillTriangle(a, b, c, 0.2, folder)
 
-		-- Hit from above (normal pointing up = toward the surface)
-		local upNormal = Vector3.new(0, 1, 0)
+		-- Point above center (Y=5.3) → depth face at Y ≈ 5.2
+		local hintAbove = Vector3.new(522, 5.3, 1)
 		local allVertsUp: { Vector3 } = {}
 		for _, part in parts do
-			local v1, v2, v3 = getWedgeVertices(part, upNormal)
+			local v1, v2, v3 = getWedgeVertices(part, hintAbove)
 			table.insert(allVertsUp, v1)
 			table.insert(allVertsUp, v2)
 			table.insert(allVertsUp, v3)
 		end
 
-		-- Hit from below (normal pointing down = toward the other face)
-		local downNormal = Vector3.new(0, -1, 0)
+		-- Point below center (Y=4.8) → surface face at Y ≈ 5.0
+		local hintBelow = Vector3.new(522, 4.8, 1)
 		local allVertsDown: { Vector3 } = {}
 		for _, part in parts do
-			local v1, v2, v3 = getWedgeVertices(part, downNormal)
+			local v1, v2, v3 = getWedgeVertices(part, hintBelow)
 			table.insert(allVertsDown, v1)
 			table.insert(allVertsDown, v2)
 			table.insert(allVertsDown, v3)
@@ -243,8 +254,8 @@ return function(t: TestTypes.TestContext)
 
 		-- For this triangle, natural normal is -Y. fillTriangle extends depth
 		-- opposite to the normal (+Y direction), so:
-		-- Hit from above (+Y) → depth face at Y ≈ 5.2
-		-- Hit from below (-Y) → surface face at Y ≈ 5.0
+		-- Point above → depth face at Y ≈ 5.2
+		-- Point below → surface face at Y ≈ 5.0
 		local foundUpAtDepth = false
 		local foundDownAtSurface = false
 		for _, v in allVertsUp do
@@ -275,7 +286,8 @@ return function(t: TestTypes.TestContext)
 		wedge.Anchored = true
 		wedge.Parent = workspace
 
-		local v1, v2, v3 = getWedgeVertices(wedge, Vector3.zAxis)
+		-- Point on the +X face of the wedge
+		local v1, v2, v3 = getWedgeVertices(wedge, Vector3.new(5.2, 5, 5))
 
 		-- All three should be different
 		t.expect(fuzzyEqVec3(v1, v2)).toBeFalsy()
