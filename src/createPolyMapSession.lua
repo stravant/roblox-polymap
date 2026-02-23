@@ -1204,31 +1204,49 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			mMesh.discoverRegion(origPos, radius + 5, origPos)
 		end
 
-		for vid, vertex in mMesh.getVertices() do
-			if mSelectedVertices[vid] then
-				continue
-			end
-
-			-- Find minimum X/Z distance to any selected vertex
-			local minDist = math.huge
-			for _, origPos in mSavedVertexPositions do
-				local delta = vertex.position - origPos
-				local dist = Vector3.new(delta.X, 0, delta.Z).Magnitude
-				if dist < minDist then
-					minDist = dist
+		-- Walk outwards via mesh topology to find influenced vertices,
+		-- avoiding vertices on the opposite face that are spatially close
+		-- but not topologically connected.
+		local frontier: { number } = {}
+		for vid in mSelectedVertices do
+			table.insert(frontier, vid)
+		end
+		local visited: { [number]: boolean } = {}
+		for vid in mSelectedVertices do
+			visited[vid] = true
+		end
+		while #frontier > 0 do
+			local nextFrontier: { number } = {}
+			for _, vid in frontier do
+				for _, neighborId in mMesh.getVertexNeighbors(vid) do
+					if not visited[neighborId] then
+						visited[neighborId] = true
+						local neighbor = mMesh.getVertex(neighborId)
+						if neighbor then
+							local minDist = math.huge
+							for _, origPos in mSavedVertexPositions do
+								local delta = neighbor.position - origPos
+								local dist = Vector3.new(delta.X, 0, delta.Z).Magnitude
+								if dist < minDist then
+									minDist = dist
+								end
+							end
+							if minDist < radius then
+								local t = minDist / radius
+								local factor = computeFalloff(t)
+								if factor > 0.001 then
+									mInfluencedVertices[neighborId] = {
+										position = neighbor.position,
+										factor = factor,
+									}
+								end
+								table.insert(nextFrontier, neighborId)
+							end
+						end
+					end
 				end
 			end
-
-			if minDist < radius then
-				local t = minDist / radius
-				local factor = computeFalloff(t)
-				if factor > 0.001 then
-					mInfluencedVertices[vid] = {
-						position = vertex.position,
-						factor = factor,
-					}
-				end
-			end
+			frontier = nextFrontier
 		end
 	end
 
@@ -1546,34 +1564,50 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 		if radius > 0 then
 			-- Get seed positions (use saved positions during drags)
-			local seedPositions: { Vector3 } = {}
+			local seedPositions: { [number]: Vector3 } = {}
 			if mIsDraggingHandle and next(mSavedVertexPositions) then
 				for vid in seedVids do
 					local pos = mSavedVertexPositions[vid]
 					if pos then
-						table.insert(seedPositions, pos)
+						seedPositions[vid] = pos
 					end
 				end
 			else
 				for vid in seedVids do
 					local v = mMesh.getVertex(vid)
 					if v then
-						table.insert(seedPositions, v.position)
+						seedPositions[vid] = v.position
 					end
 				end
 			end
 
-			-- Expand by influence radius
-			for vid, vertex in mMesh.getVertices() do
-				if not affectedVids[vid] then
-					for _, selPos in seedPositions do
-						local delta = vertex.position - selPos
-						if Vector3.new(delta.X, 0, delta.Z).Magnitude < radius then
-							affectedVids[vid] = true
-							break
+			-- Walk outwards via mesh topology (vertex -> triangles -> verts)
+			-- instead of checking all vertices, to avoid selecting vertices
+			-- on the opposite face that happen to be within radius.
+			local frontier: { number } = {}
+			for vid in seedVids do
+				table.insert(frontier, vid)
+			end
+			while #frontier > 0 do
+				local nextFrontier: { number } = {}
+				for _, vid in frontier do
+					for _, neighborId in mMesh.getVertexNeighbors(vid) do
+						if not affectedVids[neighborId] then
+							local neighbor = mMesh.getVertex(neighborId)
+							if neighbor then
+								for seedVid, selPos in seedPositions do
+									local delta = neighbor.position - selPos
+									if Vector3.new(delta.X, 0, delta.Z).Magnitude < radius then
+										affectedVids[neighborId] = true
+										table.insert(nextFrontier, neighborId)
+										break
+									end
+								end
+							end
 						end
 					end
 				end
+				frontier = nextFrontier
 			end
 		end
 
