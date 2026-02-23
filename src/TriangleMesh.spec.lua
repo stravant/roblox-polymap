@@ -404,7 +404,7 @@ return function(t: TestTypes.TestContext)
 		end
 
 		-- Discover the region covering both
-		mesh.discoverRegion(Vector3.new(202, 10, 0), 20, Vector3.new(202, 11, 0))
+		mesh.discoverRegion({Vector3.new(202, 10, 0)}, 20)
 
 		local triCount = 0
 		for _ in mesh.getTriangles() do
@@ -818,7 +818,7 @@ return function(t: TestTypes.TestContext)
 		fillTriangle(a, c, d, 0.2, folder, nil, nil, true)
 
 		-- Discover all parts in the region (hintPoint below for underhanging)
-		mesh.discoverRegion(Vector3.new(1002, 10, 1000), 20, Vector3.new(1002, 9.8, 1000))
+		mesh.discoverRegion({Vector3.new(1002, 10, 1000)}, 20)
 
 		-- Should have 2 triangles with 4 vertices (a, b, c, d)
 		local triCount = 0
@@ -874,7 +874,7 @@ return function(t: TestTypes.TestContext)
 		-- hintPoint on the +Z side of the wall surface at Z=1100
 		local wallHint = Vector3.new(1102, 1, 1100.2)
 		mesh.discoverPart(parts1[1], wallHint)
-		mesh.discoverRegion(Vector3.new(1102, 0, 1100), 20, wallHint)
+		mesh.discoverRegion({Vector3.new(1102, 0, 1100)}, 20)
 
 		local triCount = 0
 		local firstTriId: number? = nil

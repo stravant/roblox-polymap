@@ -72,7 +72,7 @@ export type TriangleMesh = {
 
 	-- Discovery / Scanning
 	discoverPart: (part: BasePart, hintPoint: Vector3) -> number?,
-	discoverRegion: (center: Vector3, radius: number, hintPoint: Vector3) -> (),
+	discoverRegion: (seeds: { Vector3 }, radius: number) -> ({ number }, { number }),
 	getPartTriangle: (part: BasePart, hintPoint: Vector3) -> number?,
 	refreshFromParts: () -> (),
 	clear: () -> (),
@@ -989,13 +989,128 @@ local function createTriangleMesh(): TriangleMesh
 		return nil
 	end
 
-	mesh.discoverRegion = function(center: Vector3, radius: number, hintPoint: Vector3)
-		local candidates = workspace:GetPartBoundsInRadius(center, radius)
-		for _, candidate in candidates do
-			if not getPartTriangle(candidate, hintPoint) and (isWedge(candidate) or isThinBlock(candidate)) then
-				mesh.discoverPart(candidate, hintPoint)
+	mesh.discoverRegion = function(seeds: { Vector3 }, radius: number): ({ number }, { number })
+		local visitedVertices: { [number]: boolean } = {}
+		local visitedTriangles: { [number]: boolean } = {}
+		local queue: { number } = {} -- vertex id queue
+		local queueHead = 1
+
+		-- Bootstrap: convert seed positions to vertex IDs
+		for _, seed in seeds do
+			-- Try O(1) lookup for already-tracked vertex
+			local existingVid = mPositionToVertex[positionKey(seed)]
+			if existingVid then
+				local vertex = mVertices[existingVid]
+				if vertex and not visitedVertices[existingVid] then
+					visitedVertices[existingVid] = true
+					table.insert(queue, existingVid)
+					for _, triId in vertex.triangles do
+						visitedTriangles[triId] = true
+					end
+				end
+			else
+				-- Fallback: small spatial query to discover nearby parts
+				local candidates = workspace:GetPartBoundsInRadius(seed, 1)
+				for _, candidate in candidates do
+					if isWedge(candidate) or isThinBlock(candidate) then
+						local triId = getPartTriangle(candidate, seed)
+						if not triId then
+							triId = mesh.discoverPart(candidate, seed)
+						end
+						if triId then
+							local tri = mTriangles[triId]
+							if tri and not visitedTriangles[triId] then
+								visitedTriangles[triId] = true
+								for _, vid in tri.vertices do
+									if not visitedVertices[vid] then
+										visitedVertices[vid] = true
+										table.insert(queue, vid)
+									end
+								end
+							end
+						end
+					end
+				end
 			end
 		end
+
+		-- BFS over vertices (same pattern as walkSurface)
+		while queueHead <= #queue do
+			local vid = queue[queueHead]
+			queueHead += 1
+
+			local vertex = mVertices[vid]
+			if not vertex then continue end
+
+			-- Discover undiscovered adjacent parts via small spatial query
+			local candidates = workspace:GetPartBoundsInRadius(vertex.position, 1)
+			for _, candidate in candidates do
+				if not getPartTriangle(candidate, vertex.position) then
+					mesh.discoverPart(candidate, vertex.position)
+				end
+			end
+
+			-- Visit all triangles touching this vertex
+			for _, triId in vertex.triangles do
+				if visitedTriangles[triId] then continue end
+				visitedTriangles[triId] = true
+
+				local tri = mTriangles[triId]
+				if not tri then continue end
+
+				-- Enqueue unvisited vertices if within extended radius of any seed
+				for _, triVid in tri.vertices do
+					if not visitedVertices[triVid] then
+						local triVertex = mVertices[triVid]
+						if triVertex then
+							local withinExtended = false
+							for _, seed in seeds do
+								if (triVertex.position - seed).Magnitude <= radius + 5 then
+									withinExtended = true
+									break
+								end
+							end
+							if withinExtended then
+								visitedVertices[triVid] = true
+								table.insert(queue, triVid)
+							end
+						end
+					end
+				end
+			end
+		end
+
+		-- Final filter: only include geometry within actual radius of any seed
+		local resultTriangles: { number } = {}
+		local resultVertices: { number } = {}
+		local vertexInRadius: { [number]: boolean } = {}
+
+		for vid in visitedVertices do
+			local vertex = mVertices[vid]
+			if vertex then
+				for _, seed in seeds do
+					if (vertex.position - seed).Magnitude <= radius then
+						vertexInRadius[vid] = true
+						table.insert(resultVertices, vid)
+						break
+					end
+				end
+			end
+		end
+
+		for triId in visitedTriangles do
+			local tri = mTriangles[triId]
+			if tri then
+				for _, vid in tri.vertices do
+					if vertexInRadius[vid] then
+						table.insert(resultTriangles, triId)
+						break
+					end
+				end
+			end
+		end
+
+		return resultTriangles, resultVertices
 	end
 
 	mesh.refreshFromParts = function()

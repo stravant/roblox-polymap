@@ -533,7 +533,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	end
 
 	local function handleSelectClick(worldPos: Vector3, hitPart: BasePart?)
-		mMesh.discoverRegion(worldPos, 15, worldPos)
+		mMesh.discoverRegion({worldPos}, 15)
 		local hitTriangleId = if hitPart then mMesh.getPartTriangle(hitPart, worldPos) else nil
 		local vid = findNearestVertex(worldPos, hitTriangleId)
 		if vid then
@@ -555,7 +555,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	end
 
 	local function handleAddClick(worldPos: Vector3)
-		mMesh.discoverRegion(worldPos, 15, worldPos)
+		mMesh.discoverRegion({worldPos}, 15)
 		if not mAddBoundaryEdge then
 			-- Phase 1: select a boundary edge (no distance limit)
 			local edgeKey = findNearestBoundaryEdge(nil)
@@ -715,7 +715,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				then mMesh.getPartTriangle(result.Instance :: BasePart, result.Position)
 				else nil
 			if hitTriangleId then
-				mMesh.discoverRegion(worldPos, 15, worldPos)
+				mMesh.discoverRegion({worldPos}, 15)
 				local vid = findNearestVertex(worldPos, hitTriangleId)
 				if vid then
 					local vertex = mMesh.getVertex(vid)
@@ -819,7 +819,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			local _
 			_, walkVertexIds = mMesh.walkSurface(mStrokeSeedTriangleId, worldPos.hit, radius)
 		else
-			mMesh.discoverRegion(worldPos.hit, radius + 5, worldPos.hit)
+			mMesh.discoverRegion({worldPos.hit}, radius + 5)
 		end
 
 		-- Save vertex positions on first encounter during this stroke
@@ -930,7 +930,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			local _
 			_, walkVertexIds = mMesh.walkSurface(mStrokeSeedTriangleId, worldPos.hit, radius)
 		else
-			mMesh.discoverRegion(worldPos.hit, radius + 5, worldPos.hit)
+			mMesh.discoverRegion({worldPos.hit}, radius + 5)
 		end
 
 		-- Find all vertices within radius using current positions
@@ -1132,7 +1132,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			local depth = (centerHit.Position - camera.CFrame.Position).Magnitude
 			local cornerWorld = cornerRay.Origin + cornerRay.Direction * depth
 			local halfDiag = (cornerWorld - centerHit.Position).Magnitude
-			mMesh.discoverRegion(centerHit.Position, halfDiag + 10, centerHit.Position)
+			mMesh.discoverRegion({centerHit.Position}, halfDiag + 10)
 		end
 
 		local minX = math.min(mMarqueeStart.X, mMarqueeEnd.X)
@@ -1199,54 +1199,36 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			return
 		end
 
-		-- Discover nearby geometry so unselected vertices within influence are found
+		-- Discover nearby geometry and walk topology in a single call
+		local seedPositions: { Vector3 } = {}
 		for _, origPos in mSavedVertexPositions do
-			mMesh.discoverRegion(origPos, radius + 5, origPos)
+			table.insert(seedPositions, origPos)
 		end
+		local _, discoveredVids = mMesh.discoverRegion(seedPositions, radius)
 
-		-- Walk outwards via mesh topology to find influenced vertices,
-		-- avoiding vertices on the opposite face that are spatially close
-		-- but not topologically connected.
-		local frontier: { number } = {}
-		for vid in mSelectedVertices do
-			table.insert(frontier, vid)
-		end
-		local visited: { [number]: boolean } = {}
-		for vid in mSelectedVertices do
-			visited[vid] = true
-		end
-		while #frontier > 0 do
-			local nextFrontier: { number } = {}
-			for _, vid in frontier do
-				for _, neighborId in mMesh.getVertexNeighbors(vid) do
-					if not visited[neighborId] then
-						visited[neighborId] = true
-						local neighbor = mMesh.getVertex(neighborId)
-						if neighbor then
-							local minDist = math.huge
-							for _, origPos in mSavedVertexPositions do
-								local delta = neighbor.position - origPos
-								local dist = Vector3.new(delta.X, 0, delta.Z).Magnitude
-								if dist < minDist then
-									minDist = dist
-								end
-							end
-							if minDist < radius then
-								local t = minDist / radius
-								local factor = computeFalloff(t)
-								if factor > 0.001 then
-									mInfluencedVertices[neighborId] = {
-										position = neighbor.position,
-										factor = factor,
-									}
-								end
-								table.insert(nextFrontier, neighborId)
-							end
-						end
-					end
+		-- Compute falloff for returned non-selected vertices using XZ distance
+		for _, vid in discoveredVids do
+			if mSelectedVertices[vid] then continue end
+			local neighbor = mMesh.getVertex(vid)
+			if not neighbor then continue end
+			local minDist = math.huge
+			for _, origPos in mSavedVertexPositions do
+				local delta = neighbor.position - origPos
+				local dist = Vector3.new(delta.X, 0, delta.Z).Magnitude
+				if dist < minDist then
+					minDist = dist
 				end
 			end
-			frontier = nextFrontier
+			if minDist < radius then
+				local t = minDist / radius
+				local factor = computeFalloff(t)
+				if factor > 0.001 then
+					mInfluencedVertices[vid] = {
+						position = neighbor.position,
+						factor = factor,
+					}
+				end
+			end
 		end
 	end
 
@@ -1550,67 +1532,82 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return mHoverEdgeKey
 	end
 	-- Collect triangles from seed vertices expanded by the influence radius.
-	-- During a drag, uses saved positions to prevent flicker.
+	-- During a drag, uses saved positions for XZ distance filtering.
 	local function getExpandedTriangleIds(seedVids: { [number]: boolean }): { number }
 		if not next(seedVids) then
 			return {}
 		end
 
 		local radius = currentSettings.InfluenceRadius
+		if radius <= 0 then
+			-- Just return triangles touching the seed vertices
+			local triSet: { [number]: boolean } = {}
+			for vid in seedVids do
+				local v = mMesh.getVertex(vid)
+				if v then
+					for _, triId in v.triangles do
+						triSet[triId] = true
+					end
+				end
+			end
+			local result: { number } = {}
+			for triId in triSet do
+				table.insert(result, triId)
+			end
+			return result
+		end
+
+		-- Collect current positions as seeds for topology walk
+		local seedPositions: { Vector3 } = {}
+		for vid in seedVids do
+			local v = mMesh.getVertex(vid)
+			if v then
+				table.insert(seedPositions, v.position)
+			end
+		end
+		if #seedPositions == 0 then
+			return {}
+		end
+
+		-- Discover region and walk topology
+		local _, discoveredVids = mMesh.discoverRegion(seedPositions, radius)
+
+		-- For XZ distance filtering, use saved positions during drags
+		local filterPositions: { Vector3 }
+		if mIsDraggingHandle and next(mSavedVertexPositions) then
+			filterPositions = {}
+			for vid in seedVids do
+				local pos = mSavedVertexPositions[vid]
+				if pos then
+					table.insert(filterPositions, pos)
+				end
+			end
+			if #filterPositions == 0 then
+				filterPositions = seedPositions
+			end
+		else
+			filterPositions = seedPositions
+		end
+
+		-- Re-filter returned vertices by XZ distance and include seed vertices
 		local affectedVids: { [number]: boolean } = {}
 		for vid in seedVids do
 			affectedVids[vid] = true
 		end
-
-		if radius > 0 then
-			-- Get seed positions (use saved positions during drags)
-			local seedPositions: { [number]: Vector3 } = {}
-			if mIsDraggingHandle and next(mSavedVertexPositions) then
-				for vid in seedVids do
-					local pos = mSavedVertexPositions[vid]
-					if pos then
-						seedPositions[vid] = pos
-					end
+		for _, vid in discoveredVids do
+			if affectedVids[vid] then continue end
+			local neighbor = mMesh.getVertex(vid)
+			if not neighbor then continue end
+			for _, seedPos in filterPositions do
+				local delta = neighbor.position - seedPos
+				if Vector3.new(delta.X, 0, delta.Z).Magnitude < radius then
+					affectedVids[vid] = true
+					break
 				end
-			else
-				for vid in seedVids do
-					local v = mMesh.getVertex(vid)
-					if v then
-						seedPositions[vid] = v.position
-					end
-				end
-			end
-
-			-- Walk outwards via mesh topology (vertex -> triangles -> verts)
-			-- instead of checking all vertices, to avoid selecting vertices
-			-- on the opposite face that happen to be within radius.
-			local frontier: { number } = {}
-			for vid in seedVids do
-				table.insert(frontier, vid)
-			end
-			while #frontier > 0 do
-				local nextFrontier: { number } = {}
-				for _, vid in frontier do
-					for _, neighborId in mMesh.getVertexNeighbors(vid) do
-						if not affectedVids[neighborId] then
-							local neighbor = mMesh.getVertex(neighborId)
-							if neighbor then
-								for seedVid, selPos in seedPositions do
-									local delta = neighbor.position - selPos
-									if Vector3.new(delta.X, 0, delta.Z).Magnitude < radius then
-										affectedVids[neighborId] = true
-										table.insert(nextFrontier, neighborId)
-										break
-									end
-								end
-							end
-						end
-					end
-				end
-				frontier = nextFrontier
 			end
 		end
 
+		-- Collect triangles from affected vertices
 		local triSet: { [number]: boolean } = {}
 		for vid in affectedVids do
 			local v = mMesh.getVertex(vid)
@@ -1705,7 +1702,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local gridExtent = math.max(currentSettings.GridWidth, currentSettings.GridHeight)
 			* currentSettings.GridSpacing / 2 + currentSettings.GridSpacing
 		-- TODO: Do we need a discover here? We could discover on demand
-		mMesh.discoverRegion(origin.Position, gridExtent, origin.Position)
+		mMesh.discoverRegion({origin.Position}, gridExtent)
 		changeSignal:Fire()
 	end
 	session.ImportHeightmap = function()
@@ -1771,7 +1768,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				local gridExtent = math.max(importWidth, importHeight)
 					* importSpacing / 2 + importSpacing
 				-- TODO: Do we need a discover here? We could discover on demand
-				mMesh.discoverRegion(origin.Position, gridExtent, origin.Position)
+				mMesh.discoverRegion({origin.Position}, gridExtent)
 			else
 				warn("PolyMap Import failed: " .. tostring(err))
 			end
