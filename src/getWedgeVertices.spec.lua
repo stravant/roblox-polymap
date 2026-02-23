@@ -241,25 +241,27 @@ return function(t: TestTypes.TestContext)
 			table.insert(allVertsDown, v3)
 		end
 
-		-- Hit from above → gets the upward-facing face (at Y ≈ 5.0, the surface)
-		-- Hit from below → gets the downward-facing face (at Y ≈ 4.8, thickness extends down)
-		local foundUpAtSurface = false
-		local foundDownOffset = false
+		-- For this triangle, natural normal is -Y. fillTriangle extends depth
+		-- opposite to the normal (+Y direction), so:
+		-- Hit from above (+Y) → depth face at Y ≈ 5.2
+		-- Hit from below (-Y) → surface face at Y ≈ 5.0
+		local foundUpAtDepth = false
+		local foundDownAtSurface = false
 		for _, v in allVertsUp do
-			if math.abs(v.Y - 5.0) < ROUND_TRIP_EPSILON then
-				foundUpAtSurface = true
+			if math.abs(v.Y - 5.2) < ROUND_TRIP_EPSILON then
+				foundUpAtDepth = true
 				break
 			end
 		end
 		for _, v in allVertsDown do
-			if math.abs(v.Y - 4.8) < ROUND_TRIP_EPSILON then
-				foundDownOffset = true
+			if math.abs(v.Y - 5.0) < ROUND_TRIP_EPSILON then
+				foundDownAtSurface = true
 				break
 			end
 		end
 
-		t.expect(foundUpAtSurface).toBeTruthy()
-		t.expect(foundDownOffset).toBeTruthy()
+		t.expect(foundUpAtDepth).toBeTruthy()
+		t.expect(foundDownAtSurface).toBeTruthy()
 
 		folder:Destroy()
 	end)

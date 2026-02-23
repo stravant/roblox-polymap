@@ -1843,6 +1843,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			splits: { boolean },
 			color: Color3,
 			material: Enum.Material,
+			normal: Vector3,
 		}
 		local snapshots: { TriSnapshot } = {}
 		for triId in affectedTriIds do
@@ -1869,6 +1870,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 						},
 						color = part.Color,
 						material = part.Material,
+						normal = tri.normal,
 					})
 				end
 			end
@@ -1892,9 +1894,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			}
 			local splitCount = (if s[1] then 1 else 0) + (if s[2] then 1 else 0) + (if s[3] then 1 else 0)
 
+			local targetNormal = snap.normal
 			if splitCount == 0 then
 				-- No edges split — re-add as-is
-				mMesh.addTriangle(p[1], p[2], p[3], thickness, parent, props)
+				mMesh.addTriangle(p[1], p[2], p[3], thickness, parent, props, targetNormal)
 			elseif splitCount == 3 then
 				-- All edges split — standard 4-way subdivision
 				local m12 = (p[1] + p[2]) / 2
@@ -1903,10 +1906,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				table.insert(newMidpoints, m12)
 				table.insert(newMidpoints, m23)
 				table.insert(newMidpoints, m31)
-				mMesh.addTriangle(p[1], m12, m31, thickness, parent, props)
-				mMesh.addTriangle(m12, p[2], m23, thickness, parent, props)
-				mMesh.addTriangle(m31, m23, p[3], thickness, parent, props)
-				mMesh.addTriangle(m12, m23, m31, thickness, parent, props)
+				mMesh.addTriangle(p[1], m12, m31, thickness, parent, props, targetNormal)
+				mMesh.addTriangle(m12, p[2], m23, thickness, parent, props, targetNormal)
+				mMesh.addTriangle(m31, m23, p[3], thickness, parent, props, targetNormal)
+				mMesh.addTriangle(m12, m23, m31, thickness, parent, props, targetNormal)
 			elseif splitCount == 1 then
 				-- One edge split — rotate so split edge is 1-2, then bisect
 				local rp = p
@@ -1917,8 +1920,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				end
 				local m = (rp[1] + rp[2]) / 2
 				table.insert(newMidpoints, m)
-				mMesh.addTriangle(rp[1], m, rp[3], thickness, parent, props)
-				mMesh.addTriangle(m, rp[2], rp[3], thickness, parent, props)
+				mMesh.addTriangle(rp[1], m, rp[3], thickness, parent, props, targetNormal)
+				mMesh.addTriangle(m, rp[2], rp[3], thickness, parent, props, targetNormal)
 			else -- splitCount == 2
 				-- Two edges split — rotate so unsplit edge is 1-2, apex is vertex 3
 				local rp = p
@@ -1934,9 +1937,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				local m31 = (rp[3] + rp[1]) / 2
 				table.insert(newMidpoints, m23)
 				table.insert(newMidpoints, m31)
-				mMesh.addTriangle(rp[3], m31, m23, thickness, parent, props)
-				mMesh.addTriangle(rp[1], rp[2], m23, thickness, parent, props)
-				mMesh.addTriangle(rp[1], m23, m31, thickness, parent, props)
+				mMesh.addTriangle(rp[3], m31, m23, thickness, parent, props, targetNormal)
+				mMesh.addTriangle(rp[1], rp[2], m23, thickness, parent, props, targetNormal)
+				mMesh.addTriangle(rp[1], m23, m31, thickness, parent, props, targetNormal)
 			end
 		end
 
@@ -2011,7 +2014,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			end
 
 			-- Snapshot each triangle, replacing either endpoint with midpoint
-			local snapshots: { { positions: { Vector3 }, color: Color3, material: Enum.Material } } = {}
+			local snapshots: { { positions: { Vector3 }, color: Color3, material: Enum.Material, normal: Vector3 } } = {}
 			for triId in affectedTriIds do
 				local tri = mMesh.getTriangle(triId)
 				if tri then
@@ -2032,6 +2035,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 							positions = positions,
 							color = part.Color,
 							material = part.Material,
+							normal = tri.normal,
 						})
 					end
 				end
@@ -2056,7 +2060,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				}
 				mMesh.addTriangle(
 					snap.positions[1], snap.positions[2], snap.positions[3],
-					currentSettings.Thickness, workspace.Terrain, props
+					currentSettings.Thickness, workspace.Terrain, props, snap.normal
 				)
 			end
 

@@ -14,7 +14,7 @@ return function(t: TestTypes.TestContext)
 			Vector3.new(0, 0, 0),
 			Vector3.new(4, 0, 0),
 			Vector3.new(2, 0, 3),
-			0.2, folder
+			0.2, folder, nil, Vector3.yAxis
 		)
 
 		t.expect(triId).toBeTruthy()
@@ -52,13 +52,13 @@ return function(t: TestTypes.TestContext)
 			Vector3.new(0, 0, 0),
 			Vector3.new(4, 0, 0),
 			Vector3.new(2, 0, 3),
-			0.2, folder
+			0.2, folder, nil, Vector3.yAxis
 		)
 		mesh.addTriangle(
 			Vector3.new(0, 0, 0),
 			Vector3.new(4, 0, 0),
 			Vector3.new(2, 0, -3),
-			0.2, folder
+			0.2, folder, nil, Vector3.yAxis
 		)
 
 		-- Should have 4 vertices (2 shared)
@@ -87,7 +87,7 @@ return function(t: TestTypes.TestContext)
 			Vector3.new(0, 0, 0),
 			Vector3.new(4, 0, 0),
 			Vector3.new(2, 0, 3),
-			0.2, folder
+			0.2, folder, nil, Vector3.yAxis
 		)
 
 		-- A single triangle should have 3 boundary edges
@@ -99,7 +99,7 @@ return function(t: TestTypes.TestContext)
 			Vector3.new(0, 0, 0),
 			Vector3.new(4, 0, 0),
 			Vector3.new(2, 0, -3),
-			0.2, folder
+			0.2, folder, nil, Vector3.yAxis
 		)
 
 		-- Now the shared edge is internal, so 4 boundary edges
@@ -118,7 +118,7 @@ return function(t: TestTypes.TestContext)
 			Vector3.new(0, 0, 0),
 			Vector3.new(4, 0, 0),
 			Vector3.new(2, 0, 3),
-			0.2, folder
+			0.2, folder, nil, Vector3.yAxis
 		)
 		assert(triId)
 
@@ -148,13 +148,13 @@ return function(t: TestTypes.TestContext)
 			Vector3.new(0, 0, 0),
 			Vector3.new(4, 0, 0),
 			Vector3.new(2, 0, 3),
-			0.2, folder
+			0.2, folder, nil, Vector3.yAxis
 		)
 		mesh.addTriangle(
 			Vector3.new(0, 0, 0),
 			Vector3.new(4, 0, 0),
 			Vector3.new(2, 0, -3),
-			0.2, folder
+			0.2, folder, nil, Vector3.yAxis
 		)
 		assert(tri1)
 
@@ -179,7 +179,7 @@ return function(t: TestTypes.TestContext)
 			Vector3.new(0, 0, 0),
 			Vector3.new(4, 0, 0),
 			Vector3.new(2, 0, 3),
-			0.2, folder
+			0.2, folder, nil, Vector3.yAxis
 		)
 
 		-- Find the vertex at (0,0,0)
@@ -202,7 +202,7 @@ return function(t: TestTypes.TestContext)
 			Vector3.new(0, 0, 0),
 			Vector3.new(4, 0, 0),
 			Vector3.new(2, 0, 3),
-			0.2, folder
+			0.2, folder, nil, Vector3.yAxis
 		)
 
 		local vid = mesh.findVertexNear(Vector3.new(0.01, 0, 0), 1)
@@ -223,7 +223,7 @@ return function(t: TestTypes.TestContext)
 			Vector3.new(0, 0, 0),
 			Vector3.new(4, 0, 0),
 			Vector3.new(2, 0, 3),
-			0.2, folder
+			0.2, folder, nil, Vector3.yAxis
 		)
 		assert(triId)
 
@@ -252,7 +252,7 @@ return function(t: TestTypes.TestContext)
 			Vector3.new(0, 0, 0),
 			Vector3.new(4, 0, 0),
 			Vector3.new(2, 0, 3),
-			0.2, folder
+			0.2, folder, nil, Vector3.yAxis
 		)
 
 		local vid = mesh.findVertexNear(Vector3.new(2, 0, 3), 0.1)
@@ -285,7 +285,7 @@ return function(t: TestTypes.TestContext)
 			Vector3.new(0, 0, 0),
 			Vector3.new(4, 0, 0),
 			Vector3.new(2, 0, 3),
-			0.2, folder
+			0.2, folder, nil, Vector3.yAxis
 		)
 		assert(triId)
 
@@ -316,6 +316,10 @@ return function(t: TestTypes.TestContext)
 	end)
 
 	t.test("discoverPart pairs fillTriangle wedges", function()
+		-- Clean up any foreign parts in the test area
+		for _, p in workspace:GetPartBoundsInRadius(Vector3.new(22, 10, 1.5), 10) do
+			if p:IsA("BasePart") then p:Destroy() end
+		end
 		local mesh = createTriangleMesh()
 		local folder = Instance.new("Folder")
 		folder.Parent = workspace
@@ -328,7 +332,7 @@ return function(t: TestTypes.TestContext)
 		t.expect(#parts > 0).toBeTruthy()
 
 		-- Discover one of the parts
-		local triId = mesh.discoverPart(parts[1])
+		local triId = mesh.discoverPart(parts[1], Vector3.yAxis)
 		t.expect(triId).toBeTruthy()
 
 		-- Should have 1 triangle with 3 vertices
@@ -364,8 +368,8 @@ return function(t: TestTypes.TestContext)
 			0.2, folder
 		)
 
-		local triId1 = mesh.discoverPart(parts[1])
-		local triId2 = mesh.discoverPart(parts[1])
+		local triId1 = mesh.discoverPart(parts[1], Vector3.yAxis)
+		local triId2 = mesh.discoverPart(parts[1], Vector3.yAxis)
 		t.expect(triId1).toBe(triId2)
 
 		folder:Destroy()
@@ -390,8 +394,15 @@ return function(t: TestTypes.TestContext)
 			0.2, folder
 		)
 
+		-- Clean up any foreign parts in the test area
+		for _, p in workspace:GetPartBoundsInRadius(Vector3.new(202, 10, 0), 25) do
+			if p:IsA("BasePart") and p.Parent ~= folder then
+				p:Destroy()
+			end
+		end
+
 		-- Discover the region covering both
-		mesh.discoverRegion(Vector3.new(202, 10, 0), 20)
+		mesh.discoverRegion(Vector3.new(202, 10, 0), 20, Vector3.yAxis)
 
 		local triCount = 0
 		for _ in mesh.getTriangles() do
@@ -407,6 +418,13 @@ return function(t: TestTypes.TestContext)
 		local folder = Instance.new("Folder")
 		folder.Parent = workspace
 
+		-- Clean up any foreign parts in the test area
+		for _, p in workspace:GetPartBoundsInRadius(Vector3.new(52, 10, 0), 10) do
+			if p:IsA("BasePart") then
+				p:Destroy()
+			end
+		end
+
 		local parts = fillTriangle(
 			Vector3.new(50, 10, 0),
 			Vector3.new(54, 10, 0),
@@ -414,7 +432,7 @@ return function(t: TestTypes.TestContext)
 			0.2, folder
 		)
 
-		local triId = mesh.discoverPart(parts[1])
+		local triId = mesh.discoverPart(parts[1], Vector3.yAxis)
 		t.expect(triId).toBeTruthy()
 
 		-- Each part should map to the same triangle
@@ -443,7 +461,7 @@ return function(t: TestTypes.TestContext)
 		block.Anchored = true
 		block.Parent = folder
 
-		local triId = mesh.discoverPart(block)
+		local triId = mesh.discoverPart(block, Vector3.yAxis)
 		t.expect(triId).toBeTruthy()
 
 		-- Should have 2 triangles (Block = quad = 2 triangles)
@@ -479,7 +497,7 @@ return function(t: TestTypes.TestContext)
 		block.Anchored = true
 		block.Parent = folder
 
-		mesh.discoverPart(block)
+		mesh.discoverPart(block, Vector3.yAxis)
 
 		-- Find a vertex and move it up (making the quad non-planar)
 		local vid = mesh.findVertexNear(Vector3.new(322, 10.1, 1.5), 1)
@@ -522,7 +540,7 @@ return function(t: TestTypes.TestContext)
 		block.Anchored = true
 		block.Parent = folder
 
-		local triId = mesh.discoverPart(block)
+		local triId = mesh.discoverPart(block, Vector3.yAxis)
 		t.expect(triId).toBeTruthy()
 		assert(triId)
 
@@ -551,6 +569,10 @@ return function(t: TestTypes.TestContext)
 	end)
 
 	t.test("walkSurface returns seed triangle with small radius", function()
+		-- Clean up any foreign parts in the test area
+		for _, p in workspace:GetPartBoundsInRadius(Vector3.new(402, 0, 0), 10) do
+			if p:IsA("BasePart") then p:Destroy() end
+		end
 		local mesh = createTriangleMesh()
 		local folder = Instance.new("Folder")
 		folder.Parent = workspace
@@ -560,7 +582,7 @@ return function(t: TestTypes.TestContext)
 			Vector3.new(400, 0, 0),
 			Vector3.new(404, 0, 0),
 			Vector3.new(402, 0, 3),
-			0.2, folder
+			0.2, folder, nil, Vector3.yAxis
 		)
 		assert(triId)
 
@@ -576,6 +598,10 @@ return function(t: TestTypes.TestContext)
 	end)
 
 	t.test("walkSurface walks connected triangles within radius", function()
+		-- Clean up any foreign parts in the test area
+		for _, p in workspace:GetPartBoundsInRadius(Vector3.new(422, 0, 0), 15) do
+			if p:IsA("BasePart") then p:Destroy() end
+		end
 		local mesh = createTriangleMesh()
 		local folder = Instance.new("Folder")
 		folder.Parent = workspace
@@ -585,13 +611,13 @@ return function(t: TestTypes.TestContext)
 			Vector3.new(420, 0, 0),
 			Vector3.new(424, 0, 0),
 			Vector3.new(422, 0, 3),
-			0.2, folder
+			0.2, folder, nil, Vector3.yAxis
 		)
 		local tri2 = mesh.addTriangle(
 			Vector3.new(420, 0, 0),
 			Vector3.new(424, 0, 0),
 			Vector3.new(422, 0, -3),
-			0.2, folder
+			0.2, folder, nil, Vector3.yAxis
 		)
 		assert(tri1)
 		assert(tri2)
@@ -606,6 +632,10 @@ return function(t: TestTypes.TestContext)
 	end)
 
 	t.test("walkSurface does NOT include disconnected triangles at same position", function()
+		-- Clean up any foreign parts in the test area
+		for _, p in workspace:GetPartBoundsInRadius(Vector3.new(442, 5, 0), 20) do
+			if p:IsA("BasePart") then p:Destroy() end
+		end
 		local mesh = createTriangleMesh()
 		local folder = Instance.new("Folder")
 		folder.Parent = workspace
@@ -615,14 +645,14 @@ return function(t: TestTypes.TestContext)
 			Vector3.new(440, 0, 0),
 			Vector3.new(444, 0, 0),
 			Vector3.new(442, 0, 3),
-			0.2, folder
+			0.2, folder, nil, Vector3.yAxis
 		)
 		-- This triangle is 10 units above, nearby but shares no vertices/edges
 		local tri2 = mesh.addTriangle(
 			Vector3.new(440, 10, 0),
 			Vector3.new(444, 10, 0),
 			Vector3.new(442, 10, 3),
-			0.2, folder
+			0.2, folder, nil, Vector3.yAxis
 		)
 		assert(tri1)
 		assert(tri2)
@@ -637,6 +667,10 @@ return function(t: TestTypes.TestContext)
 	end)
 
 	t.test("walkSurface returns correct vertex IDs", function()
+		-- Clean up any foreign parts in the test area
+		for _, p in workspace:GetPartBoundsInRadius(Vector3.new(462, 0, 0), 10) do
+			if p:IsA("BasePart") then p:Destroy() end
+		end
 		local mesh = createTriangleMesh()
 		local folder = Instance.new("Folder")
 		folder.Parent = workspace
@@ -645,7 +679,7 @@ return function(t: TestTypes.TestContext)
 			Vector3.new(460, 0, 0),
 			Vector3.new(464, 0, 0),
 			Vector3.new(462, 0, 3),
-			0.2, folder
+			0.2, folder, nil, Vector3.yAxis
 		)
 		assert(triId)
 
@@ -668,15 +702,23 @@ return function(t: TestTypes.TestContext)
 		local folder = Instance.new("Folder")
 		folder.Parent = workspace
 
-		-- Create an underhanging triangle (normal pointing down) via fillTriangle directly
+		-- Clean up any leftover parts from previous runs
+		for _, p in workspace:GetPartBoundsInRadius(Vector3.new(482, 10, 0), 10) do
+			if p:IsA("BasePart") and p.Parent ~= folder then
+				p:Destroy()
+			end
+		end
+
+		-- Create an underhanging triangle via fillTriangle with invertNormal=true
+		-- so the parts are oriented with the surface face pointing downward.
 		local a = Vector3.new(480, 10, 0)
 		local b = Vector3.new(482, 10, 3)
 		local c = Vector3.new(484, 10, 0)
-		local parts = fillTriangle(a, b, c, 0.2, folder)
+		local parts = fillTriangle(a, b, c, 0.2, folder, nil, nil, true)
 		t.expect(#parts > 0).toBeTruthy()
 
-		-- Discover the parts
-		local triId = mesh.discoverPart(parts[1])
+		-- Discover the parts from below (-yAxis matches the inverted surface normal)
+		local triId = mesh.discoverPart(parts[1], -Vector3.yAxis)
 		t.expect(triId).toBeTruthy()
 		assert(triId)
 
@@ -711,14 +753,16 @@ return function(t: TestTypes.TestContext)
 		local folder = Instance.new("Folder")
 		folder.Parent = workspace
 
-		-- Create a vertical wall triangle (normal pointing in Z direction)
+		-- Create a vertical wall triangle with invertNormal=true so the surface
+		-- face (at Z=600) has outward normal pointing in -Z direction.
 		local a = Vector3.new(600, 0, 600)
 		local b = Vector3.new(604, 0, 600)
 		local c = Vector3.new(602, 3, 600)
-		local parts = fillTriangle(a, b, c, 0.2, folder)
+		local parts = fillTriangle(a, b, c, 0.2, folder, nil, nil, true)
 		t.expect(#parts > 0).toBeTruthy()
 
-		local triId = mesh.discoverPart(parts[1])
+		-- Vertical wall: hit the surface at Z=600 from the -Z side
+		local triId = mesh.discoverPart(parts[1], -Vector3.zAxis)
 		t.expect(triId).toBeTruthy()
 		assert(triId)
 
@@ -758,17 +802,18 @@ return function(t: TestTypes.TestContext)
 			end
 		end
 
-		-- Create two adjacent underhanging triangles via fillTriangle
-		-- (sharing edge a-c, with normals pointing down)
+		-- Create two adjacent underhanging triangles via fillTriangle.
+		-- Use invertNormal=true so the surface face at Y=10 has outward
+		-- normal pointing downward (-Y), matching our hitNormal.
 		local a = Vector3.new(1000, 10, 1000)
 		local b = Vector3.new(1002, 10, 1003)
 		local c = Vector3.new(1004, 10, 1000)
 		local d = Vector3.new(1002, 10, 997)
-		fillTriangle(a, b, c, 0.2, folder)
-		fillTriangle(a, c, d, 0.2, folder)
+		fillTriangle(a, b, c, 0.2, folder, nil, nil, true)
+		fillTriangle(a, c, d, 0.2, folder, nil, nil, true)
 
 		-- Discover all parts in the region
-		mesh.discoverRegion(Vector3.new(1002, 10, 1000), 20)
+		mesh.discoverRegion(Vector3.new(1002, 10, 1000), 20, -Vector3.yAxis)
 
 		-- Should have 2 triangles with 4 vertices (a, b, c, d)
 		local triCount = 0
@@ -816,14 +861,13 @@ return function(t: TestTypes.TestContext)
 		local parts1 = fillTriangle(a, b, c, 0.2, folder)
 		fillTriangle(a, b, d, 0.2, folder)
 
-		-- Discover the first triangle with a hitNormal to anchor the correct
-		-- face (the Z=1100 surface). This mirrors actual usage where the user
-		-- clicks on a part. The second triangle is then discovered via
-		-- discoverRegion and snaps to the first triangle's shared vertices.
-		-- Triangle 1's normal is +Z, so parts extend to Z=1100.2. The
-		-- surface face at Z=1100 has outward normal (0,0,-1).
-		mesh.discoverPart(parts1[1], Vector3.new(0, 0, -1))
-		mesh.discoverRegion(Vector3.new(1102, 0, 1100), 20)
+		-- Triangle 1 has natural normal +Z, so depth extends in -Z from Z=1100
+		-- to Z=1099.8. The surface face at Z=1100 has outward normal +Z.
+		-- Triangle 2 has natural normal -Z, so depth extends in +Z from Z=1100
+		-- to Z=1100.2. discoverRegion's snap fallback selects the correct face
+		-- for triangle 2 by matching existing vertex positions.
+		mesh.discoverPart(parts1[1], Vector3.new(0, 0, 1))
+		mesh.discoverRegion(Vector3.new(1102, 0, 1100), 20, Vector3.new(0, 0, 1))
 
 		local triCount = 0
 		local firstTriId: number? = nil
@@ -853,33 +897,33 @@ return function(t: TestTypes.TestContext)
 		local folder = Instance.new("Folder")
 		folder.Parent = workspace
 
-		-- Create a horizontal triangle at Y=5
+		-- Create a horizontal triangle at Y=5 (front = up-facing)
 		local a = Vector3.new(1200, 5, 0)
 		local b = Vector3.new(1204, 5, 0)
 		local c = Vector3.new(1202, 5, 3)
-		local triId = mesh.addTriangle(a, b, c, 0.2, folder)
-		assert(triId)
+		local upId = mesh.addTriangle(a, b, c, 0.2, folder, nil, Vector3.yAxis)
+		assert(upId)
 
 		-- Get the parts of this triangle
-		local tri = mesh.getTriangle(triId)
-		assert(tri)
-		local part = tri.parts[1]
+		local upTri = mesh.getTriangle(upId)
+		assert(upTri)
+		local part = upTri.parts[1]
 
-		-- Opposite hit normals should return different triangle IDs
-		local upId = mesh.getPartTriangle(part, Vector3.yAxis)
-		local downId = mesh.getPartTriangle(part, -Vector3.yAxis)
-		t.expect(upId).toBeTruthy()
+		-- Front face found with upward normal
+		t.expect(mesh.getPartTriangle(part, Vector3.yAxis)).toBe(upId)
+
+		-- Back face not yet discovered
+		t.expect(mesh.getPartTriangle(part, -Vector3.yAxis) == nil).toBeTruthy()
+
+		-- Discover the back face from the same parts
+		local downId = mesh.discoverPart(part, -Vector3.yAxis)
 		t.expect(downId).toBeTruthy()
-		assert(upId)
 		assert(downId)
 		t.expect(upId ~= downId).toBeTruthy()
 
 		-- Both should be valid triangles
-		local upTri = mesh.getTriangle(upId)
 		local downTri = mesh.getTriangle(downId)
-		t.expect(upTri).toBeTruthy()
 		t.expect(downTri).toBeTruthy()
-		assert(upTri)
 		assert(downTri)
 
 		-- Collect Y values for each face's vertices
@@ -896,8 +940,8 @@ return function(t: TestTypes.TestContext)
 			table.insert(downYs, v.position.Y)
 		end
 
-		-- One face should have vertices at Y≈5.0, the other at Y≈4.8
-		-- (thickness 0.2 extends downward from Y=5)
+		-- One face should have vertices at Y≈5.0, the other at Y≈5.2
+		-- (thickness extends upward from the surface at Y=5)
 		local upAvgY = (upYs[1] + upYs[2] + upYs[3]) / 3
 		local downAvgY = (downYs[1] + downYs[2] + downYs[3]) / 3
 		t.expect(math.abs(upAvgY - downAvgY) > 0.1).toBeTruthy()
@@ -915,15 +959,15 @@ return function(t: TestTypes.TestContext)
 		local a = Vector3.new(1300, 5, 0)
 		local b = Vector3.new(1304, 5, 0)
 		local c = Vector3.new(1302, 5, 3)
-		local frontTriId = mesh.addTriangle(a, b, c, 0.2, folder)
+		local frontTriId = mesh.addTriangle(a, b, c, 0.2, folder, nil, Vector3.yAxis)
 		assert(frontTriId)
 
 		local frontTri = mesh.getTriangle(frontTriId)
 		assert(frontTri)
 		local part = frontTri.parts[1]
 
-		-- Select the bottom (back) face via downward hitNormal
-		local backTriId = mesh.getPartTriangle(part, -Vector3.yAxis)
+		-- Discover the bottom (back) face via downward hitNormal
+		local backTriId = mesh.discoverPart(part, -Vector3.yAxis)
 		assert(backTriId)
 		t.expect(backTriId ~= frontTriId).toBeTruthy()
 

@@ -233,7 +233,7 @@ local function createTriangleMesh(): TriangleMesh
 		
 		local backTriId = mPartToTriangleBack[part]
 		if backTriId then
-			if mTriangles[backTriId].normal:Dot(hitNormal) < 0 then
+			if mTriangles[backTriId].normal:Dot(hitNormal) > 0 then
 				return backTriId, mPartToTriangleBack
 			else
 				return nil, mPartToTriangleBack
@@ -859,6 +859,12 @@ local function createTriangleMesh(): TriangleMesh
 			return existing
 		end
 
+		-- If this part already has one face registered but getPartTriangle
+		-- returned nil (hitNormal doesn't match that face), we're
+		-- discovering the opposite face. Skip the snap fallback to avoid
+		-- snapping back to the already-registered face's vertices.
+		local alreadyHasOneFace = mPartToTriangleFront[part] ~= nil or mPartToTriangleBack[part] ~= nil
+
 		-- Thin Block: split into 2 triangles sharing the same Block part
 		if isThinBlock(part) then
 			local va, vb, vc, vd = getBlockVertices(part)
@@ -918,7 +924,10 @@ local function createTriangleMesh(): TriangleMesh
 				-- opposite face. This handles adjacent vertical wall triangles
 				-- with opposite normals, where the heuristic picks different
 				-- faces for the two triangles.
-				if next(mVertices) then
+				-- Skip when we're discovering the second face of an already-
+				-- registered part, since hitNormal already selects the correct
+				-- opposite face and the snap would switch back to the existing one.
+				if next(mVertices) and not alreadyHasOneFace then
 					local snapCount = 0
 					for _, c in corners do
 						if mPositionToVertex[positionKey(c)] then
@@ -926,10 +935,12 @@ local function createTriangleMesh(): TriangleMesh
 						end
 					end
 					if snapCount < 3 then
-						local dir1 = getThinAxisDir(part)
-						local dir2 = getThinAxisDir(candidate)
-						local altV1a, altV1b, altV1c = getWedgeVertices(part, dir1 * -consistentSign(dir1))
-						local altV2a, altV2b, altV2c = getWedgeVertices(candidate, dir2 * -consistentSign(dir2))
+						-- Use -hitNormal to select the opposite face from what
+						-- hitNormal chose. This is more reliable than using
+						-- consistentSign, which can give the same face as hitNormal
+						-- when the thin axis direction aligns with -hitNormal.
+						local altV1a, altV1b, altV1c = getWedgeVertices(part, -hitNormal)
+						local altV2a, altV2b, altV2c = getWedgeVertices(candidate, -hitNormal)
 						local altCorners = tryPairWedges(
 							{ altV1a, altV1b, altV1c },
 							{ altV2a, altV2b, altV2c }
