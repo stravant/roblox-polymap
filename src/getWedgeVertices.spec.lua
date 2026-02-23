@@ -9,28 +9,6 @@ local function fuzzyEqVec3(a: Vector3, b: Vector3, epsilon: number?): boolean
 	return (a - b).Magnitude < eps
 end
 
--- Check if a set of 3 vertices matches another set of 3 vertices (in any order)
-local function verticesSetsMatch(set1: { Vector3 }, set2: { Vector3 }, epsilon: number?): boolean
-	if #set1 ~= 3 or #set2 ~= 3 then
-		return false
-	end
-	local used = { false, false, false }
-	for _, v1 in set1 do
-		local found = false
-		for j, v2 in set2 do
-			if not used[j] and fuzzyEqVec3(v1, v2, epsilon) then
-				used[j] = true
-				found = true
-				break
-			end
-		end
-		if not found then
-			return false
-		end
-	end
-	return true
-end
-
 return function(t: TestTypes.TestContext)
 	-- The orientation heuristic picks the face whose outward normal has the
 	-- larger Y component, which is accurate for heightmap-like triangles.
@@ -48,7 +26,7 @@ return function(t: TestTypes.TestContext)
 		-- Collect all vertices from all wedge parts
 		local allVerts: { Vector3 } = {}
 		for _, part in parts do
-			local v1, v2, v3 = getWedgeVertices(part)
+			local v1, v2, v3 = getWedgeVertices(part, -Vector3.yAxis)
 			table.insert(allVerts, v1)
 			table.insert(allVerts, v2)
 			table.insert(allVerts, v3)
@@ -80,7 +58,7 @@ return function(t: TestTypes.TestContext)
 
 		local allVerts: { Vector3 } = {}
 		for _, part in parts do
-			local v1, v2, v3 = getWedgeVertices(part)
+			local v1, v2, v3 = getWedgeVertices(part, -Vector3.yAxis)
 			table.insert(allVerts, v1)
 			table.insert(allVerts, v2)
 			table.insert(allVerts, v3)
@@ -112,7 +90,7 @@ return function(t: TestTypes.TestContext)
 
 		local allVerts: { Vector3 } = {}
 		for _, part in parts do
-			local v1, v2, v3 = getWedgeVertices(part)
+			local v1, v2, v3 = getWedgeVertices(part, Vector3.zAxis)
 			table.insert(allVerts, v1)
 			table.insert(allVerts, v2)
 			table.insert(allVerts, v3)
@@ -144,7 +122,7 @@ return function(t: TestTypes.TestContext)
 
 		local allVerts: { Vector3 } = {}
 		for _, part in parts do
-			local v1, v2, v3 = getWedgeVertices(part)
+			local v1, v2, v3 = getWedgeVertices(part, Vector3.yAxis)
 			table.insert(allVerts, v1)
 			table.insert(allVerts, v2)
 			table.insert(allVerts, v3)
@@ -176,7 +154,7 @@ return function(t: TestTypes.TestContext)
 
 		local allVerts: { Vector3 } = {}
 		for _, part in parts do
-			local v1, v2, v3 = getWedgeVertices(part)
+			local v1, v2, v3 = getWedgeVertices(part, Vector3.zAxis)
 			table.insert(allVerts, v1)
 			table.insert(allVerts, v2)
 			table.insert(allVerts, v3)
@@ -295,7 +273,7 @@ return function(t: TestTypes.TestContext)
 		wedge.Anchored = true
 		wedge.Parent = workspace
 
-		local v1, v2, v3 = getWedgeVertices(wedge)
+		local v1, v2, v3 = getWedgeVertices(wedge, Vector3.zAxis)
 
 		-- All three should be different
 		t.expect(fuzzyEqVec3(v1, v2)).toBeFalsy()

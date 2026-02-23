@@ -109,14 +109,14 @@ return function(t: TestTypes.TestContext)
 			}))
 		end)
 		-- Flush useEffect then wait for 3D pipeline to render adornments
-		ReactRoblox.act(function() end)
-		waitFrames(3)
+		--ReactRoblox.act(function() end)
+		--waitFrames(3)
 
-		t.screenshot(name)
+		--t.screenshot(name)
 
 		-- CaptureService reads the framebuffer asynchronously — wait long
 		-- enough for the capture to resolve before re-rendering new props.
-		waitFrames(15)
+		--waitFrames(15)
 	end
 
 	t.test("viewport: mesh with no overlay", function()

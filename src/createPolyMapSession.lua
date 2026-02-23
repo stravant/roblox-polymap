@@ -213,15 +213,6 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		mAddInvertNormal = false
 	end
 
-	local function scanMesh()
-		mMesh.scanWorkspace()
-		mSelectedVertices = {}
-		mHoverVertexId = nil
-		mHoverEdgeKey = nil
-		clearAddState()
-		changeSignal:Fire()
-	end
-
 	-- No initial scan — mesh starts empty, discovery happens on demand
 
 	local function isShiftHeld(): boolean
@@ -386,33 +377,6 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 
 		return bestKey
-	end
-
-	local function findNearestVertexScreenRadius(worldPos: Vector3, skipVids: { [number]: boolean }?): number?
-		local camera = workspace.CurrentCamera
-		if not camera then
-			return nil
-		end
-
-		local mouseScreen = camera:WorldToScreenPoint(worldPos)
-		local bestId: number? = nil
-		local bestScreenDist = 15
-
-		for id, vertex in mMesh.getVertices() do
-			if skipVids and skipVids[id] then continue end
-			local screenPos, onScreen = camera:WorldToScreenPoint(vertex.position)
-			if onScreen then
-				local dx = screenPos.X - mouseScreen.X
-				local dy = screenPos.Y - mouseScreen.Y
-				local dist = math.sqrt(dx * dx + dy * dy)
-				if dist < bestScreenDist then
-					bestScreenDist = dist
-					bestId = id
-				end
-			end
-		end
-
-		return bestId
 	end
 
 	local function updateHover()
@@ -610,8 +574,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 	end
 
-	local function handleSelectClick(worldPos: Vector3, hitPart: BasePart?, hitNormal: Vector3?)
-		mMesh.discoverRegion(worldPos, 15)
+	local function handleSelectClick(worldPos: Vector3, hitPart: BasePart?, hitNormal: Vector3)
+		mMesh.discoverRegion(worldPos, 15, hitNormal)
 		local hitTriangleId = if hitPart then mMesh.getPartTriangle(hitPart, hitNormal) else nil
 		local vid = findNearestVertex(worldPos, hitTriangleId)
 		if vid then
@@ -632,8 +596,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		changeSignal:Fire()
 	end
 
-	local function handleAddClick(worldPos: Vector3)
-		mMesh.discoverRegion(worldPos, 15)
+	local function handleAddClick(worldPos: Vector3, hitNormal: Vector3)
+		mMesh.discoverRegion(worldPos, 15, hitNormal)
 		if not mAddBoundaryEdge then
 			-- Phase 1: select a boundary edge (no distance limit)
 			local edgeKey = findNearestBoundaryEdge(nil)
@@ -651,7 +615,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 								mAddPlanePoint = tv.position
 							end
 							mAddPlaneNormal = tri.normal
-							mAddInvertNormal = tri.invertNormal
+							mAddInvertNormal = tri.invertedNormal
 							local part = tri.parts[1]
 							if part then
 								mAddTriangleProps = {
@@ -686,7 +650,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					if tv then
 						mMesh.addTriangle(
 							v1.position, v2.position, tv.position,
-							currentSettings.Thickness, workspace.Terrain, addProps, mAddInvertNormal
+							currentSettings.Thickness, workspace.Terrain, addProps, hitNormal
 						)
 					end
 				elseif target.type == "edge" and target.edgeKey then
@@ -704,18 +668,18 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 							end
 							mMesh.addTriangle(
 								v1.position, v2.position, ta.position,
-								currentSettings.Thickness, workspace.Terrain, addProps, mAddInvertNormal
+								currentSettings.Thickness, workspace.Terrain, addProps, hitNormal
 							)
 							mMesh.addTriangle(
 								v2.position, tb.position, ta.position,
-								currentSettings.Thickness, workspace.Terrain, addProps, mAddInvertNormal
+								currentSettings.Thickness, workspace.Terrain, addProps, hitNormal
 							)
 						end
 					end
 				elseif target.type == "plane" and target.position then
 					mMesh.addTriangle(
 						v1.position, v2.position, target.position,
-						currentSettings.Thickness, workspace.Terrain, addProps, mAddInvertNormal
+						currentSettings.Thickness, workspace.Terrain, addProps, hitNormal
 					)
 				end
 			end
@@ -731,7 +695,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 	-- Get world position for stroke operations. Uses raycast when it hits,
 	-- falls back to projecting onto the last-hit plane when geometry is gone.
-	local function getStrokeWorldPos(): Vector3?
+	local function getStrokeWorldPos(): { hit: Vector3, normal: Vector3 }?
 		local result = mouseRaycast()
 		if result then
 			mStrokePlanePoint = result.Position
@@ -744,7 +708,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					mStrokeSeedTriangleId = hitTriId
 				end
 			end
-			return result.Position
+			return { hit = result.Position, normal = result.Normal }
 		end
 		-- Raycast missed — project onto the remembered stroke plane
 		if mStrokePlanePoint and mStrokePlaneNormal then
@@ -756,7 +720,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				if math.abs(denom) > 0.0001 then
 					local t = (mStrokePlanePoint - ray.Origin):Dot(mStrokePlaneNormal) / denom
 					if t > 0 then
-						return ray.Origin + ray.Direction * t
+						return { hit = ray.Origin + ray.Direction * t, normal = mStrokePlaneNormal }
 					end
 				end
 			end
@@ -772,12 +736,13 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			mStrokePlaneNormal = result.Normal
 			worldPos = result.Position
 		else
-			worldPos = getStrokeWorldPos()
+			local hit = getStrokeWorldPos()
+			worldPos = if hit then hit.hit else nil
 		end
 		if not worldPos then return end
 
 		-- Track seed triangle for surface walking
-		local hitNormal = if result then result.Normal else nil
+		local hitNormal = if result then result.Normal else Vector3.yAxis
 		if result and result.Instance:IsA("BasePart") then
 			mMesh.discoverPart(result.Instance :: BasePart, hitNormal)
 			local hitTriId = mMesh.getPartTriangle(result.Instance :: BasePart, hitNormal)
@@ -793,7 +758,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				then mMesh.getPartTriangle(result.Instance :: BasePart, hitNormal)
 				else nil
 			if hitTriangleId then
-				mMesh.discoverRegion(worldPos, 15)
+				mMesh.discoverRegion(worldPos, 15, hitNormal)
 				local vid = findNearestVertex(worldPos, hitTriangleId)
 				if vid then
 					local vertex = mMesh.getVertex(vid)
@@ -894,9 +859,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		-- Use surface walk if we have a seed, otherwise discover region
 		local walkVertexIds: { number }?
 		if mStrokeSeedTriangleId then
-			_, walkVertexIds = mMesh.walkSurface(mStrokeSeedTriangleId, worldPos, radius)
+			local _
+			_, walkVertexIds = mMesh.walkSurface(mStrokeSeedTriangleId, worldPos.hit, radius)
 		else
-			mMesh.discoverRegion(worldPos, radius + 5)
+			mMesh.discoverRegion(worldPos.hit, radius + 5, worldPos.normal)
 		end
 
 		-- Save vertex positions on first encounter during this stroke
@@ -919,12 +885,12 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 		-- Find all vertices within radius using saved positions
 		local verticesInRadius: { { id: number, savedPos: Vector3, dist: number } } = {}
-		local vidsToCheck = walkVertexIds or {}
+		local vidsToCheck = walkVertexIds or ({} :: { number})
 		if walkVertexIds then
 			for _, vid in vidsToCheck do
 				local savedPos = mBrushSavedPositions[vid]
 				if not savedPos then continue end
-				local dist = (savedPos - worldPos).Magnitude
+				local dist = (savedPos - worldPos.hit).Magnitude
 				if dist <= radius then
 					table.insert(verticesInRadius, { id = vid, savedPos = savedPos, dist = dist })
 				end
@@ -933,7 +899,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			for vid in mMesh.getVertices() do
 				local savedPos = mBrushSavedPositions[vid]
 				if not savedPos then continue end
-				local dist = (savedPos - worldPos).Magnitude
+				local dist = (savedPos - worldPos.hit).Magnitude
 				if dist <= radius then
 					table.insert(verticesInRadius, { id = vid, savedPos = savedPos, dist = dist })
 				end
@@ -1004,9 +970,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		-- Use surface walk if we have a seed, otherwise discover region
 		local walkVertexIds: { number }?
 		if mStrokeSeedTriangleId then
-			_, walkVertexIds = mMesh.walkSurface(mStrokeSeedTriangleId, worldPos, radius)
+			local _
+			_, walkVertexIds = mMesh.walkSurface(mStrokeSeedTriangleId, worldPos.hit, radius)
 		else
-			mMesh.discoverRegion(worldPos, radius + 5)
+			mMesh.discoverRegion(worldPos.hit, radius + 5, worldPos.normal)
 		end
 
 		-- Find all vertices within radius using current positions
@@ -1015,7 +982,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			for _, vid in walkVertexIds do
 				local vertex = mMesh.getVertex(vid)
 				if vertex then
-					local dist = (vertex.position - worldPos).Magnitude
+					local dist = (vertex.position - worldPos.hit).Magnitude
 					if dist <= radius then
 						table.insert(verticesInRadius, { id = vid, pos = vertex.position, dist = dist })
 					end
@@ -1023,7 +990,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			end
 		else
 			for vid, vertex in mMesh.getVertices() do
-				local dist = (vertex.position - worldPos).Magnitude
+				local dist = (vertex.position - worldPos.hit).Magnitude
 				if dist <= radius then
 					table.insert(verticesInRadius, { id = vid, pos = vertex.position, dist = dist })
 				end
@@ -1125,7 +1092,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			if mode == "Add" then
 				if mAddBoundaryEdge and mAddHoverTarget then
 					-- Phase 2 with a hover target (e.g., plane) — proceed
-					handleAddClick(Vector3.zero) -- worldPos unused, target comes from mAddHoverTarget
+					handleAddClick(Vector3.zero, Vector3.yAxis) -- worldPos unused, target comes from mAddHoverTarget
 				elseif mAddBoundaryEdge then
 					clearAddState()
 					changeSignal:Fire()
@@ -1177,7 +1144,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		if mode == "Select" or mode == "Move" or mode == "Rotate" or mode == "Subdivide" or mode == "Simplify" then
 			handleSelectClick(result.Position, hitPart, result.Normal)
 		elseif mode == "Add" then
-			handleAddClick(result.Position)
+			handleAddClick(result.Position, result.Normal)
 		elseif mode == "Delete" or mode == "Paint" or mode == "Relax" or mode == "Flatten" then
 			startStroke()
 			applyStrokeAtCursor()
@@ -1208,7 +1175,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			local depth = (centerHit.Position - camera.CFrame.Position).Magnitude
 			local cornerWorld = cornerRay.Origin + cornerRay.Direction * depth
 			local halfDiag = (cornerWorld - centerHit.Position).Magnitude
-			mMesh.discoverRegion(centerHit.Position, halfDiag + 10)
+			mMesh.discoverRegion(centerHit.Position, halfDiag + 10, centerHit.Normal)
 		end
 
 		local minX = math.min(mMarqueeStart.X, mMarqueeEnd.X)
@@ -1277,7 +1244,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 		-- Discover nearby geometry so unselected vertices within influence are found
 		for _, origPos in mSavedVertexPositions do
-			mMesh.discoverRegion(origPos, radius + 5)
+			-- TODO: Use normal of selected vertex's faces or something here?
+			mMesh.discoverRegion(origPos, radius + 5, Vector3.yAxis)
 		end
 
 		for vid, vertex in mMesh.getVertices() do
@@ -1517,8 +1485,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		-- Rescan mesh from the reverted parts
 		mMesh.refreshFromParts()
 		-- Restore selection from saved positions
-		if #mUndoSelections > 0 then
-			restoreSelectionFromPositions(table.remove(mUndoSelections))
+		local undoSelection = table.remove(mUndoSelections)
+		if undoSelection then
+			restoreSelectionFromPositions(undoSelection)
 		else
 			mSelectedVertices = {}
 		end
@@ -1538,8 +1507,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		-- Rescan mesh from the re-applied parts
 		mMesh.refreshFromParts()
 		-- Restore selection from saved positions
-		if #mRedoSelections > 0 then
-			restoreSelectionFromPositions(table.remove(mRedoSelections))
+		local redoSelection = table.remove(mRedoSelections)
+		if redoSelection then
+			restoreSelectionFromPositions(redoSelection)
 		else
 			mSelectedVertices = {}
 		end
@@ -1701,19 +1671,6 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	end
 
 	-- Actions
-	session.ScanMesh = function()
-		scanMesh()
-	end
-	session.SelectAll = function()
-		for id in mMesh.getVertices() do
-			mSelectedVertices[id] = true
-		end
-		changeSignal:Fire()
-	end
-	session.ClearSelection = function()
-		mSelectedVertices = {}
-		changeSignal:Fire()
-	end
 	session.GenerateGrid = function()
 		local camera = workspace.CurrentCamera
 		local origin = CFrame.identity
@@ -1757,7 +1714,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		-- Discover the generated grid parts instead of full rescan
 		local gridExtent = math.max(currentSettings.GridWidth, currentSettings.GridHeight)
 			* currentSettings.GridSpacing / 2 + currentSettings.GridSpacing
-		mMesh.discoverRegion(origin.Position, gridExtent)
+		-- TODO: Do we need a discover here? We could discover on demand
+		mMesh.discoverRegion(origin.Position, gridExtent, Vector3.yAxis)
 		changeSignal:Fire()
 	end
 	session.ImportHeightmap = function()
@@ -1822,7 +1780,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			if ok then
 				local gridExtent = math.max(importWidth, importHeight)
 					* importSpacing / 2 + importSpacing
-				mMesh.discoverRegion(origin.Position, gridExtent)
+				-- TODO: Do we need a discover here? We could discover on demand
+				mMesh.discoverRegion(origin.Position, gridExtent, Vector3.yAxis)
 			else
 				warn("PolyMap Import failed: " .. tostring(err))
 			end

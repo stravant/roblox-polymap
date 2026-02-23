@@ -107,6 +107,11 @@ return function(t: TestTypes.TestContext)
 		local c = Vector3.new(2, 0, 4 * math.sqrt(3) / 2)
 		local parts = fillTriangle(a, b, c, 0.2, folder)
 
+		-- Generate parts on the opposite side of the way the normal is facing
+		local yDirection = math.sign((b-a):Cross(c-b).Y)
+		local partSide = math.sign(parts[1].Position.Y)
+		t.expect(yDirection).toBe(-partSide)
+
 		t.expect(#parts).toBe(2)
 
 		folder:Destroy()

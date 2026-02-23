@@ -42,9 +42,7 @@ local function fillTriangle(
 	end
 
 	-- Ensure thickness extends downward: flip winding if normal points down
-	local shouldFlip = ab:Cross(bc).Y < 0
-	if invertNormal then shouldFlip = not shouldFlip end
-	if shouldFlip then
+	if invertNormal then
 		b, c = c, b
 		ab, bc, ca = b - a, c - b, a - c
 		abm, bcm, cam = ab.Magnitude, bc.Magnitude, ca.Magnitude
@@ -142,15 +140,16 @@ local function fillTriangle(
 		if existingParts and existingParts[partIndex] then
 			part1 = existingParts[partIndex]
 		else
-			part1 = Instance.new("Part")
-			part1.Shape = Enum.PartType.Wedge
-			part1.TopSurface = Enum.SurfaceType.Smooth
-			part1.BottomSurface = Enum.SurfaceType.Smooth
-			part1.Anchored = true
-			part1.Color = color
-			part1.Material = material
-			part1.Transparency = transparency
-			part1.Parent = parent
+			local newPart = Instance.new("Part")
+			newPart.Shape = Enum.PartType.Wedge
+			newPart.TopSurface = Enum.SurfaceType.Smooth
+			newPart.BottomSurface = Enum.SurfaceType.Smooth
+			newPart.Anchored = true
+			newPart.Color = color
+			newPart.Material = material
+			newPart.Transparency = transparency
+			newPart.Parent = parent
+			part1 = newPart
 		end
 		part1.Size = Vector3.new(depth, width, len1)
 		part1.CFrame = maincf * CFrame.Angles(math.pi, 0, math.pi / 2) * CFrame.new(depth / 2, width / 2, len1 / 2)
@@ -162,15 +161,16 @@ local function fillTriangle(
 		if existingParts and existingParts[partIndex] then
 			part2 = existingParts[partIndex]
 		else
-			part2 = Instance.new("Part")
-			part2.Shape = Enum.PartType.Wedge
-			part2.TopSurface = Enum.SurfaceType.Smooth
-			part2.BottomSurface = Enum.SurfaceType.Smooth
-			part2.Anchored = true
-			part2.Color = color
-			part2.Material = material
-			part2.Transparency = transparency
-			part2.Parent = parent
+			local newPart = Instance.new("Part")
+			newPart.Shape = Enum.PartType.Wedge
+			newPart.TopSurface = Enum.SurfaceType.Smooth
+			newPart.BottomSurface = Enum.SurfaceType.Smooth
+			newPart.Anchored = true
+			newPart.Color = color
+			newPart.Material = material
+			newPart.Transparency = transparency
+			newPart.Parent = parent
+			part2 = newPart
 		end
 		part2.Size = Vector3.new(depth, width, len2)
 		part2.CFrame = maincf * CFrame.Angles(math.pi, math.pi, -math.pi / 2) * CFrame.new(-depth / 2, width / 2, -len1 - len2 / 2)

@@ -214,37 +214,6 @@ return function(t: TestTypes.TestContext)
 		folder:Destroy()
 	end)
 
-	t.test("scanWorkspace finds thin wedge parts", function()
-		local mesh = createTriangleMesh()
-		local folder = Instance.new("Folder")
-		folder.Name = "PolyMapTestScan"
-		folder.Parent = workspace
-
-		-- Create a triangle manually
-		local a = Vector3.new(10, 10, 0)
-		local b = Vector3.new(14, 10, 0)
-		local c = Vector3.new(12, 10, 3)
-		fillTriangle(a, b, c, 0.2, folder)
-
-		mesh.scanWorkspace(folder)
-
-		-- Should find 1 triangle
-		local triCount = 0
-		for _ in mesh.getTriangles() do
-			triCount += 1
-		end
-		t.expect(triCount).toBe(1)
-
-		-- Should have 3 vertices
-		local vertCount = 0
-		for _ in mesh.getVertices() do
-			vertCount += 1
-		end
-		t.expect(vertCount).toBe(3)
-
-		folder:Destroy()
-	end)
-
 	t.test("removeTriangle parents out parts instead of destroying", function()
 		local mesh = createTriangleMesh()
 		local folder = Instance.new("Folder")
@@ -377,7 +346,7 @@ return function(t: TestTypes.TestContext)
 
 		-- Both parts should be tracked
 		for _, part in parts do
-			t.expect(mesh.getPartTriangle(part)).toBeTruthy()
+			t.expect(mesh.getPartTriangle(part, Vector3.yAxis)).toBeTruthy()
 		end
 
 		folder:Destroy()
@@ -450,13 +419,13 @@ return function(t: TestTypes.TestContext)
 
 		-- Each part should map to the same triangle
 		for _, part in parts do
-			t.expect(mesh.getPartTriangle(part)).toBe(triId)
+			t.expect(mesh.getPartTriangle(part, Vector3.yAxis)).toBe(triId)
 		end
 
 		-- A random new part should not be tracked
 		local randomPart = Instance.new("Part")
 		randomPart.Parent = folder
-		t.expect(mesh.getPartTriangle(randomPart) == nil).toBeTruthy()
+		t.expect(mesh.getPartTriangle(randomPart, Vector3.yAxis) == nil).toBeTruthy()
 
 		folder:Destroy()
 	end)
@@ -492,33 +461,7 @@ return function(t: TestTypes.TestContext)
 		t.expect(vertCount).toBe(4)
 
 		-- Block part should be tracked
-		t.expect(mesh.getPartTriangle(block)).toBeTruthy()
-
-		folder:Destroy()
-	end)
-
-	t.test("scanWorkspace finds thin Block parts", function()
-		local mesh = createTriangleMesh()
-		local folder = Instance.new("Folder")
-		folder.Name = "PolyMapTestBlockScan"
-		folder.Parent = workspace
-
-		-- Create a thin block
-		local block = Instance.new("Part")
-		block.Shape = Enum.PartType.Block
-		block.Size = Vector3.new(4, 0.2, 3)
-		block.CFrame = CFrame.new(310, 10, 0)
-		block.Anchored = true
-		block.Parent = folder
-
-		mesh.scanWorkspace(folder)
-
-		-- Should find 2 triangles from the Block
-		local triCount = 0
-		for _ in mesh.getTriangles() do
-			triCount += 1
-		end
-		t.expect(triCount).toBe(2)
+		t.expect(mesh.getPartTriangle(block, Vector3.yAxis)).toBeTruthy()
 
 		folder:Destroy()
 	end)
@@ -922,13 +865,9 @@ return function(t: TestTypes.TestContext)
 		assert(tri)
 		local part = tri.parts[1]
 
-		-- Without hitNormal, should return the front face (same as triId)
-		local frontId = mesh.getPartTriangle(part)
-		t.expect(frontId).toBe(triId)
-
 		-- Opposite hit normals should return different triangle IDs
-		local upId = mesh.getPartTriangle(part, Vector3.new(0, 1, 0))
-		local downId = mesh.getPartTriangle(part, Vector3.new(0, -1, 0))
+		local upId = mesh.getPartTriangle(part, Vector3.yAxis)
+		local downId = mesh.getPartTriangle(part, -Vector3.yAxis)
 		t.expect(upId).toBeTruthy()
 		t.expect(downId).toBeTruthy()
 		assert(upId)
@@ -984,7 +923,7 @@ return function(t: TestTypes.TestContext)
 		local part = frontTri.parts[1]
 
 		-- Select the bottom (back) face via downward hitNormal
-		local backTriId = mesh.getPartTriangle(part, Vector3.new(0, -1, 0))
+		local backTriId = mesh.getPartTriangle(part, -Vector3.yAxis)
 		assert(backTriId)
 		t.expect(backTriId ~= frontTriId).toBeTruthy()
 
