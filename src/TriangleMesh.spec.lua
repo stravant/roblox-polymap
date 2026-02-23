@@ -1042,4 +1042,47 @@ return function(t: TestTypes.TestContext)
 
 		folder:Destroy()
 	end)
+
+	t.test("discoverRegion expands from already-discovered vertices", function()
+		-- Clean up any foreign parts in the test area
+		for _, p in workspace:GetPartBoundsInRadius(Vector3.new(1406, 10, 0), 30) do
+			if p:IsA("BasePart") then p:Destroy() end
+		end
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		-- Create a strip of 3 adjacent triangles along X, sharing vertices:
+		-- T1: (1400,10,0)-(1404,10,0)-(1402,10,3) — shares (1404,10,0) with T2
+		-- T2: (1404,10,0)-(1408,10,0)-(1406,10,3) — shares (1408,10,0) with T3
+		-- T3: (1408,10,0)-(1412,10,0)-(1410,10,3)
+		fillTriangle(
+			Vector3.new(1400, 10, 0), Vector3.new(1404, 10, 0), Vector3.new(1402, 10, 3),
+			0.2, folder
+		)
+		fillTriangle(
+			Vector3.new(1404, 10, 0), Vector3.new(1408, 10, 0), Vector3.new(1406, 10, 3),
+			0.2, folder
+		)
+		fillTriangle(
+			Vector3.new(1408, 10, 0), Vector3.new(1412, 10, 0), Vector3.new(1410, 10, 3),
+			0.2, folder
+		)
+
+		-- First call: discover with radius 5 from T1's first vertex.
+		-- Within radius 5: v(1400) dist 0, v(1404) dist 4, v(1402,10,3) dist 3.6
+		-- T1 returned (has v(1400)), T2 returned (has v(1404) at dist 4)
+		-- T3 not returned (closest vertex v(1408) at dist 8)
+		local tris1 = mesh.discoverRegion({Vector3.new(1400, 10, 0)}, 5)
+		t.expect(#tris1).toBe(2)
+
+		-- Second call: larger radius should discover all 3 triangles.
+		-- Radius 15 from (1400,10,0) covers all vertices (max dist 12).
+		-- Without the fix, the O(1) bootstrap pre-marks the seed vertex's
+		-- triangles as visited, so the BFS never expands and returns only 1.
+		local tris2 = mesh.discoverRegion({Vector3.new(1400, 10, 0)}, 15)
+		t.expect(#tris2).toBe(3)
+
+		folder:Destroy()
+	end)
 end

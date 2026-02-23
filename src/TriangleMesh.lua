@@ -1004,9 +1004,8 @@ local function createTriangleMesh(): TriangleMesh
 				if vertex and not visitedVertices[existingVid] then
 					visitedVertices[existingVid] = true
 					table.insert(queue, existingVid)
-					for _, triId in vertex.triangles do
-						visitedTriangles[triId] = true
-					end
+					-- Don't pre-mark triangles as visited here; the BFS
+					-- will walk them and enqueue their neighbor vertices.
 				end
 			else
 				-- Fallback: small spatial query to discover nearby parts
