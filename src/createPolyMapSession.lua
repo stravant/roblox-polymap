@@ -470,13 +470,47 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					mAddHoverTarget = { type = "vertex", vertexId = bestVid }
 				else
 					-- Tier 2: boundary edge snap (world-space distance)
+					-- Skip all edges belonging to the parent triangle or its
+					-- sibling (back face of same part), so hovering near the
+					-- selected edge doesn't snap to the other face's edge.
+					local skipEdgeKeys: { [string]: boolean } = {}
 					local storedKey = tostring(math.min(mAddBoundaryEdge.v1, mAddBoundaryEdge.v2))
 						.. "_" .. tostring(math.max(mAddBoundaryEdge.v1, mAddBoundaryEdge.v2))
+					skipEdgeKeys[storedKey] = true
+					local storedEdge = mMesh.getEdges()[storedKey]
+					if storedEdge then
+						for _, parentTriId in storedEdge.triangles do
+							local parentTri = mMesh.getTriangle(parentTriId)
+							if parentTri then
+								-- Skip edges of parent triangle
+								for i = 1, 3 do
+									local va = parentTri.vertices[i]
+									local vb = parentTri.vertices[if i < 3 then i + 1 else 1]
+									local ek = tostring(math.min(va, vb)) .. "_" .. tostring(math.max(va, vb))
+									skipEdgeKeys[ek] = true
+								end
+								-- Skip edges of sibling triangles (other face of same parts)
+								for _, part in parentTri.parts do
+									for _, sibTriId in mMesh.getPartTriangles(part) do
+										local sibTri = mMesh.getTriangle(sibTriId)
+										if sibTri then
+											for i = 1, 3 do
+												local va = sibTri.vertices[i]
+												local vb = sibTri.vertices[if i < 3 then i + 1 else 1]
+												local ek = tostring(math.min(va, vb)) .. "_" .. tostring(math.max(va, vb))
+												skipEdgeKeys[ek] = true
+											end
+										end
+									end
+								end
+							end
+						end
+					end
 					local bestEdgeKey: string? = nil
 					local bestEdgeDist = snapRadius
 					for key, edge in mMesh.getEdges() do
 						if #edge.triangles ~= 1 then continue end
-						if key == storedKey then continue end
+						if skipEdgeKeys[key] then continue end
 						local ev1 = mMesh.getVertex(edge.v1)
 						local ev2 = mMesh.getVertex(edge.v2)
 						if not ev1 or not ev2 then continue end
