@@ -298,13 +298,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return bestId
 	end
 
-	local function findNearestBoundaryEdge(skipEdgeKey: string?): string?
-		local camera = workspace.CurrentCamera
-		if not camera then
-			return nil
-		end
-
-		local mouseScreen = UserInputService:GetMouseLocation()
+	local function findNearestBoundaryEdge(worldPos: Vector3, skipEdgeKey: string?): string?
 		local bestKey: string? = nil
 		local bestDist = math.huge
 
@@ -315,19 +309,11 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			local v2 = mMesh.getVertex(edge.v2)
 			if not v1 or not v2 then continue end
 
-			local s1, on1 = camera:WorldToScreenPoint(v1.position)
-			local s2, on2 = camera:WorldToScreenPoint(v2.position)
-			if not on1 or not on2 then continue end
-
-			local bx, by = s2.X - s1.X, s2.Y - s1.Y
-			local lenSq = bx * bx + by * by
-			if lenSq < 0.001 then continue end
-			local px = mouseScreen.X - s1.X
-			local py = mouseScreen.Y - s1.Y
-			local t = math.clamp((px * bx + py * by) / lenSq, 0, 1)
-			local closestX = s1.X + t * bx
-			local closestY = s1.Y + t * by
-			local dist = math.sqrt((mouseScreen.X - closestX) ^ 2 + (mouseScreen.Y - closestY) ^ 2)
+			local seg = v2.position - v1.position
+			local lenSq = seg:Dot(seg)
+			local t = if lenSq < 0.001 then 0 else math.clamp((worldPos - v1.position):Dot(seg) / lenSq, 0, 1)
+			local closest = v1.position + seg * t
+			local dist = (worldPos - closest).Magnitude
 
 			if dist < bestDist then
 				bestDist = dist
@@ -430,34 +416,29 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			end
 		end
 
-		if mode == "Add" and not mAddBoundaryEdge then
-			-- Phase 1: hover the nearest boundary edge (uses mouse screen pos directly)
-			newHoverEdge = findNearestBoundaryEdge(nil)
+		if mode == "Add" and worldPos and not mAddBoundaryEdge then
+			-- Phase 1: hover the nearest boundary edge in world space
+			newHoverEdge = findNearestBoundaryEdge(worldPos, nil)
 		end
 
-		-- Add mode phase 2 runs even without a raycast hit (plane projection)
-		if currentSettings.Mode == "Add" and mAddBoundaryEdge then
-			local camera = workspace.CurrentCamera
-			if camera then
-				local mouseLocation = UserInputService:GetMouseLocation()
-				-- Use screen pos from the viewport ray origin projected to screen
-				local mouseScreen = Vector3.new(mouseLocation.X, mouseLocation.Y, 0)
+		-- Add mode phase 2: world-space vertex/edge snapping
+		if currentSettings.Mode == "Add" and mAddBoundaryEdge and worldPos then
+			local v1 = mMesh.getVertex(mAddBoundaryEdge.v1)
+			local v2 = mMesh.getVertex(mAddBoundaryEdge.v2)
+			if v1 and v2 then
+				local edgeLength = (v2.position - v1.position).Magnitude
+				local snapRadius = edgeLength * 0.3
 
-				-- Tier 1: vertex snap (15px screen radius)
+				-- Tier 1: vertex snap (world-space distance)
 				local skipVids = { [mAddBoundaryEdge.v1] = true, [mAddBoundaryEdge.v2] = true }
 				local bestVid: number? = nil
-				local bestVidDist = 15
+				local bestVidDist = snapRadius
 				for id, vertex in mMesh.getVertices() do
 					if skipVids[id] then continue end
-					local screenPos, onScreen = camera:WorldToScreenPoint(vertex.position)
-					if onScreen then
-						local dx = screenPos.X - mouseScreen.X
-						local dy = screenPos.Y - mouseScreen.Y
-						local dist = math.sqrt(dx * dx + dy * dy)
-						if dist < bestVidDist then
-							bestVidDist = dist
-							bestVid = id
-						end
+					local dist = (vertex.position - worldPos).Magnitude
+					if dist < bestVidDist then
+						bestVidDist = dist
+						bestVid = id
 					end
 				end
 
@@ -465,29 +446,22 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					newHoverVertex = bestVid
 					mAddHoverTarget = { type = "vertex", vertexId = bestVid }
 				else
-					-- Tier 2: edge snap (15px screen radius, boundary only)
+					-- Tier 2: boundary edge snap (world-space distance)
 					local storedKey = tostring(math.min(mAddBoundaryEdge.v1, mAddBoundaryEdge.v2))
 						.. "_" .. tostring(math.max(mAddBoundaryEdge.v1, mAddBoundaryEdge.v2))
 					local bestEdgeKey: string? = nil
-					local bestEdgeDist = 15
+					local bestEdgeDist = snapRadius
 					for key, edge in mMesh.getEdges() do
 						if #edge.triangles ~= 1 then continue end
 						if key == storedKey then continue end
-						local v1 = mMesh.getVertex(edge.v1)
-						local v2 = mMesh.getVertex(edge.v2)
-						if not v1 or not v2 then continue end
-						local s1, on1 = camera:WorldToScreenPoint(v1.position)
-						local s2, on2 = camera:WorldToScreenPoint(v2.position)
-						if not on1 or not on2 then continue end
-						local bx, by = s2.X - s1.X, s2.Y - s1.Y
-						local lenSq = bx * bx + by * by
-						if lenSq < 0.001 then continue end
-						local px = mouseScreen.X - s1.X
-						local py = mouseScreen.Y - s1.Y
-						local t = math.clamp((px * bx + py * by) / lenSq, 0, 1)
-						local closestX = s1.X + t * bx
-						local closestY = s1.Y + t * by
-						local dist = math.sqrt((mouseScreen.X - closestX) ^ 2 + (mouseScreen.Y - closestY) ^ 2)
+						local ev1 = mMesh.getVertex(edge.v1)
+						local ev2 = mMesh.getVertex(edge.v2)
+						if not ev1 or not ev2 then continue end
+						local seg = ev2.position - ev1.position
+						local lenSq = seg:Dot(seg)
+						local t = if lenSq < 0.001 then 0 else math.clamp((worldPos - ev1.position):Dot(seg) / lenSq, 0, 1)
+						local closest = ev1.position + seg * t
+						local dist = (worldPos - closest).Magnitude
 						if dist < bestEdgeDist then
 							bestEdgeDist = dist
 							bestEdgeKey = key
@@ -497,16 +471,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					if bestEdgeKey then
 						newHoverEdge = bestEdgeKey
 						mAddHoverTarget = { type = "edge", edgeKey = bestEdgeKey }
-					elseif mAddPlanePoint and mAddPlaneNormal then
-						-- Tier 3: plane projection
-						local ray = camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
-						local denom = ray.Direction:Dot(mAddPlaneNormal)
-						if math.abs(denom) > 0.0001 then
-							local hitT = (mAddPlanePoint - ray.Origin):Dot(mAddPlaneNormal) / denom
-							if hitT > 0 then
-								mAddHoverTarget = { type = "plane", position = ray.Origin + ray.Direction * hitT }
-							end
-						end
+					else
+						-- No snap: use world hit position directly
+						mAddHoverTarget = { type = "plane", position = worldPos }
 					end
 				end
 			end
@@ -557,8 +524,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local function handleAddClick(worldPos: Vector3)
 		mMesh.discoverRegion({worldPos}, 15)
 		if not mAddBoundaryEdge then
-			-- Phase 1: select a boundary edge (no distance limit)
-			local edgeKey = findNearestBoundaryEdge(nil)
+			-- Phase 1: select a boundary edge nearest to world hit
+			local edgeKey = findNearestBoundaryEdge(worldPos, nil)
 			if edgeKey then
 				local edge = mMesh.getEdges()[edgeKey]
 				if edge then
@@ -1054,14 +1021,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				mSelectedVertices = {}
 				changeSignal:Fire()
 			end
-			if mode == "Add" then
-				if mAddBoundaryEdge and mAddHoverTarget then
-					-- Phase 2 with a hover target (e.g., plane) — proceed
-					handleAddClick(Vector3.zero) -- worldPos unused, target comes from mAddHoverTarget
-				elseif mAddBoundaryEdge then
-					clearAddState()
-					changeSignal:Fire()
-				end
+			if mode == "Add" and mAddBoundaryEdge then
+				clearAddState()
+				changeSignal:Fire()
 			end
 			return
 		end
