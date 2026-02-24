@@ -913,7 +913,9 @@ local function createTriangleMesh(): TriangleMesh
 			if not isWedge(candidate) then continue end
 
 			-- Skip already-paired parts (part of a 2-wedge triangle)
-			local candidateTriId = getPartTriangle(candidate, hintPoint)
+			-- Use direct mapping instead of getPartTriangle to avoid
+			-- hintPoint-dependent misses that cause duplicate registration
+			local candidateTriId = mPartToTriangleFront[candidate] or mPartToTriangleBack[candidate]
 			if candidateTriId then
 				local candidateTri = mTriangles[candidateTriId]
 				if candidateTri and #candidateTri.parts == 2 then
@@ -985,7 +987,31 @@ local function createTriangleMesh(): TriangleMesh
 			end
 		end
 
-		-- No partner found — register as single-wedge triangle
+		-- No partner found
+		-- If this part already has a registered face, only allow registration
+		-- if the new vertices are genuinely different (back face discovery).
+		-- If they overlap (2+ shared vertices), it's a duplicate — return existing.
+		if alreadyHasOneFace then
+			local existingTriId = mPartToTriangleFront[part] or mPartToTriangleBack[part]
+			local existingTri = mTriangles[existingTriId]
+			if existingTri then
+				local overlap = 0
+				for _, vid in existingTri.vertices do
+					local v = mVertices[vid]
+					if v then
+						local key = positionKey(v.position)
+						if key == positionKey(v1a) or key == positionKey(v1b) or key == positionKey(v1c) then
+							overlap += 1
+						end
+					end
+				end
+				if overlap >= 2 then
+					return existingTriId
+				end
+			end
+		end
+
+		-- Register as single-wedge triangle
 		local vid1 = findOrCreateVertex(v1a)
 		local vid2 = findOrCreateVertex(v1b)
 		local vid3 = findOrCreateVertex(v1c)
@@ -1022,7 +1048,13 @@ local function createTriangleMesh(): TriangleMesh
 					if isWedge(candidate) or isThinBlock(candidate) then
 						local triId = getPartTriangle(candidate, seed)
 						if not triId then
-							triId = mesh.discoverPart(candidate, seed)
+							-- Only discover if not already registered on any face
+							if not mPartToTriangleFront[candidate] and not mPartToTriangleBack[candidate] then
+								triId = mesh.discoverPart(candidate, seed)
+							else
+								-- Part already registered but hint didn't match; use existing
+								triId = mPartToTriangleFront[candidate] or mPartToTriangleBack[candidate]
+							end
 						end
 						if triId then
 							local tri = mTriangles[triId]
@@ -1050,9 +1082,13 @@ local function createTriangleMesh(): TriangleMesh
 			if not vertex then continue end
 
 			-- Discover undiscovered adjacent parts via small spatial query
+			-- Only discover parts with no registered face at all — using
+			-- getPartTriangle(candidate, vertex.position) could return nil
+			-- for an already-registered part if the vertex is on the wrong
+			-- side, causing discoverPart to register the back face.
 			local candidates = workspace:GetPartBoundsInRadius(vertex.position, 1)
 			for _, candidate in candidates do
-				if not getPartTriangle(candidate, vertex.position) then
+				if not mPartToTriangleFront[candidate] and not mPartToTriangleBack[candidate] then
 					mesh.discoverPart(candidate, vertex.position)
 				end
 			end
