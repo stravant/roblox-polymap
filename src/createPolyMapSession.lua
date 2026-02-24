@@ -602,13 +602,21 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			local v1 = mMesh.getVertex(mAddBoundaryEdge.v1)
 			local v2 = mMesh.getVertex(mAddBoundaryEdge.v2)
 			if v1 and v2 then
-				-- Use worldPos as hintPoint — it's on the surface, encoding the correct face direction
+				-- Derive hintPoint from the parent triangle's normal so new
+				-- triangles face the same direction. Using worldPos is unreliable:
+				-- it's coplanar with the surface (ambiguous) or Vector3.zero when
+				-- the raycast misses (wrong side entirely).
+				local edgeMid = (v1.position + v2.position) / 2
+				local addHintPoint = if mAddPlaneNormal
+					then edgeMid + mAddPlaneNormal * 0.5
+					else worldPos
+
 				if target.type == "vertex" and target.vertexId then
 					local tv = mMesh.getVertex(target.vertexId)
 					if tv then
 						mMesh.addTriangle(
 							v1.position, v2.position, tv.position,
-							currentSettings.Thickness, workspace.Terrain, addProps, worldPos
+							currentSettings.Thickness, workspace.Terrain, addProps, addHintPoint
 						)
 					end
 				elseif target.type == "edge" and target.edgeKey then
@@ -626,18 +634,18 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 							end
 							mMesh.addTriangle(
 								v1.position, v2.position, ta.position,
-								currentSettings.Thickness, workspace.Terrain, addProps, worldPos
+								currentSettings.Thickness, workspace.Terrain, addProps, addHintPoint
 							)
 							mMesh.addTriangle(
 								v2.position, tb.position, ta.position,
-								currentSettings.Thickness, workspace.Terrain, addProps, worldPos
+								currentSettings.Thickness, workspace.Terrain, addProps, addHintPoint
 							)
 						end
 					end
 				elseif target.type == "plane" and target.position then
 					mMesh.addTriangle(
 						v1.position, v2.position, target.position,
-						currentSettings.Thickness, workspace.Terrain, addProps, worldPos
+						currentSettings.Thickness, workspace.Terrain, addProps, addHintPoint
 					)
 				end
 			end

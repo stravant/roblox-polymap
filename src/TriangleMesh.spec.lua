@@ -1085,4 +1085,49 @@ return function(t: TestTypes.TestContext)
 
 		folder:Destroy()
 	end)
+
+	t.test("addTriangle preserves normal direction for adjacent triangle", function()
+		-- When extending a mesh via Add mode, the new triangle should face the
+		-- same direction as the parent. This requires a hintPoint offset from
+		-- the surface by the parent normal — NOT the click position (which is
+		-- on the surface and makes the direction ambiguous).
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		-- Create an upward-facing parent triangle at Y=10
+		local a = Vector3.new(1500, 10, 0)
+		local b = Vector3.new(1504, 10, 0)
+		local c = Vector3.new(1502, 10, 3)
+		local parentId = mesh.addTriangle(a, b, c, 0.2, folder, nil, Vector3.new(1502, 11, 1))
+		assert(parentId)
+		local parentTri = mesh.getTriangle(parentId)
+		assert(parentTri)
+		t.expect(parentTri.normal.Y > 0.9).toBeTruthy()
+
+		-- Add adjacent triangle sharing the a-b edge.
+		-- Use hintPoint derived from the parent normal (edge midpoint + normal offset).
+		-- This is what Add mode should do instead of passing the click position.
+		local d = Vector3.new(1502, 10, -3)
+		local edgeMid = (a + b) / 2
+		local hintPoint = edgeMid + parentTri.normal * 0.5
+		local childId = mesh.addTriangle(a, b, d, 0.2, folder, nil, hintPoint)
+		assert(childId)
+		local childTri = mesh.getTriangle(childId)
+		assert(childTri)
+		-- Child should face the same direction as parent (upward)
+		t.expect(childTri.normal.Y > 0.9).toBeTruthy()
+
+		-- Verify the BAD hintPoint (Vector3.zero) would produce wrong normal.
+		-- This is the bug: Add mode passed worldPos=Vector3.zero when the
+		-- raycast missed, flipping the triangle to face downward.
+		mesh.removeTriangle(childId)
+		local badChildId = mesh.addTriangle(a, b, d, 0.2, folder, nil, Vector3.zero)
+		assert(badChildId)
+		local badChildTri = mesh.getTriangle(badChildId)
+		assert(badChildTri)
+		t.expect(badChildTri.normal.Y < -0.9).toBeTruthy() -- wrong: faces down
+
+		folder:Destroy()
+	end)
 end
