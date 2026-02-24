@@ -74,6 +74,7 @@ export type TriangleMesh = {
 	discoverPart: (part: BasePart, hintPoint: Vector3) -> number?,
 	discoverRegion: (seeds: { Vector3 }, radius: number) -> ({ number }, { number }),
 	getPartTriangle: (part: BasePart, hintPoint: Vector3) -> number?,
+	getPartTriangles: (part: BasePart) -> { number },
 	refreshFromParts: () -> (),
 	clear: () -> (),
 }
@@ -834,6 +835,15 @@ local function createTriangleMesh(): TriangleMesh
 
 	mesh.getPartTriangle = function(part: BasePart, hintPoint: Vector3): number?
 		return getPartTriangle(part, hintPoint)
+	end
+
+	mesh.getPartTriangles = function(part: BasePart): { number }
+		local result = {}
+		local frontId = mPartToTriangleFront[part]
+		if frontId then table.insert(result, frontId) end
+		local backId = mPartToTriangleBack[part]
+		if backId and backId ~= frontId then table.insert(result, backId) end
+		return result
 	end
 
 	mesh.discoverPart = function(part: BasePart, hintPoint: Vector3): number?

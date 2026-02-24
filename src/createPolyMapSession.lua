@@ -298,41 +298,43 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return bestId
 	end
 
-	local function findNearestBoundaryEdge(worldPos: Vector3, triangleId: number?, skipEdgeKey: string?): string?
+	local function findNearestBoundaryEdge(worldPos: Vector3, triangleIds: { number }, skipEdgeKey: string?): string?
 		local bestKey: string? = nil
 		local bestDist = math.huge
 
-		-- Only consider edges of the given triangle
-		local tri = if triangleId then mMesh.getTriangle(triangleId) else nil
-		if not tri then
-			return nil
-		end
-		local verts = tri.vertices
-		local candidateKeys = {
-			tostring(math.min(verts[1], verts[2])) .. "_" .. tostring(math.max(verts[1], verts[2])),
-			tostring(math.min(verts[2], verts[3])) .. "_" .. tostring(math.max(verts[2], verts[3])),
-			tostring(math.min(verts[1], verts[3])) .. "_" .. tostring(math.max(verts[1], verts[3])),
-		}
-
+		-- Collect candidate edge keys from all given triangles
+		local seen: { [string]: boolean } = {}
 		local edges = mMesh.getEdges()
-		for _, key in candidateKeys do
-			local edge = edges[key]
-			if not edge then continue end
-			if #edge.triangles ~= 1 then continue end
-			if key == skipEdgeKey then continue end
-			local v1 = mMesh.getVertex(edge.v1)
-			local v2 = mMesh.getVertex(edge.v2)
-			if not v1 or not v2 then continue end
+		for _, triId in triangleIds do
+			local tri = mMesh.getTriangle(triId)
+			if not tri then continue end
+			local verts = tri.vertices
+			local keys = {
+				tostring(math.min(verts[1], verts[2])) .. "_" .. tostring(math.max(verts[1], verts[2])),
+				tostring(math.min(verts[2], verts[3])) .. "_" .. tostring(math.max(verts[2], verts[3])),
+				tostring(math.min(verts[1], verts[3])) .. "_" .. tostring(math.max(verts[1], verts[3])),
+			}
+			for _, key in keys do
+				if seen[key] then continue end
+				seen[key] = true
+				local edge = edges[key]
+				if not edge then continue end
+				if #edge.triangles ~= 1 then continue end
+				if key == skipEdgeKey then continue end
+				local v1 = mMesh.getVertex(edge.v1)
+				local v2 = mMesh.getVertex(edge.v2)
+				if not v1 or not v2 then continue end
 
-			local seg = v2.position - v1.position
-			local lenSq = seg:Dot(seg)
-			local t = if lenSq < 0.001 then 0 else math.clamp((worldPos - v1.position):Dot(seg) / lenSq, 0, 1)
-			local closest = v1.position + seg * t
-			local dist = (worldPos - closest).Magnitude
+				local seg = v2.position - v1.position
+				local lenSq = seg:Dot(seg)
+				local t = if lenSq < 0.001 then 0 else math.clamp((worldPos - v1.position):Dot(seg) / lenSq, 0, 1)
+				local closest = v1.position + seg * t
+				local dist = (worldPos - closest).Magnitude
 
-			if dist < bestDist then
-				bestDist = dist
-				bestKey = key
+				if dist < bestDist then
+					bestDist = dist
+					bestKey = key
+				end
 			end
 		end
 
@@ -431,15 +433,15 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			end
 		end
 
-		if mode == "Add" and worldPos and not mAddBoundaryEdge and hitTriangleId then
+		if mode == "Add" and worldPos and not mAddBoundaryEdge and result and result.Instance:IsA("BasePart") then
 			-- Discover neighbors so we can tell which edges are truly boundary
-			if result and result.Instance:IsA("BasePart") then
-				local size = result.Instance.Size
-				local extent = math.sqrt(size.X * size.X + size.Y * size.Y + size.Z * size.Z)
-				mMesh.discoverRegion({worldPos}, extent)
-			end
-			-- Phase 1: hover the nearest boundary edge of the hit triangle
-			newHoverEdge = findNearestBoundaryEdge(worldPos, hitTriangleId, nil)
+			local hitPart = result.Instance :: BasePart
+			local size = hitPart.Size
+			local extent = math.sqrt(size.X * size.X + size.Y * size.Y + size.Z * size.Z)
+			mMesh.discoverRegion({worldPos}, extent)
+			-- Phase 1: hover the nearest boundary edge of the hit part's triangles
+			local partTriIds = mMesh.getPartTriangles(hitPart)
+			newHoverEdge = findNearestBoundaryEdge(worldPos, partTriIds, nil)
 		end
 
 		-- Add mode phase 2: world-space vertex/edge snapping
@@ -542,16 +544,18 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		changeSignal:Fire()
 	end
 
-	local function handleAddClick(worldPos: Vector3, hitPart: BasePart?, hitTriangleId: number?)
+	local function handleAddClick(worldPos: Vector3, hitPart: BasePart?)
 		mMesh.discoverRegion({worldPos}, 15)
 		if not mAddBoundaryEdge then
-			-- Phase 1: select a boundary edge of the hit triangle
-			if not hitTriangleId or not hitPart then return end
+			-- Phase 1: select a boundary edge of the hit part
+			if not hitPart then return end
+			mMesh.discoverPart(hitPart, worldPos)
 			-- Discover neighbors so we can tell which edges are truly boundary
 			local size = hitPart.Size
 			local extent = math.sqrt(size.X * size.X + size.Y * size.Y + size.Z * size.Z)
 			mMesh.discoverRegion({worldPos}, extent)
-			local edgeKey = findNearestBoundaryEdge(worldPos, hitTriangleId, nil)
+			local partTriIds = mMesh.getPartTriangles(hitPart)
+			local edgeKey = findNearestBoundaryEdge(worldPos, partTriIds, nil)
 			if edgeKey then
 				local edge = mMesh.getEdges()[edgeKey]
 				if edge then
@@ -1097,12 +1101,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		if mode == "Select" or mode == "Move" or mode == "Rotate" or mode == "Subdivide" or mode == "Simplify" then
 			handleSelectClick(result.Position, hitPart)
 		elseif mode == "Add" then
-			local clickTriId: number? = nil
-			if hitPart then
-				mMesh.discoverPart(hitPart, result.Position)
-				clickTriId = mMesh.getPartTriangle(hitPart, result.Position)
-			end
-			handleAddClick(result.Position, hitPart, clickTriId)
+			handleAddClick(result.Position, hitPart)
 		elseif mode == "Delete" or mode == "Paint" or mode == "Relax" or mode == "Flatten" then
 			startStroke()
 			applyStrokeAtCursor()
