@@ -846,8 +846,6 @@ local function createTriangleMesh(): TriangleMesh
 		local existing = getPartTriangle(part, hintPoint)
 		if existing then
 			return existing
-		else
-			print("No existing triangle for part")
 		end
 
 		-- If this part already has one face registered but getPartTriangle
