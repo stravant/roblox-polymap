@@ -584,6 +584,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				mSelectedVertices = {}
 			end
 		end
+		mSavedVertexPositions = {}
 		changeSignal:Fire()
 	end
 
@@ -1105,6 +1106,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		if not result then
 			if (mode == "Select" or mode == "Move" or mode == "Rotate" or mode == "Subdivide" or mode == "Simplify") and not isShiftHeld() then
 				mSelectedVertices = {}
+				mSavedVertexPositions = {}
 				changeSignal:Fire()
 			end
 			if mode == "Add" and mAddBoundaryEdge then
@@ -1207,6 +1209,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			end
 		end
 
+		mSavedVertexPositions = {}
 		changeSignal:Fire()
 	end
 
@@ -1255,15 +1258,61 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			return
 		end
 
-		-- Discover nearby geometry and walk topology in a single call
+		-- Discover geometry out to the influence radius. This runs at drag
+		-- start (before movement), so seeds are at correct surface positions.
 		local seedPositions: { Vector3 } = {}
 		for _, origPos in mSavedVertexPositions do
 			table.insert(seedPositions, origPos)
 		end
-		local _, discoveredVids = mMesh.discoverRegion(seedPositions, radius)
+		if #seedPositions > 0 then
+			mMesh.discoverRegion(seedPositions, radius)
+		end
 
-		-- Compute falloff for returned non-selected vertices using XZ distance
-		for _, vid in discoveredVids do
+		-- Walk already-discovered topology outward from selected vertices,
+		-- filtering by XZ distance.
+
+		local visited: { [number]: boolean } = {}
+		local queue: { number } = {}
+		local queueHead = 1
+		for vid in mSelectedVertices do
+			visited[vid] = true
+			table.insert(queue, vid)
+		end
+
+		while queueHead <= #queue do
+			local vid = queue[queueHead]
+			queueHead += 1
+
+			local v = mMesh.getVertex(vid)
+			if not v then continue end
+
+			for _, triId in v.triangles do
+				local tri = mMesh.getTriangle(triId)
+				if not tri then continue end
+				for _, neighborVid in tri.vertices do
+					if visited[neighborVid] then continue end
+					visited[neighborVid] = true
+
+					local neighbor = mMesh.getVertex(neighborVid)
+					if not neighbor then continue end
+
+					local withinRadius = false
+					for _, seedPos in seedPositions do
+						local delta = neighbor.position - seedPos
+						if Vector3.new(delta.X, 0, delta.Z).Magnitude < radius then
+							withinRadius = true
+							break
+						end
+					end
+					if withinRadius then
+						table.insert(queue, neighborVid)
+					end
+				end
+			end
+		end
+
+		-- Compute falloff for non-selected vertices within radius
+		for vid in visited do
 			if mSelectedVertices[vid] then continue end
 			local neighbor = mMesh.getVertex(vid)
 			if not neighbor then continue end
@@ -1488,14 +1537,28 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 	end)
 
+	local function rediscoverMesh()
+		-- Collect all known vertex positions before clearing, then clear and
+		-- rediscover from scratch. The topology walk in discoverRegion will
+		-- find everything connected to any seed.
+		local seeds: { Vector3 } = {}
+		for _, vertex in mMesh.getVertices() do
+			table.insert(seeds, vertex.position)
+		end
+		mMesh.clear()
+		if #seeds > 0 then
+			mMesh.discoverRegion(seeds, 5)
+		end
+	end
+
 	local function handleUndo(waypointName: string)
 		if not string.find(waypointName, "PolyMap") then
 			return
 		end
 		-- Save current selection positions for redo
 		table.insert(mRedoSelections, captureSelectionPositions())
-		-- Rescan mesh from the reverted parts
-		mMesh.refreshFromParts()
+		-- Clear and rediscover mesh from the reverted parts
+		rediscoverMesh()
 		-- Restore selection from saved positions
 		local undoSelection = table.remove(mUndoSelections)
 		if undoSelection then
@@ -1505,6 +1568,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 		mHoverVertexId = nil
 		mHoverEdgeKey = nil
+		mSavedVertexPositions = {}
 		clearAddState()
 		Selection:Set({})
 		changeSignal:Fire()
@@ -1516,8 +1580,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 		-- Save current selection positions for undo
 		table.insert(mUndoSelections, captureSelectionPositions())
-		-- Rescan mesh from the re-applied parts
-		mMesh.refreshFromParts()
+		-- Clear and rediscover mesh from the re-applied parts
+		rediscoverMesh()
 		-- Restore selection from saved positions
 		local redoSelection = table.remove(mRedoSelections)
 		if redoSelection then
@@ -1527,6 +1591,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 		mHoverVertexId = nil
 		mHoverEdgeKey = nil
+		mSavedVertexPositions = {}
 		clearAddState()
 		Selection:Set({})
 		changeSignal:Fire()
@@ -1595,7 +1660,29 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 
 		local radius = currentSettings.InfluenceRadius
-		if radius <= 0 then
+
+		-- Collect seed positions for XZ distance filtering.
+		-- During/after a drag, use saved (pre-drag) positions so the
+		-- influence area stays stable as vertices move.
+		local seedPositions: { Vector3 } = {}
+		if next(mSavedVertexPositions) then
+			for vid in seedVids do
+				local pos = mSavedVertexPositions[vid]
+				if pos then
+					table.insert(seedPositions, pos)
+				end
+			end
+		end
+		if #seedPositions == 0 then
+			for vid in seedVids do
+				local v = mMesh.getVertex(vid)
+				if v then
+					table.insert(seedPositions, v.position)
+				end
+			end
+		end
+
+		if radius <= 0 or #seedPositions == 0 then
 			-- Just return triangles touching the seed vertices
 			local triSet: { [number]: boolean } = {}
 			for vid in seedVids do
@@ -1613,52 +1700,53 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			return result
 		end
 
-		-- Collect current positions as seeds for topology walk
-		local seedPositions: { Vector3 } = {}
-		for vid in seedVids do
-			local v = mMesh.getVertex(vid)
-			if v then
-				table.insert(seedPositions, v.position)
-			end
-		end
-		if #seedPositions == 0 then
-			return {}
-		end
-
-		-- Discover region and walk topology
-		local _, discoveredVids = mMesh.discoverRegion(seedPositions, radius)
-
-		-- For XZ distance filtering, use saved positions during drags
-		local filterPositions: { Vector3 }
-		if mIsDraggingHandle and next(mSavedVertexPositions) then
-			filterPositions = {}
-			for vid in seedVids do
-				local pos = mSavedVertexPositions[vid]
-				if pos then
-					table.insert(filterPositions, pos)
-				end
-			end
-			if #filterPositions == 0 then
-				filterPositions = seedPositions
-			end
-		else
-			filterPositions = seedPositions
-		end
-
-		-- Re-filter returned vertices by XZ distance and include seed vertices
+		-- Walk already-discovered topology outward from seed vertices,
+		-- filtering by XZ distance. No spatial discovery — that happens
+		-- at action time (click, drag start), not during rendering.
 		local affectedVids: { [number]: boolean } = {}
 		for vid in seedVids do
 			affectedVids[vid] = true
 		end
-		for _, vid in discoveredVids do
-			if affectedVids[vid] then continue end
-			local neighbor = mMesh.getVertex(vid)
-			if not neighbor then continue end
-			for _, seedPos in filterPositions do
-				local delta = neighbor.position - seedPos
-				if Vector3.new(delta.X, 0, delta.Z).Magnitude < radius then
-					affectedVids[vid] = true
-					break
+
+		local visited: { [number]: boolean } = {}
+		local queue: { number } = {}
+		local queueHead = 1
+		for vid in seedVids do
+			visited[vid] = true
+			table.insert(queue, vid)
+		end
+
+		while queueHead <= #queue do
+			local vid = queue[queueHead]
+			queueHead += 1
+
+			local v = mMesh.getVertex(vid)
+			if not v then continue end
+
+			-- Walk through triangles to find neighbor vertices
+			for _, triId in v.triangles do
+				local tri = mMesh.getTriangle(triId)
+				if not tri then continue end
+				for _, neighborVid in tri.vertices do
+					if visited[neighborVid] then continue end
+					visited[neighborVid] = true
+
+					local neighbor = mMesh.getVertex(neighborVid)
+					if not neighbor then continue end
+
+					-- Check XZ distance to any seed
+					local withinRadius = false
+					for _, seedPos in seedPositions do
+						local delta = neighbor.position - seedPos
+						if Vector3.new(delta.X, 0, delta.Z).Magnitude < radius then
+							withinRadius = true
+							break
+						end
+					end
+					if withinRadius then
+						affectedVids[neighborVid] = true
+						table.insert(queue, neighborVid)
+					end
 				end
 			end
 		end
@@ -2000,6 +2088,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			end
 		end
 		mSelectedVertices = newSelection
+		mSavedVertexPositions = {}
 
 		if recording then
 			ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
