@@ -213,6 +213,62 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		end
 	end
 
+	-- Upgrade a Block-backed triangle to use Wedge parts via fillTriangle.
+	-- This replaces the block part with 1-2 wedge parts and clears the upgrade flag.
+	-- If the block has other triangles linked (sibling quads), they are upgraded too.
+	local function upgradeBlockTriangles(tri: Triangle, thickness: number, props: fillTriangle.TriangleProps?)
+		local block = tri.parts[1]
+		local parent = block.Parent
+
+		-- Collect all triangles backed by this block
+		local blockTriangles = {} :: {Triangle}
+		local headId = mPartToTriangles[block]
+		if headId then
+			local current: Triangle? = mTriangles[headId]
+			while current do
+				table.insert(blockTriangles, current)
+				current = current.next
+			end
+		end
+
+		-- Upgrade each triangle
+		for _, blockTri in blockTriangles do
+			-- Unlink from the block
+			unlinkTriangleFromPart(blockTri, block)
+
+			-- Get vertex positions
+			local v1 = mVertices[blockTri.vertices[1]]
+			local v2 = mVertices[blockTri.vertices[2]]
+			local v3 = mVertices[blockTri.vertices[3]]
+			if not (v1 and v2 and v3) then
+				continue
+			end
+
+			-- Determine if fillTriangle needs invertNormal
+			local naturalNormal = computeNormal(v1.position, v2.position, v3.position)
+			local shouldInvert = naturalNormal:Dot(blockTri.normal) < 0
+
+			-- Create new wedge parts
+			local newParts = fillTriangle(
+				v1.position, v2.position, v3.position,
+				thickness, parent :: Instance, props, nil, shouldInvert
+			)
+
+			-- Update triangle
+			blockTri.parts = newParts
+			blockTri.thickness = thickness
+			blockTri.partsRequireUpgrade = nil
+
+			-- Link new parts to this triangle
+			for _, newPart in newParts do
+				linkTriangleToPart(blockTri, newPart)
+			end
+		end
+
+		-- Remove the block
+		block.Parent = nil
+	end
+
 	---------------------------------------------------------------------------
 	-- Data access
 	---------------------------------------------------------------------------
@@ -362,6 +418,12 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			return
 		end
 
+		-- If this is a Block-backed triangle, upgrade all siblings first
+		-- so the remaining triangles get proper Wedge parts
+		if tri.partsRequireUpgrade then
+			upgradeBlockTriangles(tri, tri.thickness)
+		end
+
 		-- Unlink from parts and parent-out parts (not destroy)
 		for _, part in tri.parts do
 			unlinkTriangleFromPart(tri, part)
@@ -425,33 +487,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		local newHash = hashVertex(newPosition)
 		mSpatialHash[newHash] = vertexId
 
-		-- Update edge hashes for all edges touching this vertex
-		-- We need to remove old hashes and re-add with new position
-		for _, triId in vertex.triangles do
-			local tri = mTriangles[triId]
-			if tri then
-				local verts = tri.vertices
-				local vertPairs = {{verts[1], verts[2]}, {verts[2], verts[3]}, {verts[3], verts[1]}}
-				for _, pair in vertPairs do
-					if pair[1] == vertexId or pair[2] == vertexId then
-						local v1 = mVertices[pair[1]]
-						local v2 = mVertices[pair[2]]
-						if v1 and v2 then
-							-- Old hash used old position for this vertex
-							local otherVid = if pair[1] == vertexId then pair[2] else pair[1]
-							local other = mVertices[otherVid]
-							if other then
-								local oldEdgeHash = hashEdge(vertex.position - (newPosition - vertex.position) + (newPosition - vertex.position), other.position)
-								-- Actually we already changed vertex.position, so we need
-								-- to compute what the old hash was. Let's just rebuild edges.
-							end
-						end
-					end
-				end
-			end
-		end
-
-		-- Simpler approach: rebuild edge lookup for affected edges
+		-- Rebuild edge lookup for affected edges
 		-- First collect all edge ids that touch this vertex
 		local affectedEdges = {} :: {EdgeId}
 		for edgeHash, edgeId in mEdgeLookup do
@@ -474,6 +510,15 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			end
 		end
 
+		-- Upgrade any Block-backed triangles before rebuilding
+		local triIds = table.clone(vertex.triangles)
+		for _, triId in triIds do
+			local tri = mTriangles[triId]
+			if tri and tri.partsRequireUpgrade then
+				upgradeBlockTriangles(tri, thickness, props)
+			end
+		end
+
 		-- Rebuild all triangles touching this vertex
 		for _, triId in vertex.triangles do
 			local tri = mTriangles[triId]
@@ -486,10 +531,6 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 					tri.normal = computeNormal(v1.position, v2.position, v3.position)
 
 					-- Determine if we need invertNormal for fillTriangle
-					-- The natural normal from fillTriangle(a,b,c) points in the
-					-- direction of (b-a):Cross(c-b). Our stored vertex order defines
-					-- the desired normal. If the natural fillTriangle normal doesn't
-					-- match our desired normal, we need invertNormal.
 					local naturalNormal = computeNormal(v1.position, v2.position, v3.position)
 					local shouldInvert = naturalNormal:Dot(tri.normal) < 0
 
@@ -650,7 +691,11 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			end
 			currentTri = currentTri.next
 		end
-		return bestTriId
+		-- Only return if hintPoint is on the normal side of the triangle
+		if bestDot >= 0 then
+			return bestTriId
+		end
+		return nil
 	end
 
 	local function getPartTriangles(part: BasePart): {TriangleId}
@@ -675,29 +720,33 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		end
 
 		if (part :: Part).Shape == Enum.PartType.Wedge then
-			-- Get the triangle vertices from the wedge. Try both faces and
-			-- prefer the one that shares more vertices with existing geometry
-			-- (helps when hintPoint is ambiguous, e.g. on the surface plane).
-			local hintA = part.CFrame.Position + part.CFrame.RightVector
-			local hintB = part.CFrame.Position - part.CFrame.RightVector
-			local v1a, v2a, v3a, thicknessA = getWedgeVertices(part, hintA)
-			local v1b, v2b, v3b, thicknessB = getWedgeVertices(part, hintB)
-			local matchA, matchB = 0, 0
-			for _, vp in {v1a, v2a, v3a} do
-				if mSpatialHash[hashVertex(vp)] then matchA += 1 end
-			end
-			for _, vp in {v1b, v2b, v3b} do
-				if mSpatialHash[hashVertex(vp)] then matchB += 1 end
-			end
-
+			-- Get the triangle vertices from the wedge.
+			-- If this part already has a discovered face, use hintPoint directly
+			-- (we're discovering the other face). Otherwise, try both faces and
+			-- prefer the one sharing more vertices with existing geometry.
 			local v1, v2, v3, wedgeThickness
-			if matchA > matchB then
-				v1, v2, v3, wedgeThickness = v1a, v2a, v3a, thicknessA
-			elseif matchB > matchA then
-				v1, v2, v3, wedgeThickness = v1b, v2b, v3b, thicknessB
-			else
-				-- Tie: use hintPoint to decide
+			if mPartToTriangles[part] then
+				-- Part already has a face — use hintPoint to pick the other face
 				v1, v2, v3, wedgeThickness = getWedgeVertices(part, hintPoint)
+			else
+				local hintA = part.CFrame.Position + part.CFrame.RightVector
+				local hintB = part.CFrame.Position - part.CFrame.RightVector
+				local v1a, v2a, v3a, thicknessA = getWedgeVertices(part, hintA)
+				local v1b, v2b, v3b, thicknessB = getWedgeVertices(part, hintB)
+				local matchA, matchB = 0, 0
+				for _, vp in {v1a, v2a, v3a} do
+					if mSpatialHash[hashVertex(vp)] then matchA += 1 end
+				end
+				for _, vp in {v1b, v2b, v3b} do
+					if mSpatialHash[hashVertex(vp)] then matchB += 1 end
+				end
+				if matchA > matchB then
+					v1, v2, v3, wedgeThickness = v1a, v2a, v3a, thicknessA
+				elseif matchB > matchA then
+					v1, v2, v3, wedgeThickness = v1b, v2b, v3b, thicknessB
+				else
+					v1, v2, v3, wedgeThickness = getWedgeVertices(part, hintPoint)
+				end
 			end
 
 			local natural = computeNormal(v1, v2, v3)
