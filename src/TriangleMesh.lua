@@ -675,11 +675,31 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		end
 
 		if (part :: Part).Shape == Enum.PartType.Wedge then
-			-- Get the triangle vertices from the wedge
-			local v1, v2, v3, wedgeThickness = getWedgeVertices(part, hintPoint)
+			-- Get the triangle vertices from the wedge. Try both faces and
+			-- prefer the one that shares more vertices with existing geometry
+			-- (helps when hintPoint is ambiguous, e.g. on the surface plane).
+			local hintA = part.CFrame.Position + part.CFrame.RightVector
+			local hintB = part.CFrame.Position - part.CFrame.RightVector
+			local v1a, v2a, v3a, thicknessA = getWedgeVertices(part, hintA)
+			local v1b, v2b, v3b, thicknessB = getWedgeVertices(part, hintB)
+			local matchA, matchB = 0, 0
+			for _, vp in {v1a, v2a, v3a} do
+				if mSpatialHash[hashVertex(vp)] then matchA += 1 end
+			end
+			for _, vp in {v1b, v2b, v3b} do
+				if mSpatialHash[hashVertex(vp)] then matchB += 1 end
+			end
 
-			-- Check if there's an adjacent co-planar wedge that forms one triangle
-			-- For now, just add the single wedge as a triangle
+			local v1, v2, v3, wedgeThickness
+			if matchA > matchB then
+				v1, v2, v3, wedgeThickness = v1a, v2a, v3a, thicknessA
+			elseif matchB > matchA then
+				v1, v2, v3, wedgeThickness = v1b, v2b, v3b, thicknessB
+			else
+				-- Tie: use hintPoint to decide
+				v1, v2, v3, wedgeThickness = getWedgeVertices(part, hintPoint)
+			end
+
 			local natural = computeNormal(v1, v2, v3)
 			local centroid = (v1 + v2 + v3) / 3
 			local toHint = hintPoint - centroid
@@ -745,18 +765,26 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 					if mPartToTriangles[nearPart] then
 						continue
 					end
-					-- Check if this wedge shares exactly 2 vertices and is co-planar.
-					-- Try both faces of the neighbor and pick the one sharing more vertices.
+					-- Check if this wedge shares exactly 2 vertices with THIS triangle.
+					-- Try both faces of the neighbor and pick the one sharing more.
+					-- Only count vertices shared with the current triangle, not all mesh vertices.
+					local currentVertHashes = {} :: {[VertexHash]: boolean}
+					for _, ovid in orderedVerts do
+						local ov = mVertices[ovid]
+						if ov then
+							currentVertHashes[hashVertex(ov.position)] = true
+						end
+					end
 					local hintA = nearPart.CFrame.Position + nearPart.CFrame.RightVector
 					local hintB = nearPart.CFrame.Position - nearPart.CFrame.RightVector
 					local nv1a, nv2a, nv3a = getWedgeVertices(nearPart, hintA)
 					local nv1b, nv2b, nv3b = getWedgeVertices(nearPart, hintB)
 					local sharedA, sharedB = 0, 0
 					for _, nv in {nv1a, nv2a, nv3a} do
-						if mSpatialHash[hashVertex(nv)] then sharedA += 1 end
+						if currentVertHashes[hashVertex(nv)] then sharedA += 1 end
 					end
 					for _, nv in {nv1b, nv2b, nv3b} do
-						if mSpatialHash[hashVertex(nv)] then sharedB += 1 end
+						if currentVertHashes[hashVertex(nv)] then sharedB += 1 end
 					end
 					local nv1, nv2, nv3
 					if sharedA >= sharedB then
@@ -769,7 +797,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 					local unsharedNeighborVert: Vector3? = nil
 					for _, nv in neighborVerts do
 						local hash = hashVertex(nv)
-						if not mSpatialHash[hash] then
+						if not currentVertHashes[hash] then
 							unsharedNeighborVert = nv
 						end
 					end
