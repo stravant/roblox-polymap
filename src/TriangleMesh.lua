@@ -691,8 +691,10 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			end
 			currentTri = currentTri.next
 		end
-		-- Only return if hintPoint is on the normal side of the triangle
-		if bestDot >= 0 then
+		-- Only return if hintPoint is on the normal side of the triangle.
+		-- Use a small negative tolerance to handle hints that are in the
+		-- triangle's plane (dot ≈ 0) but have tiny floating point error.
+		if bestDot >= -0.01 then
 			return bestTriId
 		end
 		return nil
@@ -770,6 +772,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 
 			local triId = mNextTriangleId
 			mNextTriangleId += 1
+
 			local triangle: Triangle = {
 				id = triId,
 				vertices = orderedVerts,
@@ -1163,78 +1166,139 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		local discovered = {} :: {[TriangleId]: boolean}
 		local result = {} :: {TriangleId}
 
-		-- For each seed, find nearby parts and discover them
-		for _, seed in seeds do
-			local nearbyParts = workspace:GetPartBoundsInRadius(seed, radius)
-			for _, part in nearbyParts do
-				if not part:IsA("BasePart") then
-					continue
-				end
-				-- Skip already-fully-discovered parts
-				if mPartToTriangles[part] then
-					-- Still add to results
-					local triId = mPartToTriangles[part]
-					local tri: Triangle? = mTriangles[triId]
-					while tri do
-						if not discovered[tri.id] then
-							discovered[tri.id] = true
-							table.insert(result, tri.id)
-						end
-						tri = tri.next
-					end
-					continue
-				end
+		-- Track explored positions to avoid re-processing
+		local explored = {} :: {[VertexHash]: boolean}
 
-				-- Try to discover this part
-				-- Use the seed as the hintPoint direction
-				local triId = discoverPart(part, seed)
-				if triId and not discovered[triId] then
-					discovered[triId] = true
-					table.insert(result, triId)
-					-- If discovering the part created additional triangles (e.g., block),
-					-- add those too
-					local tri: Triangle? = mTriangles[triId]
-					while tri do
-						if not discovered[tri.id] then
-							discovered[tri.id] = true
-							table.insert(result, tri.id)
+		-- Queue of positions to explore incrementally
+		local exploreQueue = {} :: {Vector3}
+
+		-- Helper: add a triangle to results and queue its unexplored vertices
+		local function collectTriangle(triId: TriangleId)
+			if discovered[triId] then return end
+			discovered[triId] = true
+			table.insert(result, triId)
+			local tri = mTriangles[triId]
+			if tri then
+				for _, vid in tri.vertices do
+					local v = mVertices[vid]
+					if v then
+						local h = hashVertex(v.position)
+						if not explored[h] then
+							table.insert(exploreQueue, v.position)
 						end
-						tri = tri.next
 					end
 				end
 			end
 		end
 
-		-- Walk outward from discovered triangles along edges to find connected
-		-- triangles that are also within radius
-		local queue = table.clone(result)
-		while #queue > 0 do
-			local currentTriId = table.remove(queue, 1) :: TriangleId
-			local adj = getAdjacentTriangles(currentTriId)
-			for _, adjTriId in adj do
-				if not discovered[adjTriId] then
-					-- Check if any vertex is within radius of any seed
-					local adjTri = mTriangles[adjTriId]
-					if adjTri then
-						local inRadius = false
-						for _, vid in adjTri.vertices do
-							local v = mVertices[vid]
-							if v then
-								for _, seed in seeds do
-									if (v.position - seed).Magnitude <= radius then
-										inRadius = true
-										break
-									end
-								end
-								if inRadius then
-									break
+		-- Helper: check if a vertex lies on a boundary edge (has an edge with < 2 triangles)
+		local function isVertexOnBoundary(vertId: VertexId): boolean
+			local vert = mVertices[vertId]
+			if not vert then return false end
+			for _, triId in vert.triangles do
+				local tri = mTriangles[triId]
+				if not tri then continue end
+				local verts = tri.vertices
+				for i = 1, 3 do
+					local j = if i == 3 then 1 else i + 1
+					if verts[i] == vertId or verts[j] == vertId then
+						local ev1 = mVertices[verts[i]]
+						local ev2 = mVertices[verts[j]]
+						if ev1 and ev2 then
+							local edgeHash = hashEdge(ev1.position, ev2.position)
+							local edgeId = mEdgeLookup[edgeHash]
+							if edgeId then
+								local edge = mEdges[edgeId]
+								if edge and #edge.triangles < 2 then
+									return true
 								end
 							end
 						end
-						if inRadius then
-							discovered[adjTriId] = true
-							table.insert(result, adjTriId)
-							table.insert(queue, adjTriId)
+					end
+				end
+			end
+			return false
+		end
+
+		-- Helper: get adaptive search radius from a vertex's known parts
+		local function getSearchRadius(vertId: VertexId?): number
+			local kDefaultSearchRadius = 4.0
+			local searchRadius = kDefaultSearchRadius
+			if vertId then
+				local vert = mVertices[vertId]
+				if vert then
+					for _, triId in vert.triangles do
+						local tri = mTriangles[triId]
+						if tri then
+							for _, part in tri.parts do
+								local maxSize = math.max(part.Size.X, part.Size.Y, part.Size.Z)
+								searchRadius = math.max(searchRadius, maxSize * 1.5)
+							end
+						end
+					end
+				end
+			end
+			return searchRadius
+		end
+
+		-- Seed the queue with starting positions
+		for _, seed in seeds do
+			table.insert(exploreQueue, seed)
+		end
+
+		while #exploreQueue > 0 do
+			local pos = table.remove(exploreQueue, 1) :: Vector3
+			local posHash = hashVertex(pos)
+			if explored[posHash] then continue end
+			explored[posHash] = true
+
+			-- Skip if outside radius of all seeds
+			local withinRadius = false
+			for _, seed in seeds do
+				if (pos - seed).Magnitude <= radius then
+					withinRadius = true
+					break
+				end
+			end
+			if not withinRadius then continue end
+
+			-- Check if this is an already-known vertex
+			local vertId = mSpatialHash[posHash]
+
+			-- Walk existing topology from this vertex (cheap, no workspace query)
+			if vertId then
+				local vert = mVertices[vertId]
+				if vert then
+					for _, triId in vert.triangles do
+						collectTriangle(triId)
+					end
+				end
+			end
+
+			-- Only do a workspace query if this is an unknown position (bootstrap)
+			-- or a boundary vertex (may have undiscovered adjacent parts)
+			if not vertId or isVertexOnBoundary(vertId) then
+				-- Cap search radius so we don't discover parts beyond the requested region
+				local distToClosestSeed = math.huge
+				for _, seed in seeds do
+					distToClosestSeed = math.min(distToClosestSeed, (pos - seed).Magnitude)
+				end
+				local remainingRadius = radius - distToClosestSeed
+				local searchRadius = math.min(getSearchRadius(vertId), math.max(remainingRadius, 0))
+				local nearbyParts = workspace:GetPartBoundsInRadius(pos, searchRadius)
+				for _, part in nearbyParts do
+					if not part:IsA("BasePart") then continue end
+					local triId = discoverPart(part, pos)
+					if triId then
+						collectTriangle(triId)
+						-- Also collect other triangles linked to this part (e.g., Block's second tri)
+						local headId = mPartToTriangles[part]
+						if headId then
+							local tri: Triangle? = mTriangles[headId]
+							while tri do
+								collectTriangle(tri.id)
+								tri = tri.next
+							end
 						end
 					end
 				end
