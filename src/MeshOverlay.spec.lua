@@ -14,15 +14,8 @@ local TestTypes = require("./TestTypes")
 
 local e = React.createElement
 
-local THICKNESS = 0.2
+local THICKNESS = 1
 local SPACING = 4
-
--- Wait for N render frames so 3D adornments appear in CaptureService
-local function waitFrames(n: number)
-	for _ = 1, n do
-		RunService.RenderStepped:Wait()
-	end
-end
 
 -- Build a small grid of triangles and return the mesh + container folder
 local function buildTestGrid(): (createTriangleMesh.TriangleMesh, Folder)

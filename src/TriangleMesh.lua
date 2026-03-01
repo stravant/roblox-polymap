@@ -63,6 +63,7 @@ export type TriangleMesh = {
 	removeTriangle: (triangleId: number) -> (),
 	moveVertex: (vertexId: number, newPosition: Vector3, thickness: number, props: fillTriangle.TriangleProps?) -> (),
 	moveVertices: (moves: { [number]: Vector3 }, thickness: number, props: fillTriangle.TriangleProps?) -> (),
+	setThicknessHint: (thickness: number) -> (),
 
 	-- Queries (topology)
 	getAdjacentTriangles: (triangleId: TriangleId) -> { TriangleId },
@@ -88,7 +89,9 @@ local function hashEdge(v1: Vector3, v2: Vector3): EdgeHash
 	return hashVertex(v1) + hashVertex(v2)
 end
 
-local function createTriangleMesh(): TriangleMesh
+local function createTriangleMesh(thicknessHint: number?): TriangleMesh
+	thicknessHint = thicknessHint or 1.0
+
 	local mTriangles = {} :: {[TriangleId]: Triangle}
 	local mVertices = {} :: {[VertexId]: Vertex}
 	local mEdges = {} :: {[EdgeId]: Edge}

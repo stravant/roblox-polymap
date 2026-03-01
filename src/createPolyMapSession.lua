@@ -111,7 +111,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local session = {}
 	local changeSignal = Signal.new()
 
-	local mMesh = createTriangleMesh()
+	local mMesh = createTriangleMesh(currentSettings.Thickness)
 
 	-- Selection state
 	local mSelectedVertices: { [number]: boolean } = {}
@@ -1625,6 +1625,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	session.ChangeSignal = changeSignal
 	session.Update = function()
 		fixedSelection.SelectionChanged:Fire()
+		mMesh.setThicknessHint(currentSettings.Thickness)
 	end
 	session.Destroy = function()
 		teardown()

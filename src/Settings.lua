@@ -54,7 +54,7 @@ local function loadSettings(plugin: Plugin): PolyMapSettings
 		DeleteTarget = raw.DeleteTarget or "Face",
 		DeleteRadius = raw.DeleteRadius or 0,
 		PaintRadius = raw.PaintRadius or 0,
-		Thickness = raw.Thickness or 0.2,
+		Thickness = 1, --raw.Thickness or 0.2, -- TODO uncomment
 		InfluenceRadius = raw.InfluenceRadius or 10,
 		InfluenceFalloff = raw.InfluenceFalloff or "Smooth",
 		GridType = raw.GridType or "Square",
