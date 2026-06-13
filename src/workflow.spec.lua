@@ -568,4 +568,90 @@ return function(t: TestTypes.TestContext)
 		folder:Destroy()
 		sweep()
 	end)
+
+	t.test("the move tool keeps the surface consistently oriented and crack-free", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 4
+			settings.GridHeight = 4
+			session.GenerateGrid()
+
+			-- Sculpt with the move tool.
+			local sum = Vector3.zero
+			local cnt = 0
+			for _, v in mesh.getVertices() do
+				sum += v.position
+				cnt += 1
+			end
+			local c = Vector3.new(sum.X / cnt, 0, sum.Z / cnt)
+			local function moveNearest(xz: Vector3, dy: number)
+				local best: Vector3? = nil
+				local bestD = math.huge
+				for _, v in mesh.getVertices() do
+					local d = (Vector3.new(v.position.X, 0, v.position.Z) - xz).Magnitude
+					if d < bestD then
+						bestD = d
+						best = v.position
+					end
+				end
+				if best then
+					session.SelectVerticesNear({ best })
+					session.MoveSelectedVertices(Vector3.new(0, dy, 0))
+				end
+			end
+			moveNearest(c, 8)
+			moveNearest(c + Vector3.new(4, 0, 4), 5)
+			moveNearest(c + Vector3.new(-4, 0, -4), -3)
+
+			local function countFlipped(m): number
+				local function edgeDir(tri, vA: number, vB: number): number
+					local v = tri.vertices
+					for i = 1, 3 do
+						local j = i % 3 + 1
+						if v[i] == vA and v[j] == vB then
+							return 1
+						elseif v[i] == vB and v[j] == vA then
+							return -1
+						end
+					end
+					return 0
+				end
+				local f = 0
+				for _, e in m.getEdges() do
+					if #e.triangles == 2 then
+						local t1 = m.getTriangle(e.triangles[1])
+						local t2 = m.getTriangle(e.triangles[2])
+						if t1 and t2 then
+							local d1 = edgeDir(t1, e.v1, e.v2)
+							if d1 ~= 0 and d1 == edgeDir(t2, e.v1, e.v2) then
+								f += 1
+							end
+						end
+					end
+				end
+				return f
+			end
+
+			-- The live mesh stays consistently oriented through the moves.
+			t.expect(countFlipped(mesh)).toBe(0)
+
+			-- And the world geometry the move tool produced rediscovers cleanly:
+			-- same topology, no cracks, consistently oriented.
+			local correctTris = countDict(mesh.getTriangles())
+			local correctVerts = countDict(mesh.getVertices())
+			local correctBoundary = #mesh.getBoundaryEdges()
+			local mesh2 = createTriangleMesh()
+			for _, tri in mesh.getTriangles() do
+				local a = mesh.getVertex(tri.vertices[1])
+				local b = mesh.getVertex(tri.vertices[2])
+				local d = mesh.getVertex(tri.vertices[3])
+				if a and b and d then
+					mesh2.discoverRegion({ (a.position + b.position + d.position) / 3 }, 8)
+				end
+			end
+			t.expect(countDict(mesh2.getTriangles())).toBe(correctTris)
+			t.expect(countDict(mesh2.getVertices())).toBe(correctVerts)
+			t.expect(#mesh2.getBoundaryEdges()).toBe(correctBoundary)
+			t.expect(countFlipped(mesh2)).toBe(0)
+		end)
+	end)
 end
