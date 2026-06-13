@@ -166,6 +166,11 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local mUndoSelections: { { Vector3 } } = {}
 	local mRedoSelections: { { Vector3 } } = {}
 
+	-- Most recent non-empty rediscovery seeds. Lets redoing a creation after it
+	-- was fully undone (current mesh empty, so nothing to seed from) still
+	-- re-find the restored parts.
+	local mLastRediscoverSeeds: { Vector3 } = {}
+
 	local function captureSelectionPositions(): { Vector3 }
 		local positions: { Vector3 } = {}
 		for vid in mSelectedVertices do
@@ -1555,6 +1560,14 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		for _, vertex in mMesh.getVertices() do
 			table.insert(seeds, vertex.position)
 		end
+		-- When the current mesh is empty -- e.g. redoing a creation after it was
+		-- fully undone -- there are no live vertices to seed from, so fall back to
+		-- the most recent known positions to re-find the restored parts.
+		if #seeds > 0 then
+			mLastRediscoverSeeds = seeds
+		else
+			seeds = mLastRediscoverSeeds
+		end
 		mMesh.clear()
 		if #seeds > 0 then
 			mMesh.discoverRegion(seeds, math.huge)
@@ -2240,6 +2253,156 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			end
 		elseif recording then
 			ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Cancel)
+		end
+		changeSignal:Fire()
+	end
+
+	----------------------------------------------------------------------
+	-- Programmatic actions
+	--
+	-- These drive the same mesh mutations and undo machinery as the
+	-- mouse-driven handlers above, but parameterized by explicit world
+	-- positions instead of the live cursor. They let the editor be scripted
+	-- and, in particular, let workflow.spec.lua exercise full editing
+	-- sequences (add / adjust / paint) with undo/redo end-to-end.
+	----------------------------------------------------------------------
+
+	-- Replace the selection with the vertices nearest each given world position.
+	session.SelectVerticesNear = function(positions: { Vector3 })
+		local newSelection: { [number]: boolean } = {}
+		for _, pos in positions do
+			local vid = mMesh.findVertexNear(pos, 0.5)
+			if vid then
+				newSelection[vid] = true
+			end
+		end
+		mSelectedVertices = newSelection
+		mSavedVertexPositions = {}
+		changeSignal:Fire()
+	end
+
+	-- Add a triangle off the boundary edge nearest nearEdgeWorldPos, with its
+	-- third corner at apexWorldPos. Mirrors handleAddClick's "plane" placement,
+	-- but selects the boundary edge via getBoundaryEdges() (which returns Edge
+	-- objects directly) rather than findNearestBoundaryEdge's string-key lookup.
+	session.AddTriangleOffEdge = function(nearEdgeWorldPos: Vector3, apexWorldPos: Vector3): number?
+		mMesh.discoverRegion({ nearEdgeWorldPos }, 15)
+		local edge: any = nil
+		local bestDist = math.huge
+		for _, candidate in mMesh.getBoundaryEdges() do
+			local cv1 = mMesh.getVertex(candidate.v1)
+			local cv2 = mMesh.getVertex(candidate.v2)
+			if cv1 and cv2 then
+				local mid = (cv1.position + cv2.position) / 2
+				local dist = (mid - nearEdgeWorldPos).Magnitude
+				if dist < bestDist then
+					bestDist = dist
+					edge = candidate
+				end
+			end
+		end
+		if not edge then
+			return nil
+		end
+		local v1 = mMesh.getVertex(edge.v1)
+		local v2 = mMesh.getVertex(edge.v2)
+		if not (v1 and v2) then
+			return nil
+		end
+
+		-- Face the new triangle the same way as the edge's parent, deriving the
+		-- hint from the parent normal rather than the apex (as handleAddClick does).
+		local hintPoint = apexWorldPos
+		local parentTriId = edge.triangles[1]
+		if parentTriId then
+			local parentTri = mMesh.getTriangle(parentTriId)
+			if parentTri then
+				local edgeMid = (v1.position + v2.position) / 2
+				hintPoint = edgeMid + parentTri.normal * 0.5
+			end
+		end
+
+		pushUndoSnapshot()
+		local recording = ChangeHistoryService:TryBeginRecording("PolyMap Add Triangle")
+		local triId = mMesh.addTriangle(
+			v1.position, v2.position, apexWorldPos,
+			currentSettings.Thickness, workspace.Terrain, getTriangleProps(), hintPoint
+		)
+		if recording then
+			ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+		else
+			ChangeHistoryService:SetWaypoint("PolyMap Add Triangle")
+		end
+		changeSignal:Fire()
+		return triId
+	end
+
+	-- Paint the triangle under worldPos (plus PaintRadius walk) using the current
+	-- paint settings. Mirrors applyPaintAtCursor's colour/material application.
+	session.PaintAt = function(worldPos: Vector3)
+		mMesh.discoverRegion({ worldPos }, 15)
+		local hitPart: BasePart? = nil
+		for _, p in workspace:GetPartBoundsInRadius(worldPos, 1) do
+			if p:IsA("BasePart") then
+				hitPart = p :: BasePart
+				break
+			end
+		end
+		if not hitPart then
+			return
+		end
+
+		pushUndoSnapshot()
+		local recording = ChangeHistoryService:TryBeginRecording("PolyMap Paint")
+
+		local partsToPaint: { BasePart } = {}
+		local triId = mMesh.getPartTriangle(hitPart, worldPos)
+		if triId then
+			local tri = mMesh.getTriangle(triId)
+			if tri then
+				for _, part in tri.parts do
+					table.insert(partsToPaint, part)
+				end
+			end
+			local radius = currentSettings.PaintRadius
+			if radius > 0 then
+				for _, nearTriId in mMesh.walkSurface(triId, worldPos, radius) do
+					local nearTri = mMesh.getTriangle(nearTriId)
+					if nearTri then
+						for _, part in nearTri.parts do
+							table.insert(partsToPaint, part)
+						end
+					end
+				end
+			end
+		else
+			table.insert(partsToPaint, hitPart)
+		end
+
+		local c = currentSettings.PaintColor
+		local color = Color3.new(c[1], c[2], c[3])
+		local mat = (Enum.Material :: any)[currentSettings.PaintMaterial]
+		local paintStrength = currentSettings.PaintStrength
+		local paintTarget = currentSettings.PaintTarget
+		local doColor = paintTarget ~= "Material"
+		local doMaterial = paintTarget ~= "Color"
+		for _, part in partsToPaint do
+			if doColor then
+				if paintStrength >= 1.0 then
+					part.Color = color
+				else
+					part.Color = part.Color:Lerp(color, paintStrength)
+				end
+			end
+			if doMaterial and mat then
+				part.Material = mat
+			end
+		end
+
+		if recording then
+			ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+		else
+			ChangeHistoryService:SetWaypoint("PolyMap Paint")
 		end
 		changeSignal:Fire()
 	end
