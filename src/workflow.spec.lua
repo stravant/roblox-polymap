@@ -1236,4 +1236,45 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("Paint discovers the radius region on a freshly opened mesh", function()
+		withSession(function(session, mesh, settings)
+			-- Build grid PARTS in the world WITHOUT discovering them into the session
+			-- mesh -- the "just opened the tool on an existing place" state, where
+			-- only on-demand discovery has happened.
+			local generateGrid = require("./generateGrid")
+			generateGrid({
+				GridType = "Square",
+				Width = 6,
+				Height = 6,
+				Spacing = 4,
+				Origin = CFrame.new(kRegionCenter),
+				Thickness = 0.2,
+				Parent = workspace.Terrain,
+				Props = { Color = Color3.new(0.5, 0.5, 0.5), Material = Enum.Material.Plastic },
+			})
+			t.expect(countDict(mesh.getTriangles())).toBe(0) -- nothing discovered yet
+
+			settings.Mode = "Paint"
+			settings.PaintTarget = "Color"
+			settings.PaintStrength = 1.0
+			settings.PaintColor = { 1, 0, 0 }
+			settings.PaintRadius = 8
+
+			session.PaintAt(kRegionCenter)
+
+			-- A radius-8 brush must colour a region of triangles -- not just the one
+			-- under the cursor, which is all an un-discovered surface walk would find.
+			local redCount = 0
+			for _, p in workspace:GetPartBoundsInRadius(kRegionCenter, 12) do
+				if p:IsA("BasePart") then
+					local col = (p :: BasePart).Color
+					if math.abs(col.R - 1) < 0.05 and col.G < 0.05 and col.B < 0.05 then
+						redCount += 1
+					end
+				end
+			end
+			t.expect(redCount > 10).toBeTruthy()
+		end)
+	end)
+
 end

@@ -450,6 +450,18 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return worldPos, nil
 	end
 
+	-- Walk the surface within radius of worldPos, discovering it first. walkSurface
+	-- only traverses ALREADY-discovered triangles, and on a freshly opened tool only
+	-- the single part directly under the cursor has been discovered -- so the brush
+	-- tools (and their hover preview) would find an empty/incomplete region. The
+	-- Move tool's influence drag already discovers-then-walks the same way; this
+	-- gives the brush tools the same. discoverRegion is incremental, so repeated
+	-- calls as the cursor moves only discover newly-entered geometry.
+	local function discoverAndWalkSurface(seedTriangleId: number, worldPos: Vector3, radius: number)
+		mMesh.discoverRegion({ worldPos }, radius)
+		return mMesh.walkSurface(seedTriangleId, worldPos, radius)
+	end
+
 	local function updateHover()
 		-- Leaving Add mode abandons any in-progress triangle (edge grab or fresh
 		-- points), so stale state doesn't reappear on returning to Add.
@@ -518,7 +530,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					-- Face mode: hover the triangle(s) that would be affected
 					local radius = currentSettings.DeleteRadius
 					if radius > 0 and hitTriangleId then
-						newHoverTriangles = mMesh.walkSurface(hitTriangleId, worldPos, radius)
+						newHoverTriangles = discoverAndWalkSurface(hitTriangleId, worldPos, radius)
 					elseif result and result.Instance:IsA("BasePart") then
 						local triId = mMesh.getPartTriangle(result.Instance :: BasePart, result.Position)
 						if triId then
@@ -530,7 +542,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			if mode == "Paint" then
 				local radius = if currentSettings.PaintEyedropper ~= "None" then 0 else currentSettings.PaintRadius
 				if radius > 0 and hitTriangleId then
-					newHoverTriangles = mMesh.walkSurface(hitTriangleId, worldPos, radius)
+					newHoverTriangles = discoverAndWalkSurface(hitTriangleId, worldPos, radius)
 				elseif result and result.Instance:IsA("BasePart") then
 					local triId = mMesh.getPartTriangle(result.Instance :: BasePart, result.Position)
 					if triId then
@@ -541,13 +553,13 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			if mode == "Relax" then
 				local radius = currentSettings.RelaxRadius
 				if radius > 0 and hitTriangleId then
-					newHoverTriangles = mMesh.walkSurface(hitTriangleId, worldPos, radius)
+					newHoverTriangles = discoverAndWalkSurface(hitTriangleId, worldPos, radius)
 				end
 			end
 			if mode == "Flatten" then
 				local radius = currentSettings.FlattenRadius
 				if radius > 0 and hitTriangleId then
-					newHoverTriangles = mMesh.walkSurface(hitTriangleId, worldPos, radius)
+					newHoverTriangles = discoverAndWalkSurface(hitTriangleId, worldPos, radius)
 				end
 			end
 		end
@@ -967,7 +979,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			local radius = currentSettings.DeleteRadius
 			local toRemove: { number }
 			if radius > 0 and mStrokeSeedTriangleId then
-				toRemove = mMesh.walkSurface(mStrokeSeedTriangleId, worldPos, radius)
+				toRemove = discoverAndWalkSurface(mStrokeSeedTriangleId, worldPos, radius)
 			else
 				-- Zero radius: use exact part mapping (no plane fallback)
 				if result and result.Instance:IsA("BasePart") then
@@ -1004,7 +1016,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			local partsToPaint: { BasePart } = { result.Instance :: BasePart }
 			local radius = currentSettings.PaintRadius
 			if radius > 0 and mStrokeSeedTriangleId then
-				for _, nearTriId in mMesh.walkSurface(mStrokeSeedTriangleId, result.Position, radius) do
+				for _, nearTriId in discoverAndWalkSurface(mStrokeSeedTriangleId, result.Position, radius) do
 					local tri = mMesh.getTriangle(nearTriId)
 					if tri then
 						for _, part in tri.parts do
@@ -1050,7 +1062,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local walkVertexIds: { number }?
 		if mStrokeSeedTriangleId then
 			local _
-			_, walkVertexIds = mMesh.walkSurface(mStrokeSeedTriangleId, worldPos.hit, radius)
+			_, walkVertexIds = discoverAndWalkSurface(mStrokeSeedTriangleId, worldPos.hit, radius)
 		else
 			mMesh.discoverRegion({worldPos.hit}, radius + 5)
 		end
@@ -1161,7 +1173,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local walkVertexIds: { number }?
 		if mStrokeSeedTriangleId then
 			local _
-			_, walkVertexIds = mMesh.walkSurface(mStrokeSeedTriangleId, worldPos.hit, radius)
+			_, walkVertexIds = discoverAndWalkSurface(mStrokeSeedTriangleId, worldPos.hit, radius)
 		else
 			mMesh.discoverRegion({worldPos.hit}, radius + 5)
 		end
@@ -2243,7 +2255,6 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	-- Paint the triangle under worldPos (plus PaintRadius walk) using the current
 	-- paint settings. Mirrors applyPaintAtCursor's colour/material application.
 	session.PaintAt = function(worldPos: Vector3)
-		mMesh.discoverRegion({ worldPos }, 15)
 		local hitPart: BasePart? = nil
 		for _, p in workspace:GetPartBoundsInRadius(worldPos, 1) do
 			if p:IsA("BasePart") then
@@ -2254,6 +2265,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		if not hitPart then
 			return
 		end
+		-- Mirror applyPaintAtCursor's discovery: discover the hit part, then the
+		-- radius region just before walking it (see discoverAndWalkSurface).
+		mMesh.discoverPart(hitPart, worldPos)
 
 		pushUndoSnapshot()
 		local recording = ChangeHistoryService:TryBeginRecording("PolyMap Paint")
@@ -2269,7 +2283,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			end
 			local radius = currentSettings.PaintRadius
 			if radius > 0 then
-				for _, nearTriId in mMesh.walkSurface(triId, worldPos, radius) do
+				for _, nearTriId in discoverAndWalkSurface(triId, worldPos, radius) do
 					local nearTri = mMesh.getTriangle(nearTriId)
 					if nearTri then
 						for _, part in nearTri.parts do
