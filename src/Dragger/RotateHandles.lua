@@ -29,7 +29,9 @@ local RotateHandleDefinitions = {
 		Color = Colors.X_AXIS,
 		RadiusOffset = 0.00,
 		View = PartialRotateHandleView,
-		AngleOffset = math.rad(90),
+		-- Arcs sit at +-Z (in the X-Z plane) rather than +-Y, lining up with the Y
+		-- ring and Z arcs so every handle reads in the same horizontal plane.
+		AngleOffset = 0,
 		LocalAxis = Vector3.xAxis,
 	},
 	-- Y is the primary heading rotation: a full ring, drawn smaller so it reads as
