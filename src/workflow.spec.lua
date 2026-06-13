@@ -654,4 +654,34 @@ return function(t: TestTypes.TestContext)
 			t.expect(countFlipped(mesh2)).toBe(0)
 		end)
 	end)
+
+	t.test("moving a region down then undoing restores the original mesh", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 4
+			settings.GridHeight = 4
+			session.GenerateGrid()
+			local n0T = countDict(mesh.getTriangles())
+			local n0V = countDict(mesh.getVertices())
+			local n0B = #mesh.getBoundaryEdges()
+			t.expect(n0T > 0).toBeTruthy()
+
+			-- Move a large connected region down -- like a single move-tool drag with
+			-- the influence radius -- so every moved vertex ends up far from where it
+			-- started.
+			local allPos: { Vector3 } = {}
+			for _, v in mesh.getVertices() do
+				table.insert(allPos, v.position)
+			end
+			session.SelectVerticesNear(allPos)
+			session.MoveSelectedVertices(Vector3.new(0, -8, 0))
+
+			-- Undo must bring the original flat grid back, not an empty/broken mesh.
+			ChangeHistoryService:Undo()
+			settle()
+
+			t.expect(countDict(mesh.getTriangles())).toBe(n0T)
+			t.expect(countDict(mesh.getVertices())).toBe(n0V)
+			t.expect(#mesh.getBoundaryEdges()).toBe(n0B)
+		end)
+	end)
 end

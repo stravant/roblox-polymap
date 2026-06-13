@@ -1591,7 +1591,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 	end)
 
-	local function rediscoverMesh()
+	local function rediscoverMesh(extraSeeds: { Vector3 }?)
 		-- Collect all known vertex positions before clearing, then clear and
 		-- rediscover from scratch. After an undo/redo the parts have been
 		-- reverted (moved, or deleted-then-restored, etc.), so we must rebuild
@@ -1604,9 +1604,19 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		for _, vertex in mMesh.getVertices() do
 			table.insert(seeds, vertex.position)
 		end
-		-- When the current mesh is empty -- e.g. redoing a creation after it was
-		-- fully undone -- there are no live vertices to seed from, so fall back to
-		-- the most recent known positions to re-find the restored parts.
+		-- Also seed from the snapshot being restored by this undo/redo. The in-
+		-- memory mesh still holds the POST-op positions (e.g. a moved-down region),
+		-- but the parts now sit at their reverted positions, so the in-memory seeds
+		-- can ALL miss them -- leaving an empty mesh. The restored snapshot matches
+		-- the reverted world, and the unbounded walk recovers the connected mesh
+		-- from any one good seed.
+		if extraSeeds then
+			for _, p in extraSeeds do
+				table.insert(seeds, p)
+			end
+		end
+		-- When there is still nothing to seed from -- e.g. redoing a creation after
+		-- it was fully undone -- fall back to the most recent known positions.
 		if #seeds > 0 then
 			mLastRediscoverSeeds = seeds
 		else
@@ -1624,10 +1634,11 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 		-- Save current selection positions for redo
 		table.insert(mRedoSelections, captureSelectionPositions())
-		-- Clear and rediscover mesh from the reverted parts
-		rediscoverMesh()
-		-- Restore selection from saved positions
+		-- The undo snapshot holds the pre-op positions, which match the reverted
+		-- world -- seed rediscovery from them so a fully-moved region isn't lost.
 		local undoSelection = table.remove(mUndoSelections)
+		rediscoverMesh(undoSelection)
+		-- Restore selection from saved positions
 		if undoSelection then
 			restoreSelectionFromPositions(undoSelection)
 		else
@@ -1647,10 +1658,11 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 		-- Save current selection positions for undo
 		table.insert(mUndoSelections, captureSelectionPositions())
-		-- Clear and rediscover mesh from the re-applied parts
-		rediscoverMesh()
-		-- Restore selection from saved positions
+		-- The redo snapshot holds the post-op positions, which match the re-applied
+		-- world -- seed rediscovery from them for the same reason as undo.
 		local redoSelection = table.remove(mRedoSelections)
+		rediscoverMesh(redoSelection)
+		-- Restore selection from saved positions
 		if redoSelection then
 			restoreSelectionFromPositions(redoSelection)
 		else
