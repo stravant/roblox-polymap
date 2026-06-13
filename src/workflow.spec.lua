@@ -11,6 +11,7 @@ local ChangeHistoryService = game:GetService("ChangeHistoryService")
 local TestTypes = require("./TestTypes")
 local createPolyMapSession = require("./createPolyMapSession")
 local createTriangleMesh = require("./TriangleMesh")
+local fillTriangle = require("./fillTriangle")
 local Settings = require("./Settings")
 
 -- Grids spawn relative to the camera; pin it so geometry lands in a known,
@@ -474,5 +475,97 @@ return function(t: TestTypes.TestContext)
 			t.expect(interiorBoundary).toBe(0)
 			t.expect(#mesh2.getBoundaryEdges()).toBe(flatBoundary)
 		end)
+	end)
+
+	t.test("incremental discovery of a clean curved surface stays coherent and consistently oriented", function()
+		-- Build the surface DIRECTLY with fillTriangle (uniform winding) so this
+		-- discovery test is not contaminated by the move tool's orientation
+		-- handling -- the two concerns are tested separately.
+		local region = Vector3.new(7000, 0, 0)
+		local function sweep()
+			for _, p in workspace:GetPartBoundsInRadius(region, 80) do
+				if p:IsA("BasePart") then
+					p:Destroy()
+				end
+			end
+		end
+		sweep()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		local n = 5
+		local spacing = 4
+		local thickness = 0.2
+		local function height(x: number, z: number): number
+			local dx = x - region.X
+			local dz = z - region.Z
+			return 5 * math.exp(-(dx * dx + dz * dz) / 60)
+		end
+		local function vAt(i: number, j: number): Vector3
+			local x = region.X - (n * spacing) / 2 + i * spacing
+			local z = region.Z - (n * spacing) / 2 + j * spacing
+			return Vector3.new(x, height(x, z), z)
+		end
+		for i = 0, n - 1 do
+			for j = 0, n - 1 do
+				local tl, tr = vAt(i, j), vAt(i + 1, j)
+				local bl, br = vAt(i, j + 1), vAt(i + 1, j + 1)
+				fillTriangle(tl, tr, bl, thickness, folder)
+				fillTriangle(tr, br, bl, thickness, folder)
+			end
+		end
+
+		-- Discover incrementally -- a small region seeded at each triangle's
+		-- centroid, simulating hovering over several areas in turn. The centroid
+		-- lies on that triangle's (front) face, exactly like a raycast hit.
+		local mesh = createTriangleMesh()
+		for i = 0, n - 1 do
+			for j = 0, n - 1 do
+				local tl, tr = vAt(i, j), vAt(i + 1, j)
+				local bl, br = vAt(i, j + 1), vAt(i + 1, j + 1)
+				mesh.discoverRegion({ (tl + tr + bl) / 3 }, 6)
+				mesh.discoverRegion({ (tr + br + bl) / 3 }, 6)
+			end
+		end
+
+		-- Exact grid topology: (n+1)^2 vertices, 2 n^2 triangles, 4n perimeter edges.
+		-- Any excess means cracks (unmerged vertices / unmerged wedge pairs).
+		t.expect(countDict(mesh.getVertices())).toBe((n + 1) * (n + 1))
+		t.expect(countDict(mesh.getTriangles())).toBe(2 * n * n)
+		t.expect(#mesh.getBoundaryEdges()).toBe(4 * n)
+
+		-- Consistent orientation: every shared (interior) edge is traversed in
+		-- opposite directions by its two triangles. A flipped triangle traverses
+		-- it the same way -- the "some go one way, some the other" bug.
+		local function edgeDir(tri, vA: number, vB: number): number
+			local v = tri.vertices
+			for i = 1, 3 do
+				local j = i % 3 + 1
+				if v[i] == vA and v[j] == vB then
+					return 1
+				elseif v[i] == vB and v[j] == vA then
+					return -1
+				end
+			end
+			return 0
+		end
+		local flipped = 0
+		for _, edge in mesh.getEdges() do
+			if #edge.triangles == 2 then
+				local t1 = mesh.getTriangle(edge.triangles[1])
+				local t2 = mesh.getTriangle(edge.triangles[2])
+				if t1 and t2 then
+					local d1 = edgeDir(t1, edge.v1, edge.v2)
+					local d2 = edgeDir(t2, edge.v1, edge.v2)
+					if d1 ~= 0 and d1 == d2 then
+						flipped += 1
+					end
+				end
+			end
+		end
+		t.expect(flipped).toBe(0)
+
+		folder:Destroy()
+		sweep()
 	end)
 end

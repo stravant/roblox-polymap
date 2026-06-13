@@ -78,6 +78,10 @@ export type TriangleMesh = {
 	clear: () -> (),
 }
 
+-- Distance under which two positions are treated as the same vertex. Must stay
+-- well below any part thickness so the two faces of a thin wedge never collapse.
+local kVertexMergeTolerance = 0.02
+
 local function hashVertex(position: Vector3): VertexHash
 	local asVector = (position :: any) :: vector
 	local result = (vector.floor((asVector / 0.01) + vector.one * 0.513456))
@@ -127,6 +131,24 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		local existing = mSpatialHash[hash]
 		if existing then
 			return existing
+		end
+		-- A position that should be the same vertex can land in a neighbouring
+		-- hash cell when it sits on a cell boundary (two wedges meeting at an edge
+		-- reconstruct the shared corner with tiny FP differences). Check adjacent
+		-- cells for a near-duplicate before creating a new vertex.
+		for dx = -1, 1 do
+			for dy = -1, 1 do
+				for dz = -1, 1 do
+					local nvid = mSpatialHash[hash + Vector3.new(dx, dy, dz)]
+					if nvid then
+						local nv = mVertices[nvid]
+						if nv and (nv.position - position).Magnitude < kVertexMergeTolerance then
+							mSpatialHash[hash] = nvid
+							return nvid
+						end
+					end
+				end
+			end
 		end
 		local id = mNextVertexId
 		mNextVertexId += 1
@@ -732,6 +754,67 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		return result
 	end
 
+	-- Make every connected component consistently oriented: BFS the triangle
+	-- adjacency graph and flip any neighbour whose winding disagrees (two
+	-- consistently-oriented triangles traverse their shared edge in opposite
+	-- directions). Per-hint orientation gets each triangle's outward side right
+	-- but, with split wedges and incremental discovery, can disagree between
+	-- neighbours; this pass reconciles them. The first triangle of each component
+	-- (oriented toward the clicked side) sets that component's global direction.
+	local function orientConsistently()
+		local visited = {} :: {[TriangleId]: boolean}
+		for startId in mTriangles do
+			if visited[startId] then
+				continue
+			end
+			visited[startId] = true
+			local queue = { startId }
+			local qh = 1
+			while qh <= #queue do
+				local tid = queue[qh]
+				qh += 1
+				local tri = mTriangles[tid]
+				if not tri then
+					continue
+				end
+				local verts = tri.vertices
+				for i = 1, 3 do
+					local j = if i == 3 then 1 else i + 1
+					local va, vb = verts[i], verts[j]
+					local pva, pvb = mVertices[va], mVertices[vb]
+					if not (pva and pvb) then
+						continue
+					end
+					local eid = mEdgeLookup[hashEdge(pva.position, pvb.position)]
+					local edge = if eid then mEdges[eid] else nil
+					if not edge then
+						continue
+					end
+					for _, ntid in edge.triangles do
+						local nt = mTriangles[ntid]
+						if ntid ~= tid and nt and not visited[ntid] then
+							visited[ntid] = true
+							-- Inconsistent if the neighbour also traverses va -> vb.
+							local sameDir = false
+							for k = 1, 3 do
+								local l = if k == 3 then 1 else k + 1
+								if nt.vertices[k] == va and nt.vertices[l] == vb then
+									sameDir = true
+									break
+								end
+							end
+							if sameDir then
+								nt.vertices = { nt.vertices[1], nt.vertices[3], nt.vertices[2] }
+								nt.normal = -nt.normal
+							end
+							table.insert(queue, ntid)
+						end
+					end
+				end
+			end
+		end
+	end
+
 	local function discoverPart(part: BasePart, hintPoint: Vector3): number?
 		-- Check if already discovered for this face
 		local existing = getPartTriangle(part, hintPoint)
@@ -770,8 +853,15 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			end
 
 			local natural = computeNormal(v1, v2, v3)
-			local centroid = (v1 + v2 + v3) / 3
-			local toHint = hintPoint - centroid
+			-- Orient the face normal toward the hint, measured from the PART
+			-- CENTRE rather than the (coplanar) face centroid. A hint -- the click
+			-- point, or an adjacent already-discovered vertex as the walk expands --
+			-- lies in the face plane, so measuring from the centroid gives ~0 and a
+			-- coin-flip orientation (the source of the "some go one way, some the
+			-- other" flipping). The part centre sits half a thickness off the face,
+			-- so hint - partCentre has a clean sign toward the clicked surface side,
+			-- which then propagates outward through the walk.
+			local toHint = hintPoint - part.Position
 			local shouldInvert = natural:Dot(toHint) < 0
 
 			local v1Id = getOrCreateVertex(v1)
@@ -838,12 +928,24 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 					-- Check if this wedge shares exactly 2 vertices with THIS triangle.
 					-- Try both faces of the neighbor and pick the one sharing more.
 					-- Only count vertices shared with the current triangle, not all mesh vertices.
-					local currentVertHashes = {} :: {[VertexHash]: boolean}
+					-- Match coincident corners by DISTANCE, not exact hash. On a
+					-- curved surface the two wedges' shared front corners differ by
+					-- tiny FP amounts that can straddle hash cells, which mis-picked
+					-- the neighbour's face and landed its corner on the back face.
+					local currentPositions = {} :: {Vector3}
 					for _, ovid in orderedVerts do
 						local ov = mVertices[ovid]
 						if ov then
-							currentVertHashes[hashVertex(ov.position)] = true
+							table.insert(currentPositions, ov.position)
 						end
+					end
+					local function sharedWithCurrent(p: Vector3): boolean
+						for _, cp in currentPositions do
+							if (cp - p).Magnitude < kVertexMergeTolerance then
+								return true
+							end
+						end
+						return false
 					end
 					local hintA = nearPart.CFrame.Position + nearPart.CFrame.RightVector
 					local hintB = nearPart.CFrame.Position - nearPart.CFrame.RightVector
@@ -851,10 +953,10 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 					local nv1b, nv2b, nv3b = getWedgeVertices(nearPart, hintB)
 					local sharedA, sharedB = 0, 0
 					for _, nv in {nv1a, nv2a, nv3a} do
-						if currentVertHashes[hashVertex(nv)] then sharedA += 1 end
+						if sharedWithCurrent(nv) then sharedA += 1 end
 					end
 					for _, nv in {nv1b, nv2b, nv3b} do
-						if currentVertHashes[hashVertex(nv)] then sharedB += 1 end
+						if sharedWithCurrent(nv) then sharedB += 1 end
 					end
 					local nv1, nv2, nv3
 					if sharedA >= sharedB then
@@ -866,8 +968,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 					local sharedCount = math.max(sharedA, sharedB)
 					local unsharedNeighborVert: Vector3? = nil
 					for _, nv in neighborVerts do
-						local hash = hashVertex(nv)
-						if not currentVertHashes[hash] then
+						if not sharedWithCurrent(nv) then
 							unsharedNeighborVert = nv
 						end
 					end
@@ -894,7 +995,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 								if ov then
 									local isShared = false
 									for _, nv in neighborVerts do
-										if hashVertex(ov.position) == hashVertex(nv) then
+										if (ov.position - nv).Magnitude < kVertexMergeTolerance then
 											isShared = true
 											break
 										end
@@ -1004,9 +1105,11 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 									local mv3Id = getOrCreateVertex(allPositions[3])
 
 									local mergedNatural = computeNormal(allPositions[1], allPositions[2], allPositions[3])
-									local mergedCentroid = (allPositions[1] + allPositions[2] + allPositions[3]) / 3
-									local mergedToHint = hintPoint - mergedCentroid
-									local mergedInvert = mergedNatural:Dot(mergedToHint) < 0
+									-- Inherit orientation from the single-wedge triangle we just
+									-- oriented (finalNormal). mergedNatural is a different winding
+									-- than the single wedge, so re-deriving from the hint can flip
+									-- the merged face relative to its neighbours.
+									local mergedInvert = mergedNatural:Dot(finalNormal) < 0
 
 									local mergedVerts: {VertexId}
 									local mergedNormal: Vector3
@@ -1326,6 +1429,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			end
 		end
 
+		orientConsistently()
 		return result
 	end
 
