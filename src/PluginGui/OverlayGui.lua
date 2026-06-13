@@ -1,4 +1,6 @@
 --!strict
+local UserInputService = game:GetService("UserInputService")
+
 local Plugin = script.Parent.Parent.Parent
 local Packages = Plugin.Packages
 
@@ -55,6 +57,24 @@ end
 function OverlayGui.Display(_props: {})
 	local overlayContext = OverlayGui.use()
 	local frameRef = React.useRef(nil)
+
+	-- Close the popup on Escape (mirrors the click-outside backdrop). The listener
+	-- only exists while a popup is open.
+	local hasOverlay = overlayContext.Overlay ~= nil
+	local setOverlay = overlayContext.SetOverlay
+	React.useEffect(function()
+		if not hasOverlay then
+			return
+		end
+		local conn = UserInputService.InputBegan:Connect(function(input: InputObject)
+			if input.KeyCode == Enum.KeyCode.Escape then
+				setOverlay(nil)
+			end
+		end)
+		return function()
+			conn:Disconnect()
+		end
+	end, { hasOverlay, setOverlay } :: { any })
 
 	if not overlayContext.Overlay then
 		return e("Frame", {
