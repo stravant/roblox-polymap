@@ -71,7 +71,7 @@ export type TriangleMesh = {
 	walkSurface: (seedTriangleId: TriangleId, center: Vector3, radius: number) -> ({ TriangleId }, { VertexId }),
 
 	-- Discovery / Scanning
-	discoverPart: (part: BasePart, hintPoint: Vector3) -> number?,
+	discoverPart: (part: BasePart, hintPoint: Vector3, nearbyResolver: ((Vector3, number) -> { Instance })?) -> number?,
 	discoverRegion: (seeds: { Vector3 }, radius: number) -> { TriangleId },
 	getPartTriangle: (part: BasePart, hintPoint: Vector3) -> number?,
 	getPartTriangles: (part: BasePart) -> { TriangleId },
@@ -81,6 +81,19 @@ export type TriangleMesh = {
 -- Distance under which two positions are treated as the same vertex. Must stay
 -- well below any part thickness so the two faces of a thin wedge never collapse.
 local kVertexMergeTolerance = 0.02
+
+-- The eight unit sign vectors of a box's local corners, for indexing non-wedge
+-- parts by their bounding-box corners during a bulk rebuild.
+local BOX_CORNER_SIGNS = {
+	Vector3.new(1, 1, 1),
+	Vector3.new(1, 1, -1),
+	Vector3.new(1, -1, 1),
+	Vector3.new(1, -1, -1),
+	Vector3.new(-1, 1, 1),
+	Vector3.new(-1, 1, -1),
+	Vector3.new(-1, -1, 1),
+	Vector3.new(-1, -1, -1),
+}
 
 local function hashVertex(position: Vector3): VertexHash
 	local asVector = (position :: any) :: vector
@@ -916,7 +929,12 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		end
 	end
 
-	local function discoverPart(part: BasePart, hintPoint: Vector3): number?
+	-- nearbyResolver, when supplied, replaces the per-vertex
+	-- workspace:GetPartBoundsInRadius merge search with an in-memory lookup. The
+	-- unbounded rebuild (discoverRegion at radius == math.huge) passes one backed
+	-- by a prebuilt corner index, turning thousands of workspace queries per undo
+	-- into in-memory probes. Interactive callers omit it and keep the live query.
+	local function discoverPart(part: BasePart, hintPoint: Vector3, nearbyResolver: ((Vector3, number) -> { Instance })?): number?
 		-- A wedge part backs exactly one single-sided triangle. Once it is
 		-- discovered, return that triangle regardless of which face the hint is on.
 		-- Crucially we must NOT spawn a second triangle on the opposite face: grids
@@ -1017,7 +1035,9 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 				if not v then
 					continue
 				end
-				local nearbyParts = workspace:GetPartBoundsInRadius(v.position, searchRadius)
+				local nearbyParts = if nearbyResolver
+					then nearbyResolver(v.position, searchRadius)
+					else workspace:GetPartBoundsInRadius(v.position, searchRadius)
 				for _, nearPart in nearbyParts do
 					if nearPart == part then
 						continue
@@ -1645,13 +1665,133 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			return searchRadius
 		end
 
+		-- Build a corner -> {parts} spatial index from ONE bulk query covering all
+		-- seeds. Used only by the unbounded rebuild (radius == math.huge, the
+		-- undo/redo rediscovery) to feed discoverPart's merge resolver below. On
+		-- that path discoverPart runs three GetPartBoundsInRadius queries per part
+		-- to find a coplanar partner wedge to fuse -- thousands of workspace queries
+		-- per undo, the dominant cost on a large mesh. A merge partner shares an
+		-- edge (two corners) with the part, so keying each candidate part by the
+		-- hash of each of its corners turns that search into an in-memory 27-cell
+		-- probe. (Enumeration -- which undiscovered parts discoverRegion ADOPTS --
+		-- deliberately stays on the workspace query: a corner-only index there would
+		-- skip the bootstrap-by-containment case and change the discovered set.)
+		local function buildCornerIndex(seedList: { Vector3 }): ({ [VertexHash]: { BasePart } }, Vector3, Vector3)
+			local lo, hi = seedList[1], seedList[1]
+			for _, s in seedList do
+				lo = lo:Min(s)
+				hi = hi:Max(s)
+			end
+			-- A part on the mesh has every corner among the seeds, so its bounds
+			-- overlap the seed AABB; the small margin only guards FP at the boundary.
+			local center = (lo + hi) / 2
+			local size = (hi - lo) + Vector3.one * 4
+			local params = OverlapParams.new()
+			params.MaxParts = 1000000
+
+			local index: { [VertexHash]: { BasePart } } = {}
+			local function add(corner: Vector3, part: BasePart)
+				local h = hashVertex(corner)
+				local bucket = index[h]
+				if bucket then
+					table.insert(bucket, part)
+				else
+					index[h] = { part }
+				end
+			end
+			for _, part in workspace:GetPartBoundsInBox(CFrame.new(center), size, params) do
+				if not part:IsA("BasePart") or mPartToTriangles[part] then
+					continue
+				end
+				if (part :: Part).Shape == Enum.PartType.Wedge then
+					local hintA = part.CFrame.Position + part.CFrame.RightVector
+					local hintB = part.CFrame.Position - part.CFrame.RightVector
+					local a1, a2, a3 = getWedgeVertices(part, hintA)
+					local b1, b2, b3 = getWedgeVertices(part, hintB)
+					add(a1, part)
+					add(a2, part)
+					add(a3, part)
+					add(b1, part)
+					add(b2, part)
+					add(b3, part)
+				else
+					-- Non-wedge (e.g. a Block): key by its eight bounding-box corners.
+					local cf, hs = part.CFrame, part.Size / 2
+					for _, sgn in BOX_CORNER_SIGNS do
+						add(cf:PointToWorldSpace(hs * sgn), part)
+					end
+				end
+			end
+			return index, lo, hi
+		end
+
+		-- Candidate parts with a corner at pos, gathered from the corner index's 27
+		-- neighbour cells (a superset; discoverPart's merge check does the exact
+		-- two-shared-vertex test). Mirrors the neighbour-cell search
+		-- getOrCreateVertex uses for tolerant vertex merging.
+		local function nearbyPartsFromCornerIndex(index: { [VertexHash]: { BasePart } }, pos: Vector3): { Instance }
+			local hash = hashVertex(pos)
+			local out: { Instance } = {}
+			local seen: { [BasePart]: boolean } = {}
+			for dx = -1, 1 do
+				for dy = -1, 1 do
+					for dz = -1, 1 do
+						local bucket = index[hash + Vector3.new(dx, dy, dz)]
+						if bucket then
+							for _, part in bucket do
+								if not seen[part] then
+									seen[part] = true
+									table.insert(out, part)
+								end
+							end
+						end
+					end
+				end
+			end
+			return out
+		end
+
 		-- Seed the queue with starting positions
 		for _, seed in seeds do
 			table.insert(exploreQueue, seed)
 		end
 
-		while #exploreQueue > 0 do
-			local pos = table.remove(exploreQueue, 1) :: Vector3
+		-- Only built for the unbounded rebuild; nil keeps every bounded
+		-- (interactive) discoverPart call on its original workspace-query merge path.
+		local cornerIndex: { [VertexHash]: { BasePart } }? = nil
+		local regionLo, regionHi = Vector3.zero, Vector3.zero
+		if radius == math.huge and #seeds > 0 then
+			cornerIndex, regionLo, regionHi = buildCornerIndex(seeds)
+		end
+
+		-- When the index exists, hand discoverPart an in-memory resolver so its
+		-- coplanar-merge search skips its three-per-part workspace queries. The
+		-- index is only COMPLETE inside the region the bulk query covered (the seed
+		-- AABB): a part with a corner there was guaranteed returned. Outside it --
+		-- e.g. an unbounded walk that reaches far past a sparse seed set -- fall back
+		-- to the live query so the merge still finds its partner. The undo path seeds
+		-- from every vertex, so every lookup lands inside and stays on the fast path.
+		local nearbyResolver: ((Vector3, number) -> { Instance })? = nil
+		if cornerIndex then
+			local idx = cornerIndex
+			local lo, hi = regionLo, regionHi
+			nearbyResolver = function(p: Vector3, fallbackRadius: number): { Instance }
+				if p.X >= lo.X and p.X <= hi.X
+					and p.Y >= lo.Y and p.Y <= hi.Y
+					and p.Z >= lo.Z and p.Z <= hi.Z
+				then
+					return nearbyPartsFromCornerIndex(idx, p)
+				end
+				return workspace:GetPartBoundsInRadius(p, fallbackRadius)
+			end
+		end
+
+		-- Dequeue via a moving head index, not table.remove(queue, 1): the latter
+		-- shifts every remaining element on each pop, making a full rebuild O(n^2).
+		local exploreHead = 1
+		while exploreHead <= #exploreQueue do
+			local pos = exploreQueue[exploreHead]
+			exploreHead += 1
 			local posHash = hashVertex(pos)
 			if explored[posHash] then continue end
 			explored[posHash] = true
@@ -1682,13 +1822,21 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			-- Only do a workspace query if this is an unknown position (bootstrap)
 			-- or a boundary vertex (may have undiscovered adjacent parts)
 			if not vertId or isVertexOnBoundary(vertId) then
-				-- Cap search radius so we don't discover parts beyond the requested region
-				local distToClosestSeed = math.huge
-				for _, seed in seeds do
-					distToClosestSeed = math.min(distToClosestSeed, (pos - seed).Magnitude)
+				-- Cap search radius so we don't discover parts beyond the requested
+				-- region. For an unbounded rebuild the cap is moot (remainingRadius is
+				-- infinite), so skip the O(seeds) distance scan -- on a full rebuild
+				-- that scan is O(vertices * seeds), pure overhead the result discards.
+				local searchRadius
+				if radius == math.huge then
+					searchRadius = getSearchRadius(vertId)
+				else
+					local distToClosestSeed = math.huge
+					for _, seed in seeds do
+						distToClosestSeed = math.min(distToClosestSeed, (pos - seed).Magnitude)
+					end
+					local remainingRadius = radius - distToClosestSeed
+					searchRadius = math.min(getSearchRadius(vertId), math.max(remainingRadius, 0))
 				end
-				local remainingRadius = radius - distToClosestSeed
-				local searchRadius = math.min(getSearchRadius(vertId), math.max(remainingRadius, 0))
 				local nearbyParts = workspace:GetPartBoundsInRadius(pos, searchRadius)
 				-- pos is an already-discovered vertex when vertId is set; nil means we
 				-- are bootstrapping from a fresh seed with nothing yet to share.
@@ -1746,7 +1894,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 					if not part:IsA("BasePart") then continue end
 					if not mPartToTriangles[part] then
 						if partHasCornerNear(part, pos) or part == bootstrapPart then
-							discoverPart(part, pos)
+							discoverPart(part, pos, nearbyResolver)
 						end
 					end
 					-- Collect the part's discovered face(s) (e.g. a Block's two tris).
