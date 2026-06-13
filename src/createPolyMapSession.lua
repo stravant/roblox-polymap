@@ -1928,9 +1928,13 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			return result
 		end
 
-		-- Walk already-discovered topology outward from seed vertices,
-		-- filtering by XZ distance. No spatial discovery — that happens
-		-- at action time (click, drag start), not during rendering.
+		-- Discover the influence region first (discoverRegion is incremental, so it
+		-- is cheap once an area is discovered), then walk the topology outward from
+		-- the seed vertices, filtering by XZ distance. This is the same
+		-- discover-then-walk the move drag and the brush tools use, so the hover /
+		-- selection outline is correct even on a freshly opened mesh.
+		mMesh.discoverRegion(seedPositions, radius)
+
 		local affectedVids: { [number]: boolean } = {}
 		for vid in seedVids do
 			affectedVids[vid] = true

@@ -1277,4 +1277,50 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("Move influence outline discovers the region on a freshly opened mesh", function()
+		withSession(function(session, mesh, settings)
+			local generateGrid = require("./generateGrid")
+			generateGrid({
+				GridType = "Square",
+				Width = 6,
+				Height = 6,
+				Spacing = 4,
+				Origin = CFrame.new(kRegionCenter),
+				Thickness = 0.2,
+				Parent = workspace.Terrain,
+				Props = { Color = Color3.new(0.5, 0.5, 0.5), Material = Enum.Material.Plastic },
+			})
+
+			-- Discover ONLY the single part at the centre -- the "first hover" state,
+			-- where the cursor has touched one triangle but nothing around it.
+			local centerPart: BasePart? = nil
+			for _, p in workspace:GetPartBoundsInRadius(kRegionCenter, 1) do
+				if p:IsA("BasePart") then
+					centerPart = p :: BasePart
+					break
+				end
+			end
+			assert(centerPart)
+			mesh.discoverPart(centerPart, (centerPart :: BasePart).Position)
+			t.expect(countDict(mesh.getTriangles()) <= 4).toBeTruthy() -- mostly undiscovered
+
+			-- Select one of the (few) discovered vertices near the centre.
+			local seedPos: Vector3? = nil
+			for _, v in mesh.getVertices() do
+				seedPos = v.position
+				break
+			end
+			assert(seedPos)
+			session.SelectVerticesNear({ seedPos })
+			t.expect(countDict(session.GetSelectedVertices())).toBe(1)
+			settings.Mode = "Move"
+			settings.InfluenceRadius = 8
+
+			-- The influence outline must cover the radius region, not just the one
+			-- discovered triangle around the selected vertex.
+			local outline = session.GetOutlineTriangleIds()
+			t.expect(#outline > 10).toBeTruthy()
+		end)
+	end)
+
 end
