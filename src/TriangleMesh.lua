@@ -89,6 +89,15 @@ local function hashEdge(v1: Vector3, v2: Vector3): EdgeHash
 	return hashVertex(v1) + hashVertex(v2)
 end
 
+-- The three edges of a triangle as ordered vertex-id pairs (1-2, 2-3, 3-1).
+local function triangleEdgePairs(verts: { VertexId }): { { VertexId } }
+	return {
+		{ verts[1], verts[2] },
+		{ verts[2], verts[3] },
+		{ verts[3], verts[1] },
+	}
+end
+
 local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 	thicknessHint = thicknessHint or 1.0
 
@@ -407,7 +416,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		end
 
 		-- Create/update edges
-		local vertPairs = {{orderedVerts[1], orderedVerts[2]}, {orderedVerts[2], orderedVerts[3]}, {orderedVerts[3], orderedVerts[1]}}
+		local vertPairs = triangleEdgePairs(orderedVerts)
 		for _, pair in vertPairs do
 			local edgeId = getOrCreateEdge(pair[1], pair[2])
 			table.insert(mEdges[edgeId].triangles, triId)
@@ -455,7 +464,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 
 		-- Remove triangle from edge lists and cleanup
 		local verts = tri.vertices
-		local vertPairs = {{verts[1], verts[2]}, {verts[2], verts[3]}, {verts[3], verts[1]}}
+		local vertPairs = triangleEdgePairs(verts)
 		for _, pair in vertPairs do
 			local v1 = mVertices[pair[1]]
 			local v2 = mVertices[pair[2]]
@@ -578,7 +587,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		local result = {} :: {TriangleId}
 		local seen = {[triangleId] = true}
 		local verts = tri.vertices
-		local vertPairs = {{verts[1], verts[2]}, {verts[2], verts[3]}, {verts[3], verts[1]}}
+		local vertPairs = triangleEdgePairs(verts)
 		for _, pair in vertPairs do
 			local v1 = mVertices[pair[1]]
 			local v2 = mVertices[pair[2]]
@@ -797,7 +806,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			end
 
 			-- Create edges
-			local vertPairs = {{orderedVerts[1], orderedVerts[2]}, {orderedVerts[2], orderedVerts[3]}, {orderedVerts[3], orderedVerts[1]}}
+			local vertPairs = triangleEdgePairs(orderedVerts)
 			for _, pair in vertPairs do
 				local edgeId = getOrCreateEdge(pair[1], pair[2])
 				table.insert(mEdges[edgeId].triangles, triId)
