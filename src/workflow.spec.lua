@@ -10,6 +10,7 @@ local ChangeHistoryService = game:GetService("ChangeHistoryService")
 
 local TestTypes = require("./TestTypes")
 local createPolyMapSession = require("./createPolyMapSession")
+local createTriangleMesh = require("./TriangleMesh")
 local Settings = require("./Settings")
 
 -- Grids spawn relative to the camera; pin it so geometry lands in a known,
@@ -382,6 +383,96 @@ return function(t: TestTypes.TestContext)
 			local sel = session.GetSelectedVertices()
 			t.expect(countDict(sel)).toBe(1)
 			t.expect(sel[restoredA]).toBeTruthy()
+		end)
+	end)
+
+	t.test("rediscovering a curved grid from a fresh state has no interior boundary edges", function()
+		withSession(function(session, mesh, settings)
+			-- A grid small enough that GenerateGrid's own discovery covers it fully.
+			settings.GridWidth = 4
+			settings.GridHeight = 4
+
+			-- 1) Create a grid
+			session.GenerateGrid()
+			local flatTris = countDict(mesh.getTriangles())
+			local correctVerts = countDict(mesh.getVertices())
+			local flatBoundary = #mesh.getBoundaryEdges()
+			t.expect(flatTris > 0).toBeTruthy()
+
+			-- 2) Select the center vertex (nearest the XZ centroid)
+			local sum = Vector3.zero
+			local cnt = 0
+			for _, v in mesh.getVertices() do
+				sum += v.position
+				cnt += 1
+			end
+			local centroidXZ = Vector3.new(sum.X / cnt, 0, sum.Z / cnt)
+			local centerPos: Vector3? = nil
+			local bestD = math.huge
+			for _, v in mesh.getVertices() do
+				local d = (Vector3.new(v.position.X, 0, v.position.Z) - centroidXZ).Magnitude
+				if d < bestD then
+					bestD = d
+					centerPos = v.position
+				end
+			end
+			assert(centerPos)
+
+			-- 3) Pull it up to form a curved surface
+			session.SelectVerticesNear({ centerPos })
+			session.MoveSelectedVertices(Vector3.new(0, 8, 0))
+			-- The live mesh keeps correct connectivity through the move.
+			t.expect(#mesh.getBoundaryEdges()).toBe(flatBoundary)
+
+			-- A surface point (a triangle centroid) to seed a fresh discovery from.
+			local seed: Vector3? = nil
+			for _, tri in mesh.getTriangles() do
+				local a = mesh.getVertex(tri.vertices[1])
+				local b = mesh.getVertex(tri.vertices[2])
+				local c = mesh.getVertex(tri.vertices[3])
+				if a and b and c then
+					seed = (a.position + b.position + c.position) / 3
+					break
+				end
+			end
+			assert(seed)
+
+			-- 4) Reset the plugin: a fresh mesh rediscovers the same world parts
+			-- 5) ...with a large radius
+			local mesh2 = createTriangleMesh()
+			mesh2.discoverRegion({ seed }, 1000)
+
+			-- 6) ...and its boundary must be exactly the grid perimeter. A boundary
+			-- edge whose midpoint is in the interior (not on the XZ bounding box)
+			-- means adjacent curved triangles failed to share a vertex -- a crack.
+			local minX, maxX, minZ, maxZ = math.huge, -math.huge, math.huge, -math.huge
+			for _, v in mesh2.getVertices() do
+				minX = math.min(minX, v.position.X)
+				maxX = math.max(maxX, v.position.X)
+				minZ = math.min(minZ, v.position.Z)
+				maxZ = math.max(maxZ, v.position.Z)
+			end
+			local tol = 0.5
+			local interiorBoundary = 0
+			for _, edge in mesh2.getBoundaryEdges() do
+				local a = mesh2.getVertex(edge.v1)
+				local b = mesh2.getVertex(edge.v2)
+				if a and b then
+					local mid = (a.position + b.position) / 2
+					local onPerimeter = math.abs(mid.X - minX) < tol or math.abs(mid.X - maxX) < tol
+						or math.abs(mid.Z - minZ) < tol or math.abs(mid.Z - maxZ) < tol
+					if not onPerimeter then
+						interiorBoundary += 1
+					end
+				end
+			end
+			-- Same triangles and vertices as the correctly-connected live mesh:
+			-- no spurious back faces and no unmerged (cracked) vertices.
+			t.expect(countDict(mesh2.getTriangles())).toBe(flatTris)
+			t.expect(countDict(mesh2.getVertices())).toBe(correctVerts)
+			-- No boundary edge may lie in the interior.
+			t.expect(interiorBoundary).toBe(0)
+			t.expect(#mesh2.getBoundaryEdges()).toBe(flatBoundary)
 		end)
 	end)
 end

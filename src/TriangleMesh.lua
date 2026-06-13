@@ -1306,17 +1306,20 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 				local nearbyParts = workspace:GetPartBoundsInRadius(pos, searchRadius)
 				for _, part in nearbyParts do
 					if not part:IsA("BasePart") then continue end
-					local triId = discoverPart(part, pos)
-					if triId then
-						collectTriangle(triId)
-						-- Also collect other triangles linked to this part (e.g., Block's second tri)
-						local headId = mPartToTriangles[part]
-						if headId then
-							local tri: Triangle? = mTriangles[headId]
-							while tri do
-								collectTriangle(tri.id)
-								tri = tri.next
-							end
+					-- Discover the part's face only if it has none yet. A region walk
+					-- builds one coherent surface, so we must NOT create a part's
+					-- second (back) face just because this explore point happens to
+					-- sit behind a tilted wedge -- that is what cracked curved meshes.
+					if not mPartToTriangles[part] then
+						discoverPart(part, pos)
+					end
+					-- Collect the part's discovered face(s) (e.g. a Block's two tris).
+					local headId = mPartToTriangles[part]
+					if headId then
+						local tri: Triangle? = mTriangles[headId]
+						while tri do
+							collectTriangle(tri.id)
+							tri = tri.next
 						end
 					end
 				end
