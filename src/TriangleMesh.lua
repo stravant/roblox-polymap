@@ -745,13 +745,14 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			end
 			currentTri = currentTri.next
 		end
-		-- Only return if hintPoint is on the normal side of the triangle.
-		-- Use a small negative tolerance to handle hints that are in the
-		-- triangle's plane (dot ≈ 0) but have tiny floating point error.
-		if bestDot >= -0.01 then
-			return bestTriId
-		end
-		return nil
+		-- A wedge part backs exactly one single-sided triangle, so return it
+		-- regardless of which face the hint is on. Terrain grids are generated
+		-- back-facing, so the camera usually hovers the side opposite the triangle
+		-- normal; rejecting "back side" hints would make Paint/Delete/Relax/Flatten
+		-- (which look the hovered triangle up through here) find nothing from the
+		-- natural viewing angle. The hint still selects the best-aligned triangle
+		-- if a part ever carries more than one.
+		return bestTriId
 	end
 
 	local function getPartTriangles(part: BasePart): {TriangleId}
@@ -830,22 +831,25 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 	end
 
 	local function discoverPart(part: BasePart, hintPoint: Vector3): number?
-		-- Check if already discovered for this face
-		local existing = getPartTriangle(part, hintPoint)
-		if existing then
-			return existing
+		-- A wedge part backs exactly one single-sided triangle. Once it is
+		-- discovered, return that triangle regardless of which face the hint is on.
+		-- Crucially we must NOT spawn a second triangle on the opposite face: grids
+		-- are generated back-facing, so the camera almost always hovers the side
+		-- opposite the discovered normal, and treating that as "the other face"
+		-- doubled the mesh with phantom triangles (breaking selection/discovery).
+		-- The hint only orients the FIRST discovery of a part; after that the
+		-- part->triangle link is the single source of truth.
+		local headId = mPartToTriangles[part]
+		if headId then
+			return getPartTriangle(part, hintPoint) or headId
 		end
 
 		if (part :: Part).Shape == Enum.PartType.Wedge then
-			-- Get the triangle vertices from the wedge.
-			-- If this part already has a discovered face, use hintPoint directly
-			-- (we're discovering the other face). Otherwise, try both faces and
-			-- prefer the one sharing more vertices with existing geometry.
+			-- First discovery of this wedge: try both faces and prefer the one
+			-- sharing more vertices with existing geometry, so its shared corners
+			-- land on the same vertices as already-discovered neighbours.
 			local v1, v2, v3, wedgeThickness
-			if mPartToTriangles[part] then
-				-- Part already has a face — use hintPoint to pick the other face
-				v1, v2, v3, wedgeThickness = getWedgeVertices(part, hintPoint)
-			else
+			do
 				local hintA = part.CFrame.Position + part.CFrame.RightVector
 				local hintB = part.CFrame.Position - part.CFrame.RightVector
 				local v1a, v2a, v3a, thicknessA = getWedgeVertices(part, hintA)

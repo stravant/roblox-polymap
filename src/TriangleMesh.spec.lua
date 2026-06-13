@@ -933,146 +933,42 @@ return function(t: TestTypes.TestContext)
 		folder:Destroy()
 	end)
 
-	t.test("getPartTriangle with hintPoint selects correct face", function()
+	t.test("a wedge part maps to its one triangle from either side (no phantom back face)", function()
 		local mesh = createTriangleMesh()
 		local folder = Instance.new("Folder")
 		folder.Parent = workspace
 
-		-- Create a horizontal triangle at Y=5 (front = up-facing)
+		-- A single horizontal triangle. A wedge part is single-sided: it backs
+		-- exactly ONE logical triangle. Hovering/clicking either face must resolve
+		-- to that same triangle, and must never spawn a phantom triangle on the
+		-- opposite face -- that doubling is what broke hover discovery/selection.
 		local a = Vector3.new(1200, 5, 0)
 		local b = Vector3.new(1204, 5, 0)
 		local c = Vector3.new(1202, 5, 3)
-		-- hintPoint above centroid at Y=5
-		local upId = mesh.addTriangle(a, b, c, 0.2, folder, nil, Vector3.new(1202, 6, 1))
-		assert(upId)
+		local triId = mesh.addTriangle(a, b, c, 0.2, folder, nil, Vector3.new(1202, 6, 1))
+		assert(triId)
+		local tri = mesh.getTriangle(triId)
+		assert(tri)
+		local part = tri.parts[1]
 
-		-- Get the parts of this triangle
-		local upTri = mesh.getTriangle(upId)
-		assert(upTri)
-		local part = upTri.parts[1]
-
-		-- Front face found with hintPoint above part center
-		local hintAbove = Vector3.new(1202, 6, 1)
-		t.expect(mesh.getPartTriangle(part, hintAbove)).toBe(upId)
-
-		-- Back face not yet discovered (hintPoint below)
-		local hintBelow = Vector3.new(1202, 4, 1)
-		t.expect(mesh.getPartTriangle(part, hintBelow) == nil).toBeTruthy()
-
-		-- Discover the back face from the same parts
-		local downId = mesh.discoverPart(part, hintBelow)
-		t.expect(downId).toBeTruthy()
-		assert(downId)
-		t.expect(upId ~= downId).toBeTruthy()
-
-		-- Both should be valid triangles
-		local downTri = mesh.getTriangle(downId)
-		t.expect(downTri).toBeTruthy()
-		assert(downTri)
-
-		-- Collect Y values for each face's vertices
-		local upYs: { number } = {}
-		local downYs: { number } = {}
-		for _, vid in upTri.vertices do
-			local v = mesh.getVertex(vid)
-			assert(v)
-			table.insert(upYs, v.position.Y)
-		end
-		for _, vid in downTri.vertices do
-			local v = mesh.getVertex(vid)
-			assert(v)
-			table.insert(downYs, v.position.Y)
-		end
-
-		-- One face should have vertices at Y≈5.0, the other at Y≈5.2
-		-- (thickness extends upward from the surface at Y=5)
-		local upAvgY = (upYs[1] + upYs[2] + upYs[3]) / 3
-		local downAvgY = (downYs[1] + downYs[2] + downYs[3]) / 3
-		t.expect(math.abs(upAvgY - downAvgY) > 0.1).toBeTruthy()
-
-		folder:Destroy()
-	end)
-
-	t.test("moveVertex on back-face triangle preserves face direction", function()
-		local mesh = createTriangleMesh()
-		local folder = Instance.new("Folder")
-		folder.Parent = workspace
-
-		-- Create a horizontal triangle at Y=5. fillTriangle makes thickness
-		-- extend downward, so surface is at Y=5, bottom at Y≈4.8.
-		local a = Vector3.new(1300, 5, 0)
-		local b = Vector3.new(1304, 5, 0)
-		local c = Vector3.new(1302, 5, 3)
-		-- hintPoint above centroid at Y=5
-		local frontTriId = mesh.addTriangle(a, b, c, 0.2, folder, nil, Vector3.new(1302, 6, 1))
-		assert(frontTriId)
-
-		local frontTri = mesh.getTriangle(frontTriId)
-		assert(frontTri)
-		local part = frontTri.parts[1]
-
-		-- Discover the bottom (back) face via hintPoint below
-		local backTriId = mesh.discoverPart(part, Vector3.new(1302, 4, 1))
-		assert(backTriId)
-		t.expect(backTriId ~= frontTriId).toBeTruthy()
-
-		-- Identify which vertex of the back-face triangle corresponds to 'c'
-		local backTri = mesh.getTriangle(backTriId)
-		assert(backTri)
-		local moveVid: number? = nil
-		for _, vid in backTri.vertices do
-			local v = mesh.getVertex(vid)
-			assert(v)
-			-- c is at (1302, 5, 3), back face should be at Y≈4.8
-			if math.abs(v.position.X - 1302) < 0.1 and math.abs(v.position.Z - 3) < 0.1 then
-				moveVid = vid
-				break
+		local function triangleCount(): number
+			local n = 0
+			for _ in mesh.getTriangles() do
+				n += 1
 			end
+			return n
 		end
-		assert(moveVid, "Should find back-face vertex near c")
+		local before = triangleCount()
 
-		-- Move the vertex slightly in Y
-		local oldV = mesh.getVertex(moveVid :: number)
-		assert(oldV)
-		local oldPosition = oldV.position
-		mesh.moveVertex(moveVid :: number, oldPosition + Vector3.new(0, -0.5, 0), 0.2)
+		-- Maps to the one triangle whether the hint is above or below the part.
+		t.expect(mesh.getPartTriangle(part, Vector3.new(1202, 6, 1))).toBe(triId)
+		t.expect(mesh.getPartTriangle(part, Vector3.new(1202, 4, 1))).toBe(triId)
 
-		-- After the move, the back-face triangle should still exist and have
-		-- its vertices on the BOTTOM side (Y < 5). The bug is that moveVertex
-		-- calls fillTriangle which flips winding to face up, putting the
-		-- surface face at ~Y=4.3 with thickness extending further down to
-		-- ~Y=4.1, when it should keep thickness extending UP.
-		local movedBackTri = mesh.getTriangle(backTriId)
-		assert(movedBackTri, "Back-face triangle should still exist after move")
-
-		-- Check that the moved vertex actually moved
-		local movedV = mesh.getVertex(moveVid :: number)
-		assert(movedV)
-		t.expect(math.abs(movedV.position.Y - (oldPosition.Y - 0.5)) < 0.05).toBeTruthy()
-
-		-- The key check: the back-face triangle's parts should still have their
-		-- surface on the bottom side. Verify by checking that getWedgeVertices
-		-- with downward hitNormal returns vertices matching the back-face
-		-- triangle's registered vertices (not the top-face vertices).
-		local getWedgeVertices = require("./getWedgeVertices")
-		local movedPart = movedBackTri.parts[1]
-		-- Use a point below the part to select the bottom face
-		local wv1, wv2, wv3 = getWedgeVertices(movedPart, movedPart.CFrame.Position - Vector3.new(0, 1, 0))
-
-		-- These wedge vertices (from the downward-facing side) should include
-		-- vertices with Y values matching the back-face triangle, NOT the
-		-- front-face triangle
-		local wedgeAvgY = (wv1.Y + wv2.Y + wv3.Y) / 3
-		local backAvgY = 0
-		for _, vid in movedBackTri.vertices do
-			local v = mesh.getVertex(vid)
-			assert(v)
-			backAvgY += v.position.Y
-		end
-		backAvgY /= 3
-
-		-- The wedge's downward face should match the back triangle's vertices
-		t.expect(math.abs(wedgeAvgY - backAvgY) < 0.15).toBeTruthy()
+		-- Re-discovering from the opposite side returns the SAME triangle and adds
+		-- nothing (no phantom back face).
+		t.expect(mesh.discoverPart(part, Vector3.new(1202, 4, 1))).toBe(triId)
+		t.expect(mesh.discoverPart(part, Vector3.new(1202, 6, 1))).toBe(triId)
+		t.expect(triangleCount()).toBe(before)
 
 		folder:Destroy()
 	end)

@@ -886,4 +886,106 @@ return function(t: TestTypes.TestContext)
 			t.expect(#mesh.getBoundaryEdges()).toBe(n0B)
 		end)
 	end)
+
+	t.test("faithful raycast hovers across moves and undos stay a clean grid", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 4
+			settings.GridHeight = 4
+			settings.GridSpacing = 4
+			settings.InfluenceRadius = 6
+			session.GenerateGrid()
+			local n0T = countDict(mesh.getTriangles())
+			local n0V = countDict(mesh.getVertices())
+			local n0B = #mesh.getBoundaryEdges()
+
+			-- Faithful replica of updateHover's discovery (createPolyMapSession ~L437):
+			-- sweep rays out from the camera eye across the region as the cursor moves
+			-- and call discoverPart UNCONDITIONALLY on every wedge hit -- there is no
+			-- "already tracked" guard in the live path, so a ray grazing a tilted
+			-- part's underside can discover its back face, exactly as the cursor task
+			-- does. This is the real hover, not the discoverRegion approximation.
+			local function hover()
+				for tx = -14, 14, 2 do
+					for tz = -14, 14, 2 do
+						local target = kRegionCenter + Vector3.new(tx, 0, tz)
+						local dir = target - kCameraEye
+						local hit = workspace:Raycast(kCameraEye, dir * 1.25)
+						if
+							hit
+							and hit.Instance:IsA("Part")
+							and (hit.Instance :: Part).Shape == Enum.PartType.Wedge
+						then
+							mesh.discoverPart(hit.Instance :: BasePart, hit.Position)
+						end
+					end
+				end
+			end
+
+			local function vertNear(xz: Vector3): Vector3?
+				local best: Vector3? = nil
+				local bestD = math.huge
+				for _, v in mesh.getVertices() do
+					local d = (Vector3.new(v.position.X, 0, v.position.Z) - Vector3.new(xz.X, 0, xz.Z)).Magnitude
+					if d < bestD then
+						bestD = d
+						best = v.position
+					end
+				end
+				return best
+			end
+
+			-- Hovering over the freshly generated flat grid discovers nothing new.
+			hover()
+			t.expect(countDict(mesh.getTriangles())).toBe(n0T)
+			t.expect(countDict(mesh.getVertices())).toBe(n0V)
+
+			-- Several select + influenced-move rounds, hovering after every change as
+			-- the cursor task would, with undo mixed in. Track pending (un-undone)
+			-- moves so we return exactly to the flat grid without undoing the generate.
+			local plan = {
+				{ off = Vector3.new(0, 0, 0), dy = -6, undo = true },
+				{ off = Vector3.new(4, 0, 4), dy = 5, undo = false },
+				{ off = Vector3.new(-4, 0, -4), dy = -5, undo = true },
+				{ off = Vector3.new(4, 0, -4), dy = 4, undo = false },
+				{ off = Vector3.new(-4, 0, 4), dy = -4, undo = false },
+			}
+			local pending = 0
+			for _, step in plan do
+				local vp = vertNear(kRegionCenter + step.off)
+				if vp then
+					session.SelectVerticesNear({ vp })
+					session.MoveSelectedWithInfluence(Vector3.new(0, step.dy, 0))
+					pending += 1
+					hover()
+					if step.undo then
+						ChangeHistoryService:Undo()
+						settle()
+						pending -= 1
+						hover()
+					end
+				end
+			end
+
+			-- Undo the remaining moves back to the flat grid, hovering between each.
+			for _ = 1, pending do
+				ChangeHistoryService:Undo()
+				settle()
+				hover()
+			end
+
+			-- The session mesh is exactly the original flat grid again.
+			t.expect(countDict(mesh.getTriangles())).toBe(n0T)
+			t.expect(countDict(mesh.getVertices())).toBe(n0V)
+			t.expect(#mesh.getBoundaryEdges()).toBe(n0B)
+
+			-- And the world geometry itself is clean: a fresh discovery from scratch
+			-- finds exactly the grid, with no leftover/duplicate parts left behind by
+			-- the hover-during-move path.
+			local fresh = createTriangleMesh()
+			fresh.discoverRegion({ kRegionCenter }, 40)
+			t.expect(countDict(fresh.getTriangles())).toBe(n0T)
+			t.expect(countDict(fresh.getVertices())).toBe(n0V)
+			t.expect(#fresh.getBoundaryEdges()).toBe(n0B)
+		end)
+	end)
 end
