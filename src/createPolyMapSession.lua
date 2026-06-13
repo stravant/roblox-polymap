@@ -2301,6 +2301,30 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		changeSignal:Fire()
 	end
 
+	-- Drag the selected vertices by delta WITH influence falloff, exactly as the
+	-- interactive Move handle does (start/apply/end): the undo snapshot captures
+	-- only the selected vertices, but the move also shifts unselected vertices
+	-- within InfluenceRadius. Lets workflow.spec exercise the move tool's real
+	-- behaviour (a single drag moves a whole region) end-to-end with undo.
+	session.MoveSelectedWithInfluence = function(delta: Vector3)
+		if getSelectedVertexCount() == 0 then
+			return
+		end
+		saveVertexPositions()
+		runUndoableOperation("PolyMap Move", function(): boolean
+			local moves: { [number]: Vector3 } = {}
+			for vid, origPos in mSavedVertexPositions do
+				moves[vid] = origPos + delta
+			end
+			for vid, info in mInfluencedVertices do
+				moves[vid] = info.position + delta * info.factor
+			end
+			mMesh.moveVertices(moves, currentSettings.Thickness, getTriangleProps())
+			return true
+		end)
+		changeSignal:Fire()
+	end
+
 	-- Add a triangle off the boundary edge nearest nearEdgeWorldPos, with its
 	-- third corner at apexWorldPos. Mirrors handleAddClick's "plane" placement;
 	-- finds the edge directly via getBoundaryEdges() so it stays independent of

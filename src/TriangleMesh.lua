@@ -224,6 +224,20 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		tri.next = nil
 	end
 
+	-- Reassign a triangle's parts, keeping mPartToTriangles in sync: unlink the
+	-- old parts and link the new ones. A tilting triangle can change wedge count
+	-- (1 <-> 2 wedges), and an unlinked new wedge would be rediscovered as a
+	-- duplicate triangle on the next hover.
+	local function relinkTriangleParts(tri: Triangle, newParts: { BasePart }): { BasePart }
+		for _, oldPart in tri.parts do
+			unlinkTriangleFromPart(tri, oldPart)
+		end
+		for _, newPart in newParts do
+			linkTriangleToPart(tri, newPart)
+		end
+		return newParts
+	end
+
 	-- Remove edges that no longer have any triangles
 	local function cleanupEdge(edgeId: EdgeId)
 		local edge = mEdges[edgeId]
@@ -580,7 +594,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 						v1.position, v2.position, v3.position,
 						thickness, parent :: Instance, props, tri.parts, shouldInvert
 					)
-					tri.parts = newParts
+					tri.parts = relinkTriangleParts(tri, newParts)
 					tri.thickness = thickness
 				end
 			end

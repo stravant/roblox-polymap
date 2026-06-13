@@ -684,4 +684,206 @@ return function(t: TestTypes.TestContext)
 			t.expect(#mesh.getBoundaryEdges()).toBe(n0B)
 		end)
 	end)
+
+	t.test("a single move-tool drag down (with influence) then undo restores the grid", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 4
+			settings.GridHeight = 4
+			settings.InfluenceRadius = 10
+			session.GenerateGrid()
+			local n0T = countDict(mesh.getTriangles())
+			local n0V = countDict(mesh.getVertices())
+			local n0B = #mesh.getBoundaryEdges()
+
+			-- Select the centre vertex only, then drag down. Influence moves a whole
+			-- region with it, but only the centre is in the undo snapshot.
+			local sum = Vector3.zero
+			local cnt = 0
+			for _, v in mesh.getVertices() do
+				sum += v.position
+				cnt += 1
+			end
+			local centreXZ = Vector3.new(sum.X / cnt, 0, sum.Z / cnt)
+			local centre: Vector3? = nil
+			local bestD = math.huge
+			for _, v in mesh.getVertices() do
+				local d = (Vector3.new(v.position.X, 0, v.position.Z) - centreXZ).Magnitude
+				if d < bestD then
+					bestD = d
+					centre = v.position
+				end
+			end
+			assert(centre)
+			session.SelectVerticesNear({ centre })
+			session.MoveSelectedWithInfluence(Vector3.new(0, -8, 0))
+
+			ChangeHistoryService:Undo()
+			settle()
+
+			t.expect(countDict(mesh.getTriangles())).toBe(n0T)
+			t.expect(countDict(mesh.getVertices())).toBe(n0V)
+			t.expect(#mesh.getBoundaryEdges()).toBe(n0B)
+		end)
+	end)
+
+	t.test("multiple move-tool drags with undo mixed in restores the grid", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 4
+			settings.GridHeight = 4
+			settings.InfluenceRadius = 5
+			session.GenerateGrid()
+			local n0T = countDict(mesh.getTriangles())
+			local n0V = countDict(mesh.getVertices())
+			local n0B = #mesh.getBoundaryEdges()
+
+			local sum = Vector3.zero
+			local cnt = 0
+			for _, v in mesh.getVertices() do
+				sum += v.position
+				cnt += 1
+			end
+			local c = Vector3.new(sum.X / cnt, 0, sum.Z / cnt)
+			local function dragNearest(xz: Vector3, delta: Vector3)
+				local best: Vector3? = nil
+				local bestD = math.huge
+				for _, v in mesh.getVertices() do
+					local d = (Vector3.new(v.position.X, 0, v.position.Z) - xz).Magnitude
+					if d < bestD then
+						bestD = d
+						best = v.position
+					end
+				end
+				if best then
+					session.SelectVerticesNear({ best })
+					session.MoveSelectedWithInfluence(delta)
+				end
+			end
+			local function undo()
+				ChangeHistoryService:Undo()
+				settle()
+			end
+
+			-- A sequence of drags with undo mixed in, ending fully undone.
+			dragNearest(c, Vector3.new(0, -6, 0))
+			dragNearest(c + Vector3.new(8, 0, 0), Vector3.new(0, -5, 0))
+			undo()
+			dragNearest(c + Vector3.new(-6, 0, -6), Vector3.new(0, 4, 0))
+			dragNearest(c + Vector3.new(0, 0, 8), Vector3.new(0, -7, 0))
+			undo()
+			undo()
+			undo()
+
+			-- Everything undone -> back to the original flat grid.
+			t.expect(countDict(mesh.getTriangles())).toBe(n0T)
+			t.expect(countDict(mesh.getVertices())).toBe(n0V)
+			t.expect(#mesh.getBoundaryEdges()).toBe(n0B)
+		end)
+	end)
+
+	t.test("hovering after a move does not duplicate geometry", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 4
+			settings.GridHeight = 4
+			settings.InfluenceRadius = 5
+			session.GenerateGrid()
+
+			local sum = Vector3.zero
+			local cnt = 0
+			for _, v in mesh.getVertices() do
+				sum += v.position
+				cnt += 1
+			end
+			local cXZ = Vector3.new(sum.X / cnt, 0, sum.Z / cnt)
+			local centre: Vector3? = nil
+			local bestD = math.huge
+			for _, v in mesh.getVertices() do
+				local d = (Vector3.new(v.position.X, 0, v.position.Z) - cXZ).Magnitude
+				if d < bestD then
+					bestD = d
+					centre = v.position
+				end
+			end
+			assert(centre)
+			session.SelectVerticesNear({ centre })
+			session.MoveSelectedWithInfluence(Vector3.new(0, -8, 0))
+
+			local tBefore = countDict(mesh.getTriangles())
+			local vBefore = countDict(mesh.getVertices())
+
+			-- Hover: re-discover every triangle's region, as the cursor task does
+			-- continuously. This must NOT change the mesh.
+			local centroids: { Vector3 } = {}
+			for _, tri in mesh.getTriangles() do
+				local a = mesh.getVertex(tri.vertices[1])
+				local b = mesh.getVertex(tri.vertices[2])
+				local c = mesh.getVertex(tri.vertices[3])
+				if a and b and c then
+					table.insert(centroids, (a.position + b.position + c.position) / 3)
+				end
+			end
+			for _, ct in centroids do
+				mesh.discoverRegion({ ct }, 6)
+			end
+
+			t.expect(countDict(mesh.getTriangles())).toBe(tBefore)
+			t.expect(countDict(mesh.getVertices())).toBe(vBefore)
+		end)
+	end)
+
+	t.test("drag down with hovering then undo restores a clean grid", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 4
+			settings.GridHeight = 4
+			settings.InfluenceRadius = 5
+			session.GenerateGrid()
+			local n0T = countDict(mesh.getTriangles())
+			local n0V = countDict(mesh.getVertices())
+			local n0B = #mesh.getBoundaryEdges()
+
+			local function hover()
+				local centroids: { Vector3 } = {}
+				for _, tri in mesh.getTriangles() do
+					local a = mesh.getVertex(tri.vertices[1])
+					local b = mesh.getVertex(tri.vertices[2])
+					local c = mesh.getVertex(tri.vertices[3])
+					if a and b and c then
+						table.insert(centroids, (a.position + b.position + c.position) / 3)
+					end
+				end
+				for _, ct in centroids do
+					mesh.discoverRegion({ ct }, 6)
+				end
+			end
+
+			local sum = Vector3.zero
+			local cnt = 0
+			for _, v in mesh.getVertices() do
+				sum += v.position
+				cnt += 1
+			end
+			local cXZ = Vector3.new(sum.X / cnt, 0, sum.Z / cnt)
+			local centre: Vector3? = nil
+			local bestD = math.huge
+			for _, v in mesh.getVertices() do
+				local d = (Vector3.new(v.position.X, 0, v.position.Z) - cXZ).Magnitude
+				if d < bestD then
+					bestD = d
+					centre = v.position
+				end
+			end
+			assert(centre)
+
+			-- Drag down, hover (as the cursor task does), then undo, then hover again.
+			session.SelectVerticesNear({ centre })
+			session.MoveSelectedWithInfluence(Vector3.new(0, -8, 0))
+			hover()
+			ChangeHistoryService:Undo()
+			settle()
+			hover()
+
+			t.expect(countDict(mesh.getTriangles())).toBe(n0T)
+			t.expect(countDict(mesh.getVertices())).toBe(n0V)
+			t.expect(#mesh.getBoundaryEdges()).toBe(n0B)
+		end)
+	end)
 end
