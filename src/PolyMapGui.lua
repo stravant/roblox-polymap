@@ -66,14 +66,9 @@ local function getStatusText(mode: string, settings: Settings.PolyMapSettings, s
 		return ""
 	end
 	local count = session.GetSelectedVertexCount()
-	if mode == "Select" then
+	if mode == "Move" then
 		if count == 0 then
-			return "Click vertices to select. Shift+click to toggle. Drag to marquee select."
-		end
-		return `{count} selected. Shift+click to toggle. Drag to marquee select.`
-	elseif mode == "Move" then
-		if count == 0 then
-			return "Select vertices first, then drag the move handles."
+			return "Click vertices to select (Shift+click toggles, drag to marquee), then drag the move handles."
 		end
 		return `{count} selected. Drag handles to move.`
 	elseif mode == "Rotate" then
@@ -101,16 +96,6 @@ local function getStatusText(mode: string, settings: Settings.PolyMapSettings, s
 		return "Configure grid settings and click Generate."
 	elseif mode == "Import" then
 		return "Enter an image asset ID, configure settings, and click Import."
-	elseif mode == "Subdivide" then
-		if count == 0 then
-			return "Select vertices, then click Subdivide to split each triangle into 4."
-		end
-		return `{count} selected. Click Subdivide to split adjacent triangles.`
-	elseif mode == "Simplify" then
-		if count < 2 then
-			return "Select at least 2 vertices, then click Collapse to merge the shortest edge."
-		end
-		return `{count} selected. Click Collapse to merge the shortest edge.`
 	elseif mode == "Relax" then
 		return "Click and drag to regularize mesh topology within the brush radius."
 	elseif mode == "Flatten" then
@@ -181,19 +166,10 @@ local function ModePanel(props: {
 				SortOrder = Enum.SortOrder.LayoutOrder,
 				Padding = UDim.new(0, 4),
 			}),
-			Select = e(ChipForToggle, {
-				Text = "Select",
-				IsCurrent = current == "Select",
-				LayoutOrder = 1,
-				OnClick = function()
-					props.Settings.Mode = "Select"
-					props.UpdatedSettings()
-				end,
-			}),
 			Move = e(ChipForToggle, {
 				Text = "Move",
 				IsCurrent = current == "Move",
-				LayoutOrder = 2,
+				LayoutOrder = 1,
 				OnClick = function()
 					props.Settings.Mode = "Move"
 					props.UpdatedSettings()
@@ -202,9 +178,18 @@ local function ModePanel(props: {
 			Rotate = e(ChipForToggle, {
 				Text = "Rotate",
 				IsCurrent = current == "Rotate",
-				LayoutOrder = 3,
+				LayoutOrder = 2,
 				OnClick = function()
 					props.Settings.Mode = "Rotate"
+					props.UpdatedSettings()
+				end,
+			}),
+			Add = e(ChipForToggle, {
+				Text = "Add Poly",
+				IsCurrent = current == "Add",
+				LayoutOrder = 3,
+				OnClick = function()
+					props.Settings.Mode = "Add"
 					props.UpdatedSettings()
 				end,
 			}),
@@ -220,19 +205,10 @@ local function ModePanel(props: {
 				SortOrder = Enum.SortOrder.LayoutOrder,
 				Padding = UDim.new(0, 4),
 			}),
-			Add = e(ChipForToggle, {
-				Text = "Add Poly",
-				IsCurrent = current == "Add",
-				LayoutOrder = 1,
-				OnClick = function()
-					props.Settings.Mode = "Add"
-					props.UpdatedSettings()
-				end,
-			}),
 			Delete = e(ChipForToggle, {
 				Text = "Delete",
 				IsCurrent = current == "Delete",
-				LayoutOrder = 2,
+				LayoutOrder = 1,
 				OnClick = function()
 					props.Settings.Mode = "Delete"
 					props.UpdatedSettings()
@@ -241,9 +217,18 @@ local function ModePanel(props: {
 			Paint = e(ChipForToggle, {
 				Text = "Paint",
 				IsCurrent = current == "Paint",
-				LayoutOrder = 3,
+				LayoutOrder = 2,
 				OnClick = function()
 					props.Settings.Mode = "Paint"
+					props.UpdatedSettings()
+				end,
+			}),
+			Generate = e(ChipForToggle, {
+				Text = "Add Grid",
+				IsCurrent = current == "Generate",
+				LayoutOrder = 3,
+				OnClick = function()
+					props.Settings.Mode = "Generate"
 					props.UpdatedSettings()
 				end,
 			}),
@@ -259,51 +244,12 @@ local function ModePanel(props: {
 				SortOrder = Enum.SortOrder.LayoutOrder,
 				Padding = UDim.new(0, 4),
 			}),
-			Generate = e(ChipForToggle, {
-				Text = "Add Grid",
-				IsCurrent = current == "Generate",
-				LayoutOrder = 1,
-				OnClick = function()
-					props.Settings.Mode = "Generate"
-					props.UpdatedSettings()
-				end,
-			}),
 			Import = e(ChipForToggle, {
 				Text = "Import",
 				IsCurrent = current == "Import",
-				LayoutOrder = 2,
-				OnClick = function()
-					props.Settings.Mode = "Import"
-					props.UpdatedSettings()
-				end,
-			}),
-			Subdivide = e(ChipForToggle, {
-				Text = "Subdiv",
-				IsCurrent = current == "Subdivide",
-				LayoutOrder = 3,
-				OnClick = function()
-					props.Settings.Mode = "Subdivide"
-					props.UpdatedSettings()
-				end,
-			}),
-		}),
-		Row4 = e("Frame", {
-			Size = UDim2.fromScale(1, 0),
-			AutomaticSize = Enum.AutomaticSize.Y,
-			BackgroundTransparency = 1,
-			LayoutOrder = 4,
-		}, {
-			ListLayout = e("UIListLayout", {
-				FillDirection = Enum.FillDirection.Horizontal,
-				SortOrder = Enum.SortOrder.LayoutOrder,
-				Padding = UDim.new(0, 4),
-			}),
-			Simplify = e(ChipForToggle, {
-				Text = "Simplify",
-				IsCurrent = current == "Simplify",
 				LayoutOrder = 1,
 				OnClick = function()
-					props.Settings.Mode = "Simplify"
+					props.Settings.Mode = "Import"
 					props.UpdatedSettings()
 				end,
 			}),
@@ -1258,60 +1204,6 @@ local function DeletePanel(props: {
 	})
 end
 
-local function SubdividePanel(props: {
-	Session: createPolyMapSession.PolyMapSession?,
-	LayoutOrder: number?,
-})
-	local session = props.Session
-	local count = if session then session.GetSelectedVertexCount() else 0
-	return e(SubPanel, {
-		Title = "Subdivide",
-		LayoutOrder = props.LayoutOrder,
-		Padding = UDim.new(0, 4),
-	}, {
-		SubdivideButton = e(OperationButton, {
-			Text = "Subdivide Selected",
-			SubText = if count > 0 then `{count} vertices` else nil,
-			Color = Colors.ACTION_BLUE,
-			Disabled = session == nil or count == 0,
-			Height = 30,
-			LayoutOrder = 1,
-			OnClick = function()
-				if session then
-					session.Subdivide()
-				end
-			end,
-		}),
-	})
-end
-
-local function SimplifyPanel(props: {
-	Session: createPolyMapSession.PolyMapSession?,
-	LayoutOrder: number?,
-})
-	local session = props.Session
-	local count = if session then session.GetSelectedVertexCount() else 0
-	return e(SubPanel, {
-		Title = "Simplify",
-		LayoutOrder = props.LayoutOrder,
-		Padding = UDim.new(0, 4),
-	}, {
-		SimplifyButton = e(OperationButton, {
-			Text = "Collapse Shortest Edge",
-			SubText = if count > 0 then `{count} vertices` else nil,
-			Color = Colors.ACTION_BLUE,
-			Disabled = session == nil or count < 2,
-			Height = 30,
-			LayoutOrder = 1,
-			OnClick = function()
-				if session then
-					session.Simplify(1)
-				end
-			end,
-		}),
-	})
-end
-
 local function RelaxPanel(props: {
 	Settings: Settings.PolyMapSettings,
 	UpdatedSettings: () -> (),
@@ -1462,8 +1354,6 @@ local function PolyMapGui(props: {
 	local showGrid = mode == "Generate"
 	local showImport = mode == "Import"
 	local showThickness = mode == "Add" or mode == "Generate" or mode == "Import"
-	local showSubdivide = mode == "Subdivide"
-	local showSimplify = mode == "Simplify"
 	local showRelax = mode == "Relax"
 	local showFlatten = mode == "Flatten"
 
@@ -1479,7 +1369,7 @@ local function PolyMapGui(props: {
 	}, {
 		Overlay = session and e(MeshOverlay, (function()
 			local mesh = session.GetMesh()
-			local showSelection = mode == "Select" or mode == "Move" or mode == "Rotate" or mode == "Subdivide" or mode == "Simplify"
+			local showSelection = mode == "Move" or mode == "Rotate"
 			local overlayProps: { [string]: any } = {
 				Mesh = mesh,
 				SelectedVertices = if showSelection then session.GetSelectedVertices() else nil,
@@ -1610,14 +1500,6 @@ local function PolyMapGui(props: {
 			MaterialPanel = showPaint and e(MaterialPanel, {
 				Settings = currentSettings,
 				UpdatedSettings = props.UpdatedSettings,
-				LayoutOrder = nextOrder(),
-			}),
-			SubdividePanel = showSubdivide and e(SubdividePanel, {
-				Session = session,
-				LayoutOrder = nextOrder(),
-			}),
-			SimplifyPanel = showSimplify and e(SimplifyPanel, {
-				Session = session,
 				LayoutOrder = nextOrder(),
 			}),
 			RelaxPanel = showRelax and e(RelaxPanel, {

@@ -470,8 +470,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 		-- Use loose targeting (spherecast fallback) for selection/add modes
 		local mode = currentSettings.Mode
-		local useLoose = mode == "Select" or mode == "Move" or mode == "Rotate"
-			or mode == "Subdivide" or mode == "Simplify" or mode == "Add"
+		local useLoose = mode == "Move" or mode == "Rotate" or mode == "Add"
 		local result = if useLoose then mouseRaycastLoose() else mouseRaycast()
 		local newHoverVertex: number? = nil
 		local newHoverEdge: string? = nil
@@ -509,7 +508,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 
 		if worldPos then
-			if mode == "Select" or mode == "Move" or mode == "Rotate" or mode == "Subdivide" or mode == "Simplify" then
+			if mode == "Move" or mode == "Rotate" then
 				newHoverVertex = findNearestVertex(worldPos, hitTriangleId)
 			end
 			if mode == "Delete" then
@@ -1277,11 +1276,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 		-- Use loose targeting (spherecast fallback) for selection/add modes
 		local mode = currentSettings.Mode
-		local useLoose = mode == "Select" or mode == "Move" or mode == "Rotate"
-			or mode == "Subdivide" or mode == "Simplify" or mode == "Add"
+		local useLoose = mode == "Move" or mode == "Rotate" or mode == "Add"
 		local result = if useLoose then mouseRaycastLoose() else mouseRaycast()
 		if not result then
-			if (mode == "Select" or mode == "Move" or mode == "Rotate" or mode == "Subdivide" or mode == "Simplify") and not isShiftHeld() then
+			if (mode == "Move" or mode == "Rotate") and not isShiftHeld() then
 				mSelectedVertices = {}
 				mSavedVertexPositions = {}
 				changeSignal:Fire()
@@ -1337,7 +1335,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			return
 		end
 
-		if mode == "Select" or mode == "Move" or mode == "Rotate" or mode == "Subdivide" or mode == "Simplify" then
+		if mode == "Move" or mode == "Rotate" then
 			handleSelectClick(result.Position, hitPart)
 		elseif mode == "Add" then
 			handleAddClick(result.Position, hitPart, result.Normal)
@@ -1677,7 +1675,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		inputBeganCn = UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
 			if input.UserInputType == Enum.UserInputType.MouseButton1 and not gameProcessed then
 				local mode = currentSettings.Mode
-				if mode == "Select" or mode == "Move" or mode == "Rotate" or mode == "Subdivide" or mode == "Simplify" then
+				if mode == "Move" or mode == "Rotate" then
 					local mousePos = UserInputService:GetMouseLocation()
 					mMarqueeStart = mousePos
 					mMarqueeEnd = nil
@@ -1730,8 +1728,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		-- rediscover from scratch. After an undo/redo the parts have been
 		-- reverted (moved, or deleted-then-restored, etc.), so we must rebuild
 		-- the *whole* connected mesh. A fixed radius would leave restored
-		-- geometry further out -- e.g. undoing a large Delete or Simplify -- as
-		-- untracked stale state. discoverRegion walks vertex-to-vertex through
+		-- geometry further out -- e.g. undoing a large Delete -- as untracked
+		-- stale state. discoverRegion walks vertex-to-vertex through
 		-- the actual parts, so an unbounded radius still stays bounded to the
 		-- real connected geometry rather than scanning the whole world.
 		local seeds: { Vector3 } = {}
@@ -1991,14 +1989,14 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		if mode == "Delete" or mode == "Paint" or mode == "Relax" or mode == "Flatten" then
 			return mHoverTriangleIds
 		end
-		if mode == "Select" or mode == "Move" or mode == "Rotate" or mode == "Subdivide" or mode == "Simplify" then
+		if mode == "Move" or mode == "Rotate" then
 			return getExpandedTriangleIds(mSelectedVertices)
 		end
 		return {}
 	end
 	session.GetHoverOutlineTriangleIds = function(): { number }
 		local mode = currentSettings.Mode
-		if mode ~= "Select" and mode ~= "Move" and mode ~= "Rotate" and mode ~= "Subdivide" and mode ~= "Simplify" then
+		if mode ~= "Move" and mode ~= "Rotate" then
 			return {}
 		end
 		if not mHoverVertexId then
@@ -2138,296 +2136,6 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			mMesh.moveVertices(moves, currentSettings.Thickness, getTriangleProps())
 			return true
 		end)
-		changeSignal:Fire()
-	end
-	session.Subdivide = function()
-		if getSelectedVertexCount() == 0 then
-			return
-		end
-
-		pushUndoSnapshot()
-		local recording = ChangeHistoryService:TryBeginRecording("PolyMap Subdivide")
-
-		-- Collect all triangle IDs touching any selected vertex
-		local affectedTriIds: { [number]: boolean } = {}
-		for vid in mSelectedVertices do
-			local v = mMesh.getVertex(vid)
-			if v then
-				for _, triId in v.triangles do
-					affectedTriIds[triId] = true
-				end
-			end
-		end
-
-		-- Snapshot each triangle with per-edge split info.
-		-- An edge is split only if both its endpoints are selected,
-		-- so boundary edges of the selection stay intact and topology is preserved.
-		type TriSnapshot = {
-			p: { Vector3 },
-			vids: { number },
-			splits: { boolean },
-			color: Color3,
-			material: Enum.Material,
-			thickness: number,
-			hintPoint: Vector3,
-		}
-		local snapshots: { TriSnapshot } = {}
-		for triId in affectedTriIds do
-			local tri = mMesh.getTriangle(triId)
-			if tri then
-				local positions: { Vector3 } = {}
-				local vids: { number } = {}
-				for _, vid in tri.vertices do
-					local v = mMesh.getVertex(vid)
-					if v then
-						table.insert(positions, v.position)
-						table.insert(vids, vid)
-					end
-				end
-				if #positions == 3 then
-					local part = tri.parts[1]
-					table.insert(snapshots, {
-						p = positions,
-						vids = vids,
-						splits = {
-							(mSelectedVertices[vids[1]] and mSelectedVertices[vids[2]]) == true,
-							(mSelectedVertices[vids[2]] and mSelectedVertices[vids[3]]) == true,
-							(mSelectedVertices[vids[3]] and mSelectedVertices[vids[1]]) == true,
-						},
-						color = part.Color,
-						material = part.Material,
-						thickness = tri.thickness,
-						hintPoint = (positions[1] + positions[2] + positions[3]) / 3 + tri.normal * 0.1,
-					})
-				end
-			end
-		end
-
-		-- Remove all affected triangles
-		for triId in affectedTriIds do
-			mMesh.removeTriangle(triId)
-		end
-
-		-- Re-add with adaptive subdivision
-		local newMidpoints: { Vector3 } = {}
-		local parent = workspace.Terrain
-		for _, snap in snapshots do
-			local p = snap.p
-			local s = snap.splits
-			-- Inherit the source triangle's thickness, not the global setting.
-			local thickness = snap.thickness
-			local props: fillTriangle.TriangleProps = {
-				Color = snap.color,
-				Material = snap.material,
-			}
-			local splitCount = (if s[1] then 1 else 0) + (if s[2] then 1 else 0) + (if s[3] then 1 else 0)
-
-			local hint = snap.hintPoint
-			if splitCount == 0 then
-				-- No edges split — re-add as-is
-				mMesh.addTriangle(p[1], p[2], p[3], thickness, parent, props, hint)
-			elseif splitCount == 3 then
-				-- All edges split — standard 4-way subdivision
-				local m12 = (p[1] + p[2]) / 2
-				local m23 = (p[2] + p[3]) / 2
-				local m31 = (p[3] + p[1]) / 2
-				table.insert(newMidpoints, m12)
-				table.insert(newMidpoints, m23)
-				table.insert(newMidpoints, m31)
-				mMesh.addTriangle(p[1], m12, m31, thickness, parent, props, hint)
-				mMesh.addTriangle(m12, p[2], m23, thickness, parent, props, hint)
-				mMesh.addTriangle(m31, m23, p[3], thickness, parent, props, hint)
-				mMesh.addTriangle(m12, m23, m31, thickness, parent, props, hint)
-			elseif splitCount == 1 then
-				-- One edge split — rotate so split edge is 1-2, then bisect
-				local rp = p
-				if s[2] then
-					rp = { p[2], p[3], p[1] }
-				elseif s[3] then
-					rp = { p[3], p[1], p[2] }
-				end
-				local m = (rp[1] + rp[2]) / 2
-				table.insert(newMidpoints, m)
-				mMesh.addTriangle(rp[1], m, rp[3], thickness, parent, props, hint)
-				mMesh.addTriangle(m, rp[2], rp[3], thickness, parent, props, hint)
-			else -- splitCount == 2
-				-- Two edges split — rotate so unsplit edge is 1-2, apex is vertex 3
-				local rp = p
-				if not s[1] then
-					-- edge 1-2 unsplit, already canonical
-				elseif not s[2] then
-					rp = { p[2], p[3], p[1] }
-				else
-					rp = { p[3], p[1], p[2] }
-				end
-				-- Split edges: rp2-rp3 and rp3-rp1
-				local m23 = (rp[2] + rp[3]) / 2
-				local m31 = (rp[3] + rp[1]) / 2
-				table.insert(newMidpoints, m23)
-				table.insert(newMidpoints, m31)
-				mMesh.addTriangle(rp[3], m31, m23, thickness, parent, props, hint)
-				mMesh.addTriangle(rp[1], rp[2], m23, thickness, parent, props, hint)
-				mMesh.addTriangle(rp[1], m23, m31, thickness, parent, props, hint)
-			end
-		end
-
-		-- Update selection: keep original selected vids that still exist, add midpoint vids
-		local newSelection: { [number]: boolean } = {}
-		for vid in mSelectedVertices do
-			if mMesh.getVertex(vid) then
-				newSelection[vid] = true
-			end
-		end
-		for _, midPos in newMidpoints do
-			local vid = mMesh.findVertexNear(midPos, 0.1)
-			if vid then
-				newSelection[vid] = true
-			end
-		end
-		mSelectedVertices = newSelection
-		mSavedVertexPositions = {}
-
-		if recording then
-			ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
-		end
-		changeSignal:Fire()
-	end
-	session.Simplify = function(count: number)
-		if getSelectedVertexCount() < 2 then
-			return
-		end
-
-		-- Capture the pre-op selection but only commit it to the undo stack if we
-		-- actually collapse an edge below. A no-op Simplify (e.g. two non-adjacent
-		-- vertices selected) cancels the recording, creating no waypoint -- pushing
-		-- a snapshot unconditionally would then desync every later undo's selection.
-		local preOpSelection = captureSelectionPositions()
-		local recording = ChangeHistoryService:TryBeginRecording("PolyMap Simplify")
-		local performed = 0
-
-		for _ = 1, count do
-			-- Find shortest edge (XZ distance) where both endpoints are selected
-			local bestEdgeKey: string? = nil
-			local bestDist = math.huge
-			for key, edge in mMesh.getEdges() do
-				if not mSelectedVertices[edge.v1] or not mSelectedVertices[edge.v2] then
-					continue
-				end
-				local v1 = mMesh.getVertex(edge.v1)
-				local v2 = mMesh.getVertex(edge.v2)
-				if not v1 or not v2 then continue end
-				local delta = v1.position - v2.position
-				local dist = Vector3.new(delta.X, 0, delta.Z).Magnitude
-				if dist < bestDist then
-					bestDist = dist
-					bestEdgeKey = key
-				end
-			end
-
-			if not bestEdgeKey then
-				break
-			end
-
-			local edge = mMesh.getEdges()[bestEdgeKey]
-			if not edge then break end
-
-			local v1 = mMesh.getVertex(edge.v1)
-			local v2 = mMesh.getVertex(edge.v2)
-			if not v1 or not v2 then break end
-
-			local midpoint = (v1.position + v2.position) / 2
-
-			-- Collect all triangles touching either endpoint
-			local affectedTriIds: { [number]: boolean } = {}
-			for _, triId in v1.triangles do
-				affectedTriIds[triId] = true
-			end
-			for _, triId in v2.triangles do
-				affectedTriIds[triId] = true
-			end
-
-			-- Snapshot each triangle, replacing either endpoint with midpoint
-			local snapshots: { { positions: { Vector3 }, color: Color3, material: Enum.Material, thickness: number, hintPoint: Vector3 } } = {}
-			for triId in affectedTriIds do
-				local tri = mMesh.getTriangle(triId)
-				if tri then
-					local positions: { Vector3 } = {}
-					for _, vid in tri.vertices do
-						local vtx = mMesh.getVertex(vid)
-						if vtx then
-							if vid == edge.v1 or vid == edge.v2 then
-								table.insert(positions, midpoint)
-							else
-								table.insert(positions, vtx.position)
-							end
-						end
-					end
-					if #positions == 3 then
-						local part = tri.parts[1]
-						local origVerts: { Vector3 } = {}
-						for _, vid in tri.vertices do
-							local vtx = mMesh.getVertex(vid)
-							if vtx then table.insert(origVerts, vtx.position) end
-						end
-						local centroid = if #origVerts == 3
-							then (origVerts[1] + origVerts[2] + origVerts[3]) / 3
-							else positions[1]
-						table.insert(snapshots, {
-							positions = positions,
-							color = part.Color,
-							material = part.Material,
-							thickness = tri.thickness,
-							hintPoint = centroid + tri.normal * 0.1,
-						})
-					end
-				end
-			end
-
-			-- Remove old vertex IDs from selection
-			local oldV1 = edge.v1
-			local oldV2 = edge.v2
-			mSelectedVertices[oldV1] = nil
-			mSelectedVertices[oldV2] = nil
-
-			-- Remove all affected triangles
-			for triId in affectedTriIds do
-				mMesh.removeTriangle(triId)
-			end
-
-			-- Recreate triangles with merged vertex (degenerate ones auto-skip)
-			for _, snap in snapshots do
-				local props: fillTriangle.TriangleProps = {
-					Color = snap.color,
-					Material = snap.material,
-				}
-				mMesh.addTriangle(
-					snap.positions[1], snap.positions[2], snap.positions[3],
-					snap.thickness, workspace.Terrain, props, snap.hintPoint
-				)
-			end
-
-			-- Add merged vertex to selection
-			local mergedVid = mMesh.findVertexNear(midpoint, 0.1)
-			if mergedVid then
-				mSelectedVertices[mergedVid] = true
-			end
-
-			performed += 1
-		end
-
-		if performed > 0 then
-			-- Commit the snapshot now that we know a waypoint will be created,
-			-- keeping the undo selection stack balanced with ChangeHistory.
-			table.insert(mUndoSelections, preOpSelection)
-			mRedoSelections = {}
-			if recording then
-				ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
-			else
-				ChangeHistoryService:SetWaypoint("PolyMap Simplify")
-			end
-		elseif recording then
-			ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Cancel)
-		end
 		changeSignal:Fire()
 	end
 

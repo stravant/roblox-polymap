@@ -50,7 +50,7 @@ local function loadSettings(plugin: Plugin): PolyMapSettings
 		HaveHelp = if raw.HaveHelp ~= nil then raw.HaveHelp else true,
 		DoneTutorial = if raw.DoneTutorial ~= nil then raw.DoneTutorial else false,
 
-		Mode = raw.Mode or "Select",
+		Mode = raw.Mode or "Move",
 		DeleteTarget = raw.DeleteTarget or "Face",
 		DeleteRadius = raw.DeleteRadius or 0,
 		PaintRadius = raw.PaintRadius or 0,

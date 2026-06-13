@@ -72,24 +72,6 @@ local function colorsClose(a: Color3, b: Color3): boolean
 	return math.abs(a.R - b.R) < 0.02 and math.abs(a.G - b.G) < 0.02 and math.abs(a.B - b.B) < 0.02
 end
 
--- Two positions that are guaranteed not to share an edge (the farthest-apart
--- pair in the set), used to make a Simplify a no-op.
-local function pickTwoFarApart(positions: { Vector3 }): (Vector3, Vector3)
-	local bestA, bestB = positions[1], positions[2]
-	local bestD = -1
-	for i = 1, #positions do
-		for j = i + 1, #positions do
-			local d = (positions[i] - positions[j]).Magnitude
-			if d > bestD then
-				bestD = d
-				bestA = positions[i]
-				bestB = positions[j]
-			end
-		end
-	end
-	return bestA, bestB
-end
-
 return function(t: TestTypes.TestContext)
 	-- Let deferred ChangeHistoryService.OnUndo/OnRedo handlers run before asserting.
 	local function settle()
@@ -302,88 +284,6 @@ return function(t: TestTypes.TestContext)
 			ChangeHistoryService:Redo()
 			settle()
 			t.expect(colorsClose(paintPart.Color, red)).toBeTruthy()
-		end)
-	end)
-
-	t.test("workflow: subdivide then simplify, undo chain restores each step, redo from empty", function()
-		withSession(function(session, mesh)
-			session.GenerateGrid()
-			local n0 = countDict(mesh.getTriangles())
-			t.expect(n0 > 0).toBeTruthy()
-
-			-- Select every vertex and subdivide
-			local allPos: { Vector3 } = {}
-			for _, v in mesh.getVertices() do
-				table.insert(allPos, v.position)
-			end
-			session.SelectVerticesNear(allPos)
-			session.Subdivide()
-			local n1 = countDict(mesh.getTriangles())
-			t.expect(n1 > n0).toBeTruthy()
-
-			-- Simplify a couple of edges
-			session.Simplify(2)
-			local n2 = countDict(mesh.getTriangles())
-			t.expect(n2 < n1).toBeTruthy()
-
-			-- Undo simplify -> back to subdivided (full rediscovery of restored parts)
-			ChangeHistoryService:Undo()
-			settle()
-			t.expect(countDict(mesh.getTriangles())).toBe(n1)
-
-			-- Undo subdivide -> back to the original grid
-			ChangeHistoryService:Undo()
-			settle()
-			t.expect(countDict(mesh.getTriangles())).toBe(n0)
-
-			-- Undo generate -> empty
-			ChangeHistoryService:Undo()
-			settle()
-			t.expect(countDict(mesh.getTriangles())).toBe(0)
-
-			-- Redo generate from the empty mesh -> grid re-found via last-known seeds
-			ChangeHistoryService:Redo()
-			settle()
-			t.expect(countDict(mesh.getTriangles())).toBe(n0)
-		end)
-	end)
-
-	t.test("workflow: a no-op Simplify does not desync the undo selection stack", function()
-		withSession(function(session, mesh)
-			session.GenerateGrid()
-
-			-- Move vertex A (a real, undoable op whose pre-op selection is {A})
-			local aPos: Vector3? = nil
-			for _, v in mesh.getVertices() do
-				aPos = v.position
-				break
-			end
-			assert(aPos)
-			session.SelectVerticesNear({ aPos })
-			session.MoveSelectedVertices(Vector3.new(0, 6, 0))
-
-			-- Select two non-adjacent vertices (not A) and Simplify -> a no-op
-			local others: { Vector3 } = {}
-			for _, v in mesh.getVertices() do
-				if (v.position - aPos).Magnitude > 0.5 then
-					table.insert(others, v.position)
-				end
-			end
-			local b, c = pickTwoFarApart(others)
-			session.SelectVerticesNear({ b, c })
-			t.expect(countDict(session.GetSelectedVertices())).toBe(2)
-			session.Simplify(1)
-
-			-- Undo the move. If the no-op Simplify leaked a snapshot, this pops the
-			-- wrong one and restores {B,C}; with the fix it restores the move's {A}.
-			ChangeHistoryService:Undo()
-			settle()
-
-			local restoredA = mesh.findVertexNear(aPos, 0.5)
-			t.expect(restoredA).toBeTruthy()
-			local sel = session.GetSelectedVertices()
-			t.expect(countDict(sel)).toBe(1)
-			t.expect(sel[restoredA]).toBeTruthy()
 		end)
 	end)
 
@@ -1258,74 +1158,6 @@ return function(t: TestTypes.TestContext)
 			t.expect(countDict(mesh.getVertices())).toBe(n0V)
 			t.expect(#mesh.getBoundaryEdges()).toBe(n0B)
 			t.expect(nonManifoldEdges(mesh)).toBe(0)
-		end)
-	end)
-
-	t.test("subdivide keeps each triangle's thickness instead of the current setting", function()
-		withSession(function(session, mesh, settings)
-			settings.GridWidth = 3
-			settings.GridHeight = 3
-			settings.GridSpacing = 4
-			settings.Thickness = 0.5
-			session.GenerateGrid()
-			t.expect(countDict(mesh.getTriangles()) > 0).toBeTruthy()
-			-- The generated parts are all 0.5 thick (fillTriangle makes the thin
-			-- wedge dimension its local X).
-			for _, tri in mesh.getTriangles() do
-				for _, part in tri.parts do
-					t.expect(math.abs(part.Size.X - 0.5) < 1e-3).toBeTruthy()
-				end
-			end
-
-			-- Change the global thickness, then subdivide the whole grid.
-			settings.Thickness = 0.2
-			local allPos: { Vector3 } = {}
-			for _, v in mesh.getVertices() do
-				table.insert(allPos, v.position)
-			end
-			session.SelectVerticesNear(allPos)
-			session.Subdivide()
-
-			-- Every resulting part keeps the source 0.5 thickness, not the new 0.2.
-			local count = 0
-			for _, tri in mesh.getTriangles() do
-				for _, part in tri.parts do
-					count += 1
-					t.expect(math.abs(part.Size.X - 0.5) < 1e-3).toBeTruthy()
-				end
-			end
-			t.expect(count > 0).toBeTruthy()
-		end)
-	end)
-
-	t.test("simplify keeps each triangle's thickness instead of the current setting", function()
-		withSession(function(session, mesh, settings)
-			settings.GridWidth = 3
-			settings.GridHeight = 3
-			settings.GridSpacing = 4
-			settings.Thickness = 0.5
-			session.GenerateGrid()
-			local before = countDict(mesh.getTriangles())
-
-			settings.Thickness = 0.2
-			local allPos: { Vector3 } = {}
-			for _, v in mesh.getVertices() do
-				table.insert(allPos, v.position)
-			end
-			session.SelectVerticesNear(allPos)
-			session.Simplify(1)
-			-- A collapse actually happened (so the re-add path ran).
-			t.expect(countDict(mesh.getTriangles()) < before).toBeTruthy()
-
-			-- The triangles rebuilt around the collapsed edge keep 0.5, not 0.2.
-			local count = 0
-			for _, tri in mesh.getTriangles() do
-				for _, part in tri.parts do
-					count += 1
-					t.expect(math.abs(part.Size.X - 0.5) < 1e-3).toBeTruthy()
-				end
-			end
-			t.expect(count > 0).toBeTruthy()
 		end)
 	end)
 
