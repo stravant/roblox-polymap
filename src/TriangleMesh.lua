@@ -430,22 +430,76 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 	-- Mutations
 	---------------------------------------------------------------------------
 
+	-- If a proposed triangle wound (a, b, c) already shares an edge with an
+	-- existing triangle, return the invert flag that makes it wind CONSISTENTLY
+	-- with that neighbour: two consistently-oriented triangles traverse their
+	-- shared edge in opposite directions, so if the neighbour also traverses the
+	-- edge a->b the proposal is backwards and must invert. Returns nil when the
+	-- triangle is isolated (nothing to match -- caller falls back to a hint).
+	local function invertToMatchNeighbor(aId: VertexId, bId: VertexId, cId: VertexId): boolean?
+		local proposed = { aId, bId, cId }
+		for i = 1, 3 do
+			local j = i % 3 + 1
+			local p, q = proposed[i], proposed[j]
+			local pv, qv = mVertices[p], mVertices[q]
+			if not (pv and qv) then
+				continue
+			end
+			local edgeId = mEdgeLookup[hashEdge(pv.position, qv.position)]
+			if not edgeId then
+				continue
+			end
+			local edge = mEdges[edgeId]
+			if not edge then
+				continue
+			end
+			for _, tid in edge.triangles do
+				local tri = mTriangles[tid]
+				if not tri then
+					continue
+				end
+				local tv = tri.vertices
+				for k = 1, 3 do
+					local l = k % 3 + 1
+					if tv[k] == p and tv[l] == q then
+						-- Neighbour also goes p->q: same direction -> inconsistent.
+						return true
+					elseif tv[k] == q and tv[l] == p then
+						-- Neighbour goes q->p: opposite direction -> consistent.
+						return false
+					end
+				end
+			end
+		end
+		return nil
+	end
+
 	local function addTriangle(
 		v1Pos: Vector3, v2Pos: Vector3, v3Pos: Vector3,
 		thickness: number, parent: Instance,
 		props: fillTriangle.TriangleProps?, hintPoint: Vector3
 	): number?
-		-- Determine normal from winding, then check if we need to flip
-		-- to face towards the hintPoint
+		-- Determine normal from winding, then choose the winding.
 		local natural = computeNormal(v1Pos, v2Pos, v3Pos)
-		local centroid = (v1Pos + v2Pos + v3Pos) / 3
-		local toHint = hintPoint - centroid
-		local shouldInvert = natural:Dot(toHint) < 0
 
 		-- Get or create vertices
 		local v1Id = getOrCreateVertex(v1Pos)
 		local v2Id = getOrCreateVertex(v2Pos)
 		local v3Id = getOrCreateVertex(v3Pos)
+
+		-- Prefer matching an existing neighbour on a shared edge so the surface
+		-- stays consistently wound; fall back to facing the hint for an isolated
+		-- triangle. The hint-only test flipped triangles added onto a tilted/curved
+		-- edge, where the new triangle's natural normal and the neighbour's normal
+		-- point far enough apart that the dot-product picked the wrong winding.
+		local shouldInvert: boolean
+		local neighborInvert = invertToMatchNeighbor(v1Id, v2Id, v3Id)
+		if neighborInvert ~= nil then
+			shouldInvert = neighborInvert
+		else
+			local centroid = (v1Pos + v2Pos + v3Pos) / 3
+			shouldInvert = natural:Dot(hintPoint - centroid) < 0
+		end
 
 		-- Determine vertex order for consistent normal direction
 		local orderedVerts: {VertexId}
@@ -1355,6 +1409,162 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		return false
 	end
 
+	-- Remove a triangle from all bookkeeping but LEAVE its world parts intact and
+	-- unlinked, so the caller can re-link them to a replacement triangle. (Unlike
+	-- removeTriangle, which parents the parts out of the world.)
+	local function detachTriangleKeepParts(tri: Triangle)
+		for _, part in tri.parts do
+			unlinkTriangleFromPart(tri, part)
+		end
+		for _, vid in tri.vertices do
+			local v = mVertices[vid]
+			if v then
+				local idx = table.find(v.triangles, tri.id)
+				if idx then
+					table.remove(v.triangles, idx)
+				end
+			end
+		end
+		for _, pair in triangleEdgePairs(tri.vertices) do
+			local v1 = mVertices[pair[1]]
+			local v2 = mVertices[pair[2]]
+			if v1 and v2 then
+				local eid = mEdgeLookup[hashEdge(v1.position, v2.position)]
+				if eid then
+					local edge = mEdges[eid]
+					if edge then
+						local idx = table.find(edge.triangles, tri.id)
+						if idx then
+							table.remove(edge.triangles, idx)
+						end
+						cleanupEdge(eid)
+					end
+				end
+			end
+		end
+		mTriangles[tri.id] = nil
+		for _, vid in tri.vertices do
+			cleanupVertex(vid)
+		end
+	end
+
+	-- Re-fuse any fillTriangle two-wedge split that was left as two separate
+	-- single-part triangles. discoverPart's per-wedge merge only fires when the
+	-- partner wedge is still undiscovered, so depending on walk order both halves
+	-- can be discovered independently and neither merges -- leaving the altitude
+	-- foot as a phantom vertex and an extra triangle (so a fresh rediscovery, e.g.
+	-- on undo, disagrees with the live mesh). This order-independent pass scans
+	-- interior edges shared by exactly two coplanar single-part triangles; if one
+	-- of the shared-edge endpoints sits collinear strictly between the two far
+	-- vertices (the foot on the original base), the pair is a split and is fused.
+	local function coalesceWedgePairs()
+		local function collinearBetween(p: Vector3, a: Vector3, b: Vector3): boolean
+			local d = b - a
+			local dl = d.Magnitude
+			if dl < 1e-4 then
+				return false
+			end
+			local toP = p - a
+			if d:Cross(toP).Magnitude / dl > 0.01 then
+				return false
+			end
+			local s = toP:Dot(d) / (dl * dl)
+			return s > 0.001 and s < 0.999
+		end
+
+		local edgeIds: { EdgeId } = {}
+		for eid in mEdges do
+			table.insert(edgeIds, eid)
+		end
+		for _, eid in edgeIds do
+			local edge = mEdges[eid]
+			if not edge or #edge.triangles ~= 2 then
+				continue
+			end
+			local t1 = mTriangles[edge.triangles[1]]
+			local t2 = mTriangles[edge.triangles[2]]
+			if not (t1 and t2) or t1 == t2 then
+				continue
+			end
+			if #t1.parts ~= 1 or #t2.parts ~= 1 then
+				continue
+			end
+			-- Coplanar (faces parallel within ~8 degrees)?
+			if math.abs(t1.normal:Dot(t2.normal)) < 0.99 then
+				continue
+			end
+			local s1Id, s2Id = edge.v1, edge.v2
+			local function thirdOf(tri: Triangle): VertexId?
+				for _, vid in tri.vertices do
+					if vid ~= s1Id and vid ~= s2Id then
+						return vid
+					end
+				end
+				return nil
+			end
+			local u1Id = thirdOf(t1)
+			local u2Id = thirdOf(t2)
+			if not (u1Id and u2Id) or u1Id == u2Id then
+				continue
+			end
+			local s1, s2 = mVertices[s1Id], mVertices[s2Id]
+			local u1, u2 = mVertices[u1Id], mVertices[u2Id]
+			if not (s1 and s2 and u1 and u2) then
+				continue
+			end
+			local apexPos: Vector3
+			if collinearBetween(s1.position, u1.position, u2.position) then
+				apexPos = s2.position
+			elseif collinearBetween(s2.position, u1.position, u2.position) then
+				apexPos = s1.position
+			else
+				continue
+			end
+
+			-- Fuse: replace t1 + t2 with one triangle {apex, u1, u2} spanning both
+			-- parts, inheriting t1's facing so the merged winding stays consistent.
+			local u1Pos, u2Pos = u1.position, u2.position
+			local p1, p2 = t1.parts[1], t2.parts[1]
+			local thick = t1.thickness
+			local mergedNatural = computeNormal(apexPos, u1Pos, u2Pos)
+			local mergedInvert = mergedNatural:Dot(t1.normal) < 0
+			detachTriangleKeepParts(t1)
+			detachTriangleKeepParts(t2)
+
+			local aId = getOrCreateVertex(apexPos)
+			local bId = getOrCreateVertex(u1Pos)
+			local cId = getOrCreateVertex(u2Pos)
+			local verts: { VertexId }
+			local normal: Vector3
+			if mergedInvert then
+				verts = { aId, cId, bId }
+				normal = -mergedNatural
+			else
+				verts = { aId, bId, cId }
+				normal = mergedNatural
+			end
+			local triId = mNextTriangleId
+			mNextTriangleId += 1
+			local merged: Triangle = {
+				id = triId,
+				vertices = verts,
+				normal = normal,
+				parts = { p1, p2 },
+				thickness = thick,
+			}
+			mTriangles[triId] = merged
+			for _, vid in verts do
+				table.insert(mVertices[vid].triangles, triId)
+			end
+			for _, pair in triangleEdgePairs(verts) do
+				local e = getOrCreateEdge(pair[1], pair[2])
+				table.insert(mEdges[e].triangles, triId)
+			end
+			linkTriangleToPart(merged, p1)
+			linkTriangleToPart(merged, p2)
+		end
+	end
+
 	local function discoverRegion(seeds: {Vector3}, radius: number): {TriangleId}
 		local discovered = {} :: {[TriangleId]: boolean}
 		local result = {} :: {TriangleId}
@@ -1503,17 +1713,29 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 				-- Arbitrary-point bootstrap: a seed that is a surface point but not a
 				-- corner (a triangle centroid, a paint/add click) on an as-yet
 				-- undiscovered surface. There is no shared corner to key off, so adopt
-				-- just the single closest part the point sits on; the corner-guarded
-				-- walk then expands from its corners.
+				-- just the single closest part the point actually sits ON -- the seed
+				-- must lie inside that part's (slightly grown) box. A stale seed left
+				-- floating after an undo sits inside no part, so it bootstraps nothing
+				-- and cannot spawn a wrong-side (back face) triangle; the real seeds
+				-- (the reverted snapshot, unmoved vertices) still bootstrap, and the
+				-- unbounded walk recovers the rest of the connected mesh from them.
 				local bootstrapPart: BasePart? = nil
 				if not posKnown and not haveCornerMatch then
 					local bestD = math.huge
 					for _, part in nearbyParts do
 						if part:IsA("BasePart") and not mPartToTriangles[part] then
-							local d = (part.Position - pos).Magnitude
-							if d < bestD then
-								bestD = d
-								bootstrapPart = part :: BasePart
+							local lp = part.CFrame:PointToObjectSpace(pos)
+							local hs = (part :: BasePart).Size / 2
+							if
+								math.abs(lp.X) <= hs.X + 0.3
+								and math.abs(lp.Y) <= hs.Y + 0.3
+								and math.abs(lp.Z) <= hs.Z + 0.3
+							then
+								local d = (part.Position - pos).Magnitude
+								if d < bestD then
+									bestD = d
+									bootstrapPart = part :: BasePart
+								end
 							end
 						end
 					end
@@ -1539,6 +1761,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			end
 		end
 
+		coalesceWedgePairs()
 		orientConsistently()
 		return result
 	end

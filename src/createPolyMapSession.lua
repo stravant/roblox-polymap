@@ -1601,19 +1601,23 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		-- the actual parts, so an unbounded radius still stays bounded to the
 		-- real connected geometry rather than scanning the whole world.
 		local seeds: { Vector3 } = {}
-		for _, vertex in mMesh.getVertices() do
-			table.insert(seeds, vertex.position)
-		end
-		-- Also seed from the snapshot being restored by this undo/redo. The in-
-		-- memory mesh still holds the POST-op positions (e.g. a moved-down region),
-		-- but the parts now sit at their reverted positions, so the in-memory seeds
-		-- can ALL miss them -- leaving an empty mesh. The restored snapshot matches
-		-- the reverted world, and the unbounded walk recovers the connected mesh
-		-- from any one good seed.
+		-- Seed from the restored snapshot FIRST. Those positions match the reverted
+		-- world exactly, so the (FIFO) walk discovers the connected mesh correctly
+		-- from them before any stale post-op live position is processed. After an
+		-- undo the in-memory mesh still holds POST-op positions (e.g. a moved-down
+		-- region) while the parts have reverted, so a stale seed now floats off the
+		-- parts; processing it first could bootstrap a part from the wrong side (a
+		-- back face). Ordering the good seeds ahead means by the time a stale seed
+		-- is reached, its region is already discovered and it is a no-op.
 		if extraSeeds then
 			for _, p in extraSeeds do
 				table.insert(seeds, p)
 			end
+		end
+		-- Then the in-memory positions, for full coverage (e.g. an op with no
+		-- selection snapshot, or geometry the snapshot's component doesn't reach).
+		for _, vertex in mMesh.getVertices() do
+			table.insert(seeds, vertex.position)
 		end
 		-- When there is still nothing to seed from -- e.g. redoing a creation after
 		-- it was fully undone -- fall back to the most recent known positions.

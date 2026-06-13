@@ -1095,15 +1095,18 @@ return function(t: TestTypes.TestContext)
 		-- Child should face the same direction as parent (upward)
 		t.expect(childTri.normal.Y > 0.9).toBeTruthy()
 
-		-- Verify the BAD hintPoint (Vector3.zero) would produce wrong normal.
-		-- This is the bug: Add mode passed worldPos=Vector3.zero when the
-		-- raycast missed, flipping the triangle to face downward.
+		-- Even a bad hintPoint (e.g. Vector3.zero from a missed raycast) no longer
+		-- flips the new triangle: when it shares an edge with an existing triangle,
+		-- addTriangle orients to wind consistently with that neighbour and ignores
+		-- the hint entirely (the hint is only the fallback for an isolated triangle
+		-- with no neighbour to match). This is what keeps Add robust on tilted and
+		-- curved edges, where a normal-vs-hint dot test picked the wrong winding.
 		mesh.removeTriangle(childId)
 		local badChildId = mesh.addTriangle(a, b, d, 0.2, folder, nil, Vector3.zero)
 		assert(badChildId)
 		local badChildTri = mesh.getTriangle(badChildId)
 		assert(badChildTri)
-		t.expect(badChildTri.normal.Y < -0.9).toBeTruthy() -- wrong: faces down
+		t.expect(badChildTri.normal.Y > 0.9).toBeTruthy() -- still faces up: matches the parent
 
 		folder:Destroy()
 	end)
