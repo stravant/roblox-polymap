@@ -218,6 +218,30 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		mRedoSelections = {}
 	end
 
+	-- Run a one-shot mesh edit inside a ChangeHistory recording. The pre-op
+	-- selection snapshot is committed to the undo stack iff body() reports it
+	-- actually changed something -- keeping the undo/redo selection stacks
+	-- balanced with the committed waypoints so undo restores the right
+	-- selection (and no-ops/failed recordings don't desync them). Returns
+	-- whether a change was made.
+	local function runUndoableOperation(name: string, body: () -> boolean): boolean
+		local snapshot = captureSelectionPositions()
+		local recording = ChangeHistoryService:TryBeginRecording(name)
+		local changed = body()
+		if changed then
+			table.insert(mUndoSelections, snapshot)
+			mRedoSelections = {}
+			if recording then
+				ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+			else
+				ChangeHistoryService:SetWaypoint(name)
+			end
+		elseif recording then
+			ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Cancel)
+		end
+		return changed
+	end
+
 	local VERTEX_CLICK_RADIUS = 3.0 -- world-space radius to find vertex
 
 	local function getTriangleProps(): fillTriangle.TriangleProps
@@ -1853,23 +1877,19 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			then CFrame.new(pos)
 			else CFrame.lookAlong(pos, flatLook)
 
-		pushUndoSnapshot()
-		local recording = ChangeHistoryService:TryBeginRecording("PolyMap Generate Grid")
-
-		generateGrid({
-			GridType = currentSettings.GridType,
-			Width = currentSettings.GridWidth,
-			Height = currentSettings.GridHeight,
-			Spacing = currentSettings.GridSpacing,
-			Origin = origin,
-			Thickness = currentSettings.Thickness,
-			Parent = workspace.Terrain,
-			Props = getTriangleProps(),
-		})
-
-		if recording then
-			ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
-		end
+		runUndoableOperation("PolyMap Generate Grid", function(): boolean
+			generateGrid({
+				GridType = currentSettings.GridType,
+				Width = currentSettings.GridWidth,
+				Height = currentSettings.GridHeight,
+				Spacing = currentSettings.GridSpacing,
+				Origin = origin,
+				Thickness = currentSettings.Thickness,
+				Parent = workspace.Terrain,
+				Props = getTriangleProps(),
+			})
+			return true
+		end)
 
 		-- Discover the generated grid parts instead of full rescan
 		local gridExtent = math.max(currentSettings.GridWidth, currentSettings.GridHeight)
@@ -1945,21 +1965,17 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			return
 		end
 
-		pushUndoSnapshot()
-		local recording = ChangeHistoryService:TryBeginRecording("PolyMap Move")
-
-		local moves: { [number]: Vector3 } = {}
-		for vid in mSelectedVertices do
-			local v = mMesh.getVertex(vid)
-			if v then
-				moves[vid] = v.position + delta
+		runUndoableOperation("PolyMap Move", function(): boolean
+			local moves: { [number]: Vector3 } = {}
+			for vid in mSelectedVertices do
+				local v = mMesh.getVertex(vid)
+				if v then
+					moves[vid] = v.position + delta
+				end
 			end
-		end
-		mMesh.moveVertices(moves, currentSettings.Thickness, getTriangleProps())
-
-		if recording then
-			ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
-		end
+			mMesh.moveVertices(moves, currentSettings.Thickness, getTriangleProps())
+			return true
+		end)
 		changeSignal:Fire()
 	end
 	session.Subdivide = function()
@@ -2314,17 +2330,14 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			end
 		end
 
-		pushUndoSnapshot()
-		local recording = ChangeHistoryService:TryBeginRecording("PolyMap Add Triangle")
-		local triId = mMesh.addTriangle(
-			v1.position, v2.position, apexWorldPos,
-			currentSettings.Thickness, workspace.Terrain, getTriangleProps(), hintPoint
-		)
-		if recording then
-			ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
-		else
-			ChangeHistoryService:SetWaypoint("PolyMap Add Triangle")
-		end
+		local triId: number? = nil
+		runUndoableOperation("PolyMap Add Triangle", function(): boolean
+			triId = mMesh.addTriangle(
+				v1.position, v2.position, apexWorldPos,
+				currentSettings.Thickness, workspace.Terrain, getTriangleProps(), hintPoint
+			)
+			return triId ~= nil
+		end)
 		changeSignal:Fire()
 		return triId
 	end
