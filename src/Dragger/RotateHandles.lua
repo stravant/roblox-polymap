@@ -13,6 +13,10 @@ local getEngineFeatureModelPivotVisual = require(DraggerFramework.Flags.getEngin
 
 local MIN_ROTATE_INCREMENT = 5.0
 
+-- Shrinks the Y ring relative to the base handle radius (4.5). Negative so the Y
+-- ring reads as the inner control sitting inside the larger X/Z arcs.
+local Y_RING_RADIUS_OFFSET = -1.5
+
 local RIGHT_ANGLE = math.pi / 2
 local RIGHT_ANGLE_EXACT_THRESHOLD = 0.001
 
@@ -28,11 +32,13 @@ local RotateHandleDefinitions = {
 		AngleOffset = math.rad(90),
 		LocalAxis = Vector3.xAxis,
 	},
+	-- Y is the primary heading rotation: a full ring, drawn smaller so it reads as
+	-- the inner control inside the X/Z arcs.
 	YAxis = {
 		Offset = CFrame.fromMatrix(Vector3.new(), Vector3.new(0, 1, 0), Vector3.new(0, 0, 1), Vector3.new(1, 0, 0)),
 		Color = Colors.Y_AXIS,
-		RadiusOffset = 0.01,
-		View = PartialRotateHandleView,
+		RadiusOffset = Y_RING_RADIUS_OFFSET,
+		View = RotateHandleView,
 		AngleOffset = 0,
 		LocalAxis = Vector3.yAxis,
 	},
@@ -40,8 +46,8 @@ local RotateHandleDefinitions = {
 		Offset = CFrame.fromMatrix(Vector3.new(), Vector3.new(0, 0, 1), Vector3.new(1, 0, 0), Vector3.new(0, 1, 0)),
 		Color = Colors.Z_AXIS,
 		RadiusOffset = 0.02,
-		View = RotateHandleView,
-		AngleOffset = 0,
+		View = PartialRotateHandleView,
+		AngleOffset = math.rad(90),
 		LocalAxis = Vector3.zAxis,
 	},
 }
