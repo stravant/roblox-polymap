@@ -195,6 +195,7 @@ return function(t: TestTypes.TestContext)
 		-- deformation -- a few harmless extra mid-edge vertices, still manifold and
 		-- consistently oriented, no back faces.
 		local orphans = 0
+		local sample = ""
 		for _, fv in fresh.getVertices() do
 			local minD = math.huge
 			for _, sp in seeds do
@@ -202,10 +203,15 @@ return function(t: TestTypes.TestContext)
 			end
 			if minD > 0.05 then
 				orphans += 1
+				if sample == "" then
+					sample = string.format(" first orphan @ (%.2f,%.2f,%.2f) minDistToSeed=%.3f", fv.position.X, fv.position.Y, fv.position.Z, minD)
+				end
 			end
 		end
 		if orphans > 0 then
-			return string.format("rediscover produced %d back-face/orphan vertices", orphans)
+			return string.format(
+				"rediscover produced %d back-face/orphan vertices (liveT=%d liveV=%d freshT=%d freshV=%d)%s",
+				orphans, liveT, liveV, fT, fV, sample)
 		end
 		return nil
 	end
@@ -277,7 +283,10 @@ return function(t: TestTypes.TestContext)
 	-- past anything a real edit produces -- that pathological regime stresses
 	-- floating-point/merge limits rather than real discovery behaviour.
 	local function opMoveInfluence(session: any, mesh: any, settings: any, rng: Random): string
-		settings.InfluenceRadius = rng:NextNumber(0, 6)
+		-- Range deliberately exceeds the 4x4 grid's half-extent (~8) so some drags
+		-- influence the WHOLE mesh -- the large-radius regime where an undo leaves
+		-- only the selected vertex as a good rediscovery seed.
+		settings.InfluenceRadius = rng:NextNumber(0, 30)
 		local d = Vector3.new(rng:NextNumber(-1.5, 1.5), rng:NextNumber(-4, 4), rng:NextNumber(-1.5, 1.5))
 		session.MoveSelectedWithInfluence(d)
 		return string.format("moveInf(r=%.1f,d=%.1f,%.1f,%.1f)", settings.InfluenceRadius, d.X, d.Y, d.Z)
@@ -418,7 +427,10 @@ return function(t: TestTypes.TestContext)
 		end)
 	end
 
-	for seed = 1, 8 do
+	-- 12 seeds (up from 8) so the large-influence-radius regime added above gets
+	-- several independent op sequences; seeds 6, 8 and 11 each drive a whole-mesh
+	-- influence drag through an undo, the case that exposed the stale-seed back face.
+	for seed = 1, 12 do
 		t.test(string.format("fuzz seed %d (40 ops)", seed), function()
 			runFuzz(seed, 40)
 		end)

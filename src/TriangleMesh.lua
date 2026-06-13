@@ -1863,13 +1863,19 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 				-- corner (a triangle centroid, a paint/add click) on an as-yet
 				-- undiscovered surface. There is no shared corner to key off, so adopt
 				-- just the single closest part the point actually sits ON -- the seed
-				-- must lie inside that part's (slightly grown) box. A stale seed left
-				-- floating after an undo sits inside no part, so it bootstraps nothing
-				-- and cannot spawn a wrong-side (back face) triangle; the real seeds
-				-- (the reverted snapshot, unmoved vertices) still bootstrap, and the
-				-- unbounded walk recovers the rest of the connected mesh from them.
+				-- must lie inside that part's (slightly grown) box.
+				--
+				-- Disabled for the unbounded rebuild (radius == math.huge, the undo/redo
+				-- rediscovery). There, every seed is either a corner (handled by the
+				-- corner match above) or a STALE post-op position. The old "a stale seed
+				-- floats inside no part" assumption fails under a large influence drag:
+				-- a vertex moved only slightly (small falloff near the radius edge) lands
+				-- a fraction off the reverted surface, still inside this part's grown
+				-- box, and bootstraps it from the wrong side -- a thickness-offset back
+				-- face. The connected mesh is fully recovered from the corner seeds via
+				-- the corner-matched walk, so containment bootstrap is pure risk here.
 				local bootstrapPart: BasePart? = nil
-				if not posKnown and not haveCornerMatch then
+				if not posKnown and not haveCornerMatch and radius ~= math.huge then
 					local bestD = math.huge
 					for _, part in nearbyParts do
 						if part:IsA("BasePart") and not mPartToTriangles[part] then
