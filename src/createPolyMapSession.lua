@@ -1053,6 +1053,11 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			pushUndoSnapshot()
 			mStrokeRecording = ChangeHistoryService:TryBeginRecording("PolyMap Delete")
 		elseif mode == "Paint" then
+			-- Push a snapshot like the other stroke modes do: Paint still commits
+			-- a "PolyMap Paint" waypoint, and handleUndo pops the selection stack
+			-- for every PolyMap waypoint, so skipping the push here desyncs the
+			-- undo/redo selection stacks for all later operations.
+			pushUndoSnapshot()
 			mStrokeRecording = ChangeHistoryService:TryBeginRecording("PolyMap Paint")
 		elseif mode == "Relax" then
 			pushUndoSnapshot()
@@ -1539,15 +1544,20 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 	local function rediscoverMesh()
 		-- Collect all known vertex positions before clearing, then clear and
-		-- rediscover from scratch. The topology walk in discoverRegion will
-		-- find everything connected to any seed.
+		-- rediscover from scratch. After an undo/redo the parts have been
+		-- reverted (moved, or deleted-then-restored, etc.), so we must rebuild
+		-- the *whole* connected mesh. A fixed radius would leave restored
+		-- geometry further out -- e.g. undoing a large Delete or Simplify -- as
+		-- untracked stale state. discoverRegion walks vertex-to-vertex through
+		-- the actual parts, so an unbounded radius still stays bounded to the
+		-- real connected geometry rather than scanning the whole world.
 		local seeds: { Vector3 } = {}
 		for _, vertex in mMesh.getVertices() do
 			table.insert(seeds, vertex.position)
 		end
 		mMesh.clear()
 		if #seeds > 0 then
-			mMesh.discoverRegion(seeds, 5)
+			mMesh.discoverRegion(seeds, math.huge)
 		end
 	end
 
@@ -2101,7 +2111,11 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			return
 		end
 
-		pushUndoSnapshot()
+		-- Capture the pre-op selection but only commit it to the undo stack if we
+		-- actually collapse an edge below. A no-op Simplify (e.g. two non-adjacent
+		-- vertices selected) cancels the recording, creating no waypoint -- pushing
+		-- a snapshot unconditionally would then desync every later undo's selection.
+		local preOpSelection = captureSelectionPositions()
 		local recording = ChangeHistoryService:TryBeginRecording("PolyMap Simplify")
 		local performed = 0
 
@@ -2214,12 +2228,18 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			performed += 1
 		end
 
-		if recording then
-			if performed > 0 then
+		if performed > 0 then
+			-- Commit the snapshot now that we know a waypoint will be created,
+			-- keeping the undo selection stack balanced with ChangeHistory.
+			table.insert(mUndoSelections, preOpSelection)
+			mRedoSelections = {}
+			if recording then
 				ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
 			else
-				ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Cancel)
+				ChangeHistoryService:SetWaypoint("PolyMap Simplify")
 			end
+		elseif recording then
+			ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Cancel)
 		end
 		changeSignal:Fire()
 	end

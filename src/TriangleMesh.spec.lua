@@ -1086,6 +1086,53 @@ return function(t: TestTypes.TestContext)
 		folder:Destroy()
 	end)
 
+	t.test("discoverRegion rebuilds the full connected mesh for undo rediscovery", function()
+		-- Regression for rediscoverMesh(): after an undo/redo the in-memory mesh
+		-- is cleared and rebuilt from the currently-known vertex positions. A
+		-- fixed radius (the old value was 5) would leave connected geometry
+		-- further out untracked -- e.g. after undoing a large Delete -- so
+		-- rediscovery walks the whole connected mesh with an unbounded radius.
+		for _, p in workspace:GetPartBoundsInRadius(Vector3.new(1712, 10, 1.5), 60) do
+			if p:IsA("BasePart") then p:Destroy() end
+		end
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		-- A chain of 6 adjacent triangles along X (each 4 studs wide, ~24 total),
+		-- far longer than the old fixed rediscovery radius of 5.
+		local stripCount = 6
+		for i = 0, stripCount - 1 do
+			local x = 1700 + i * 4
+			fillTriangle(
+				Vector3.new(x, 10, 0), Vector3.new(x + 4, 10, 0), Vector3.new(x + 2, 10, 3),
+				0.2, folder
+			)
+		end
+
+		-- From a single seed at one end, an unbounded radius must walk the entire
+		-- connected chain. (With the old radius of 5 only the first ~2 are found.)
+		local tris = mesh.discoverRegion({Vector3.new(1700, 10, 0)}, math.huge)
+		t.expect(#tris).toBe(stripCount)
+
+		-- Emulate the rediscover step itself: snapshot every known vertex, clear,
+		-- and rebuild. Nothing should be lost.
+		local seeds: { Vector3 } = {}
+		for _, v in mesh.getVertices() do
+			table.insert(seeds, v.position)
+		end
+		mesh.clear()
+		mesh.discoverRegion(seeds, math.huge)
+
+		local triCount = 0
+		for _ in mesh.getTriangles() do
+			triCount += 1
+		end
+		t.expect(triCount).toBe(stripCount)
+
+		folder:Destroy()
+	end)
+
 	t.test("addTriangle preserves normal direction for adjacent triangle", function()
 		-- When extending a mesh via Add mode, the new triangle should face the
 		-- same direction as the parent. This requires a hintPoint offset from
