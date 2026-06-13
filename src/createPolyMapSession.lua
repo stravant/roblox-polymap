@@ -2282,9 +2282,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	end
 
 	-- Add a triangle off the boundary edge nearest nearEdgeWorldPos, with its
-	-- third corner at apexWorldPos. Mirrors handleAddClick's "plane" placement,
-	-- but selects the boundary edge via getBoundaryEdges() (which returns Edge
-	-- objects directly) rather than findNearestBoundaryEdge's string-key lookup.
+	-- third corner at apexWorldPos. Mirrors handleAddClick's "plane" placement;
+	-- finds the edge directly via getBoundaryEdges() so it stays independent of
+	-- the hit-part / hover state the interactive Add path threads through.
 	session.AddTriangleOffEdge = function(nearEdgeWorldPos: Vector3, apexWorldPos: Vector3): number?
 		mMesh.discoverRegion({ nearEdgeWorldPos }, 15)
 		local edge: any = nil

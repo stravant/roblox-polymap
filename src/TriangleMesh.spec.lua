@@ -109,6 +109,40 @@ return function(t: TestTypes.TestContext)
 		folder:Destroy()
 	end)
 
+	t.test("getEdges is keyed by minVertexId_maxVertexId for vertex-pair lookup", function()
+		-- Add mode (findNearestBoundaryEdge, edge snapping) looks edges up by
+		-- building "minVid_maxVid" and indexing getEdges(); this guards that the
+		-- map is keyed that way rather than by the internal numeric EdgeId.
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		local triId = mesh.addTriangle(
+			Vector3.new(0, 0, 0),
+			Vector3.new(4, 0, 0),
+			Vector3.new(2, 0, 3),
+			0.2, folder, nil, Vector3.new(0, 1, 0)
+		)
+		assert(triId)
+		local tri = mesh.getTriangle(triId)
+		assert(tri)
+
+		local edges = mesh.getEdges()
+		local verts = tri.vertices
+		local edgePairs = { { verts[1], verts[2] }, { verts[2], verts[3] }, { verts[3], verts[1] } }
+		for _, pair in edgePairs do
+			local key = tostring(math.min(pair[1], pair[2])) .. "_" .. tostring(math.max(pair[1], pair[2]))
+			local edge = edges[key]
+			t.expect(edge).toBeTruthy()
+			assert(edge)
+			local matches = (edge.v1 == pair[1] and edge.v2 == pair[2])
+				or (edge.v1 == pair[2] and edge.v2 == pair[1])
+			t.expect(matches).toBeTruthy()
+		end
+
+		folder:Destroy()
+	end)
+
 	t.test("removeTriangle removes triangle and cleans up orphan vertices", function()
 		local mesh = createTriangleMesh()
 		local folder = Instance.new("Folder")

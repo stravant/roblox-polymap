@@ -281,8 +281,17 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		return mTriangles
 	end
 
+	-- Returns edges keyed by "minVertexId_maxVertexId" -- the form callers build
+	-- when they want to look up the edge between two known vertices (e.g.
+	-- findNearestBoundaryEdge, Add-mode edge snapping). The internal mEdges table
+	-- is keyed by numeric EdgeId, which those string lookups would never match.
 	local function getEdges(): {[string]: Edge}
-		return mEdges :: any
+		local result = {} :: {[string]: Edge}
+		for _, edge in mEdges do
+			local key = tostring(math.min(edge.v1, edge.v2)) .. "_" .. tostring(math.max(edge.v1, edge.v2))
+			result[key] = edge
+		end
+		return result
 	end
 
 	local function getVertex(id: VertexId): Vertex?
