@@ -23,6 +23,27 @@ local importHeightmap = require("./importHeightmap")
 
 local kSpherecastRadius = 2
 
+-- Key for the edge between two vertex ids, matching how TriangleMesh.getEdges()
+-- keys its result so an edge can be looked up by its endpoints.
+local function edgeKey(a: number, b: number): string
+	return tostring(math.min(a, b)) .. "_" .. tostring(math.max(a, b))
+end
+
+-- A point on the ground plane ~20 studs in front of the camera, plus the
+-- flattened (horizontal) look direction. Used to place generated geometry
+-- (grids, heightmaps) in front of the user; falls back to the world origin.
+local function groundPointAhead(): (Vector3, Vector3)
+	local camera = workspace.CurrentCamera
+	if not camera then
+		return Vector3.zero, Vector3.zAxis
+	end
+	local look = camera.CFrame.LookVector
+	local flatLook = Vector3.new(look.X, 0, look.Z)
+	flatLook = if flatLook.Magnitude > 0.01 then flatLook.Unit else Vector3.zAxis
+	local pos = camera.CFrame.Position + flatLook * 20
+	return Vector3.new(pos.X, 0, pos.Z), flatLook
+end
+
 local function mouseRaycast(): RaycastResult?
 	local mouseLocation = UserInputService:GetMouseLocation()
 	local camera = workspace.CurrentCamera
@@ -315,9 +336,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			if not tri then continue end
 			local verts = tri.vertices
 			local keys = {
-				tostring(math.min(verts[1], verts[2])) .. "_" .. tostring(math.max(verts[1], verts[2])),
-				tostring(math.min(verts[2], verts[3])) .. "_" .. tostring(math.max(verts[2], verts[3])),
-				tostring(math.min(verts[1], verts[3])) .. "_" .. tostring(math.max(verts[1], verts[3])),
+				edgeKey(verts[1], verts[2]),
+				edgeKey(verts[2], verts[3]),
+				edgeKey(verts[1], verts[3]),
 			}
 			for _, key in keys do
 				if seen[key] then continue end
@@ -488,8 +509,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					-- sibling (back face of same part), so hovering near the
 					-- selected edge doesn't snap to the other face's edge.
 					local skipEdgeKeys: { [string]: boolean } = {}
-					local storedKey = tostring(math.min(mAddBoundaryEdge.v1, mAddBoundaryEdge.v2))
-						.. "_" .. tostring(math.max(mAddBoundaryEdge.v1, mAddBoundaryEdge.v2))
+					local storedKey = edgeKey(mAddBoundaryEdge.v1, mAddBoundaryEdge.v2)
 					skipEdgeKeys[storedKey] = true
 					local storedEdge = mMesh.getEdges()[storedKey]
 					if storedEdge then
@@ -500,7 +520,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 								for i = 1, 3 do
 									local va = parentTri.vertices[i]
 									local vb = parentTri.vertices[if i < 3 then i + 1 else 1]
-									local ek = tostring(math.min(va, vb)) .. "_" .. tostring(math.max(va, vb))
+									local ek = edgeKey(va, vb)
 									skipEdgeKeys[ek] = true
 								end
 								-- Skip edges of sibling triangles (other face of same parts)
@@ -511,7 +531,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 											for i = 1, 3 do
 												local va = sibTri.vertices[i]
 												local vb = sibTri.vertices[if i < 3 then i + 1 else 1]
-												local ek = tostring(math.min(va, vb)) .. "_" .. tostring(math.max(va, vb))
+												local ek = edgeKey(va, vb)
 												skipEdgeKeys[ek] = true
 											end
 										end
@@ -1827,26 +1847,11 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 	-- Actions
 	session.GenerateGrid = function()
-		local camera = workspace.CurrentCamera
-		local origin = CFrame.identity
-		if camera then
-			-- Place grid in front of camera, on the ground plane
-			local look = camera.CFrame.LookVector
-			local flatLook = Vector3.new(look.X, 0, look.Z)
-			if flatLook.Magnitude > 0.01 then
-				flatLook = flatLook.Unit
-			else
-				flatLook = Vector3.zAxis
-			end
-			local pos = camera.CFrame.Position + flatLook * 20
-			pos = Vector3.new(pos.X, 0, pos.Z) -- project onto ground
-			if currentSettings.GridType == "Square" then
-				-- Align to world axes so grid edges are axis-aligned
-				origin = CFrame.new(pos)
-			else
-				origin = CFrame.lookAlong(pos, flatLook)
-			end
-		end
+		local pos, flatLook = groundPointAhead()
+		-- Square grids align to world axes; triangular grids face the camera.
+		local origin = if currentSettings.GridType == "Square"
+			then CFrame.new(pos)
+			else CFrame.lookAlong(pos, flatLook)
 
 		pushUndoSnapshot()
 		local recording = ChangeHistoryService:TryBeginRecording("PolyMap Generate Grid")
@@ -1878,20 +1883,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			return -- already importing
 		end
 
-		local camera = workspace.CurrentCamera
-		local origin = CFrame.identity
-		if camera then
-			local look = camera.CFrame.LookVector
-			local flatLook = Vector3.new(look.X, 0, look.Z)
-			if flatLook.Magnitude > 0.01 then
-				flatLook = flatLook.Unit
-			else
-				flatLook = Vector3.zAxis
-			end
-			local pos = camera.CFrame.Position + flatLook * 20
-			pos = Vector3.new(pos.X, 0, pos.Z)
-			origin = CFrame.new(pos)
-		end
+		local origin = CFrame.new((groundPointAhead()))
 
 		-- Snapshot settings before spawning so they can't change mid-import
 		local importWidth = currentSettings.ImportWidth
