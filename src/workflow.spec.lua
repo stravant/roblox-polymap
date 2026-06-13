@@ -1329,4 +1329,79 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("Add: three empty-space clicks form a fresh disconnected triangle", function()
+		withSession(function(session, mesh, settings)
+			settings.Mode = "Add"
+			-- All three points are over empty space (no geometry to hit).
+			local p1 = kRegionCenter + Vector3.new(0, 0, 0)
+			local p2 = kRegionCenter + Vector3.new(6, 0, 0)
+			local p3 = kRegionCenter + Vector3.new(3, 0, 5)
+
+			session.AddClickAt(p1, nil)
+			session.AddClickAt(p2, nil)
+			-- Not committed yet: two corners placed, no triangle.
+			t.expect(countDict(mesh.getTriangles())).toBe(0)
+			t.expect(#session.GetAddPoints()).toBe(2)
+
+			session.AddClickAt(p3, nil)
+			-- Third click forms the triangle and clears the in-progress state.
+			t.expect(countDict(mesh.getTriangles())).toBe(1)
+			t.expect(#session.GetAddPoints()).toBe(0)
+			t.expect(mesh.findVertexNear(p1, 0.3)).toBeTruthy()
+			t.expect(mesh.findVertexNear(p2, 0.3)).toBeTruthy()
+			t.expect(mesh.findVertexNear(p3, 0.3)).toBeTruthy()
+		end)
+	end)
+
+	t.test("Add: connect a boundary edge to a fresh vertex in empty space", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 3
+			settings.GridHeight = 3
+			settings.GridSpacing = 4
+			session.GenerateGrid()
+			settings.Mode = "Add"
+			local before = countDict(mesh.getTriangles())
+			t.expect(before > 0).toBeTruthy()
+
+			-- A boundary edge, a triangle on it, and one of its parts.
+			local boundary = mesh.getBoundaryEdges()
+			t.expect(#boundary > 0).toBeTruthy()
+			local edge = boundary[1]
+			local a = mesh.getVertex(edge.v1)
+			local b = mesh.getVertex(edge.v2)
+			local tri = mesh.getTriangle(edge.triangles[1])
+			assert(a and b and tri)
+			local part = tri.parts[1]
+			local edgeMid = (a.position + b.position) / 2
+
+			-- Grid centre, for placing the apex outward into empty space.
+			local sum = Vector3.zero
+			local cnt = 0
+			for _, v in mesh.getVertices() do
+				sum += v.position
+				cnt += 1
+			end
+			local gridCenter = sum / cnt
+
+			-- Click 1: on the boundary edge (over geometry) -> grabs the edge.
+			session.AddClickAt(edgeMid, part)
+			t.expect(session.GetAddBoundaryEdge()).toBeTruthy()
+			t.expect(countDict(mesh.getTriangles())).toBe(before) -- nothing added yet
+
+			-- Click 2: an apex out in empty space, outward from the grid, same height.
+			local outward = Vector3.new(edgeMid.X - gridCenter.X, 0, edgeMid.Z - gridCenter.Z)
+			if outward.Magnitude < 0.1 then
+				outward = Vector3.new(1, 0, 0)
+			end
+			local apex = edgeMid + outward.Unit * 4
+			apex = Vector3.new(apex.X, edgeMid.Y, apex.Z)
+			session.AddClickAt(apex, nil)
+
+			-- A new triangle now connects the edge to the fresh apex; state cleared.
+			t.expect(countDict(mesh.getTriangles())).toBe(before + 1)
+			t.expect(mesh.findVertexNear(apex, 0.3)).toBeTruthy()
+			t.expect(session.GetAddBoundaryEdge() == nil).toBeTruthy()
+		end)
+	end)
+
 end

@@ -82,10 +82,14 @@ local function getStatusText(mode: string, settings: Settings.PolyMapSettings, s
 		end
 		return `{count} selected. Drag rings to rotate.`
 	elseif mode == "Add" then
-		if session.GetAddBoundaryEdge() then
-			return "Click a vertex, edge, or empty space to place triangle(s). Click empty to cancel."
+		local points = #session.GetAddPoints()
+		if points > 0 then
+			return `Placing a fresh triangle: {points} of 3 corners. Esc to cancel.`
 		end
-		return "Hover a boundary edge and click to select it."
+		if session.GetAddBoundaryEdge() then
+			return "Click to place the apex — a vertex, edge, or empty space. Esc to cancel."
+		end
+		return "Hover a boundary edge to build from it, or click empty space to place a fresh vertex."
 	elseif mode == "Delete" then
 		if settings.DeleteTarget == "Vertex" then
 			return "Click a vertex to delete all its adjacent triangles."
@@ -1530,7 +1534,7 @@ local function PolyMapGui(props: {
 						end
 					end
 				else
-					-- Phase 1: highlight the hovered boundary edge
+					-- Phase 1: highlight the hovered boundary edge...
 					local hoverKey = session.GetHoverEdgeKey()
 					if hoverKey then
 						local edges = mesh.getEdges()
@@ -1542,6 +1546,18 @@ local function PolyMapGui(props: {
 								overlayProps.AddHighlightEdge = { v1Pos = v1.position, v2Pos = v2.position }
 							end
 						end
+					end
+
+					-- ...or, for empty-space placement, preview the fresh corners
+					-- placed so far plus the current hover point (a triangle outline
+					-- once three corners are present).
+					local points = session.GetAddPoints()
+					local target = session.GetAddHoverTarget()
+					if target and target.type == "freshVertex" and target.position then
+						table.insert(points, target.position)
+					end
+					if #points > 0 then
+						overlayProps.AddPreviewPolyline = points
 					end
 				end
 			end

@@ -69,6 +69,7 @@ local function MeshOverlay(props: {
 	MarqueeEnd: Vector2?,
 	AddHighlightEdge: { v1Pos: Vector3, v2Pos: Vector3 }?,
 	AddPreviewTriangles: { { Vector3 } }?,
+	AddPreviewPolyline: { Vector3 }?,
 })
 	local mesh = props.Mesh
 	local outlineRef = React.useRef(nil :: any)
@@ -138,8 +139,9 @@ local function MeshOverlay(props: {
 		end
 	end)
 
-	-- Draw Add mode preview triangles
+	-- Draw Add mode preview triangles and the in-progress fresh-point polyline
 	local addPreviewTriangles = props.AddPreviewTriangles
+	local addPreviewPolyline = props.AddPreviewPolyline
 	React.useEffect(function()
 		local wire = addPreviewRef.current :: WireframeHandleAdornment?
 		if not wire then
@@ -154,6 +156,24 @@ local function MeshOverlay(props: {
 					wire:AddLine(tri[2], tri[3])
 					wire:AddLine(tri[3], tri[1])
 				end
+			end
+		end
+
+		-- Fresh-point path: a small cross at each placed/hover corner, plus lines
+		-- connecting them (closing into a triangle once there are three).
+		if addPreviewPolyline and #addPreviewPolyline > 0 then
+			local pts = addPreviewPolyline
+			local s = 0.4
+			for _, p in pts do
+				wire:AddLine(p - Vector3.new(s, 0, 0), p + Vector3.new(s, 0, 0))
+				wire:AddLine(p - Vector3.new(0, s, 0), p + Vector3.new(0, s, 0))
+				wire:AddLine(p - Vector3.new(0, 0, s), p + Vector3.new(0, 0, s))
+			end
+			for i = 1, #pts - 1 do
+				wire:AddLine(pts[i], pts[i + 1])
+			end
+			if #pts >= 3 then
+				wire:AddLine(pts[#pts], pts[1])
 			end
 		end
 

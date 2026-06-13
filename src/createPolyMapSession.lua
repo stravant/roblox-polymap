@@ -142,6 +142,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 	-- Add mode state
 	local mAddBoundaryEdge: { v1: number, v2: number }? = nil
+	-- Fresh corner positions placed in empty space (the build-from-clicks path).
+	-- An edge grab uses mAddBoundaryEdge instead; the two are mutually exclusive
+	-- within one in-progress triangle.
+	local mAddPoints: { Vector3 } = {}
 	local mAddPlanePoint: Vector3? = nil
 	local mAddPlaneNormal: Vector3? = nil
 	local mAddHoverTarget: { type: string, vertexId: number?, edgeKey: string?, position: Vector3? }? = nil
@@ -254,6 +258,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 	local function clearAddState()
 		mAddBoundaryEdge = nil
+		mAddPoints = {}
 		mAddPlanePoint = nil
 		mAddPlaneNormal = nil
 		mAddHoverTarget = nil
@@ -391,7 +396,67 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return bestKey
 	end
 
+	-- The cursor's world position projected onto a sensible plane, so Add can place
+	-- points over empty space where the raycast misses. Plane = the selected edge's
+	-- surface (extend it flat), a horizontal plane through the first placed fresh
+	-- point, or the ground (Y=0) for the very first point.
+	local function addProjectedPos(): Vector3?
+		local camera = workspace.CurrentCamera
+		if not camera then
+			return nil
+		end
+		local mouseLocation = UserInputService:GetMouseLocation()
+		local ray = camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
+		local planePoint: Vector3
+		local planeNormal: Vector3
+		if mAddBoundaryEdge and mAddPlanePoint and mAddPlaneNormal then
+			planePoint, planeNormal = mAddPlanePoint, mAddPlaneNormal
+		elseif #mAddPoints > 0 then
+			planePoint, planeNormal = mAddPoints[1], Vector3.yAxis
+		else
+			planePoint, planeNormal = (groundPointAhead()), Vector3.yAxis
+		end
+		local denom = ray.Direction:Dot(planeNormal)
+		if math.abs(denom) < 1e-4 then
+			return nil
+		end
+		local t = (planePoint - ray.Origin):Dot(planeNormal) / denom
+		if t <= 0 then
+			return nil
+		end
+		return ray.Origin + ray.Direction * t
+	end
+
+	-- Snap an Add point to a nearby existing vertex so fresh geometry can connect to
+	-- the mesh; returns the (possibly snapped) position and that vertex id, or the
+	-- original position and nil.
+	local kAddSnapRadius = 2.0
+	local function snapAddPoint(worldPos: Vector3): (Vector3, number?)
+		local bestVid: number? = nil
+		local bestDist = kAddSnapRadius
+		for id, vertex in mMesh.getVertices() do
+			local dist = (vertex.position - worldPos).Magnitude
+			if dist < bestDist then
+				bestDist = dist
+				bestVid = id
+			end
+		end
+		if bestVid then
+			local v = mMesh.getVertex(bestVid)
+			if v then
+				return v.position, bestVid
+			end
+		end
+		return worldPos, nil
+	end
+
 	local function updateHover()
+		-- Leaving Add mode abandons any in-progress triangle (edge grab or fresh
+		-- points), so stale state doesn't reappear on returning to Add.
+		if currentSettings.Mode ~= "Add" and (mAddBoundaryEdge or #mAddPoints > 0) then
+			clearAddState()
+			changeSignal:Fire()
+		end
 		if mIsOverUI or mIsDraggingHandle then
 			if mHoverVertexId ~= nil or mHoverEdgeKey ~= nil or #mHoverTriangleIds > 0 or mAddHoverTarget ~= nil then
 				mHoverVertexId = nil
@@ -429,6 +494,11 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					end
 				end
 			end
+		end
+		-- Add mode places points over empty space: when nothing was hit, project the
+		-- cursor onto the appropriate plane so hover (and the click) have a position.
+		if not worldPos and mode == "Add" then
+			worldPos = addProjectedPos()
 		end
 
 		local hitTriangleId: number? = nil
@@ -483,24 +553,38 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			end
 		end
 
-		if mode == "Add" and worldPos and not mAddBoundaryEdge and result and result.Instance:IsA("BasePart") then
-			-- Discover neighbors so we can tell which edges are truly boundary
-			local hitPart = result.Instance :: BasePart
-			local size = hitPart.Size
-			local extent = math.sqrt(size.X * size.X + size.Y * size.Y + size.Z * size.Z)
-			mMesh.discoverRegion({worldPos}, extent)
-			-- Phase 1: hover the nearest boundary edge of the hit face
-			-- Filter to triangles facing the same way as the hit normal
-			-- so we don't pick edges from the back face
-			local partTriIds = mMesh.getPartTriangles(hitPart)
-			local filtered = {}
-			for _, triId in partTriIds do
-				local tri = mMesh.getTriangle(triId)
-				if tri and tri.normal:Dot(result.Normal) > 0 then
-					table.insert(filtered, triId)
+		if mode == "Add" and not mAddBoundaryEdge then
+			-- Phase 1 / fresh-point start. Only try to grab a boundary edge before any
+			-- fresh point has been placed and only when actually over geometry.
+			local grabbedEdge: string? = nil
+			if worldPos and #mAddPoints == 0 and result and result.Instance:IsA("BasePart") then
+				-- Discover neighbors so we can tell which edges are truly boundary
+				local hitPart = result.Instance :: BasePart
+				local size = hitPart.Size
+				local extent = math.sqrt(size.X * size.X + size.Y * size.Y + size.Z * size.Z)
+				mMesh.discoverRegion({worldPos}, extent)
+				-- Hover the nearest boundary edge of the hit face. Filter to triangles
+				-- facing the same way as the hit normal so we don't pick a back face.
+				local partTriIds = mMesh.getPartTriangles(hitPart)
+				local filtered = {}
+				for _, triId in partTriIds do
+					local tri = mMesh.getTriangle(triId)
+					if tri and tri.normal:Dot(result.Normal) > 0 then
+						table.insert(filtered, triId)
+					end
 				end
+				grabbedEdge = findNearestBoundaryEdge(worldPos, if #filtered > 0 then filtered else partTriIds, nil)
 			end
-			newHoverEdge = findNearestBoundaryEdge(worldPos, if #filtered > 0 then filtered else partTriIds, nil)
+			if grabbedEdge then
+				newHoverEdge = grabbedEdge
+			elseif worldPos then
+				-- No edge nearby: offer fresh vertex placement (snap to a near vertex).
+				local snapped, snapVid = snapAddPoint(worldPos)
+				if snapVid then
+					newHoverVertex = snapVid
+				end
+				mAddHoverTarget = { type = "freshVertex", position = snapped }
+			end
 		end
 
 		-- Add mode phase 2: world-space vertex/edge snapping
@@ -637,11 +721,47 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		changeSignal:Fire()
 	end
 
+	local function commitFreshTriangle()
+		if #mAddPoints < 3 then
+			return
+		end
+		local p1, p2, p3 = mAddPoints[1], mAddPoints[2], mAddPoints[3]
+		pushUndoSnapshot()
+		local recording = ChangeHistoryService:TryBeginRecording("PolyMap Add Triangle")
+		-- A disconnected triangle has nothing to match, so hint it to face up.
+		local centroid = (p1 + p2 + p3) / 3
+		mMesh.addTriangle(
+			p1, p2, p3,
+			currentSettings.Thickness, workspace.Terrain, getTriangleProps(), centroid + Vector3.yAxis
+		)
+		clearAddState()
+		if recording then
+			ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+		end
+		changeSignal:Fire()
+	end
+
+	-- Place one fresh corner (snapped to a nearby vertex). The third corner commits
+	-- the triangle.
+	local function placeFreshPoint(worldPos: Vector3)
+		local p = snapAddPoint(worldPos)
+		table.insert(mAddPoints, p)
+		if #mAddPoints >= 3 then
+			commitFreshTriangle()
+		else
+			changeSignal:Fire()
+		end
+	end
+
 	local function handleAddClick(worldPos: Vector3, hitPart: BasePart?, hitNormal: Vector3?)
 		mMesh.discoverRegion({worldPos}, 15)
 		if not mAddBoundaryEdge then
-			-- Phase 1: select a boundary edge of the hit part
-			if not hitPart then return end
+			-- No edge selected yet. Place a fresh point when over empty space, or once
+			-- the fresh-point path has started; otherwise grab a boundary edge below.
+			if not hitPart or #mAddPoints > 0 then
+				placeFreshPoint(worldPos)
+				return
+			end
 			mMesh.discoverPart(hitPart, worldPos)
 			-- Discover neighbors so we can tell which edges are truly boundary
 			local size = hitPart.Size
@@ -686,16 +806,19 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 						end
 					end
 					changeSignal:Fire()
+				else
+					placeFreshPoint(worldPos)
 				end
+			else
+				placeFreshPoint(worldPos)
 			end
 		else
 			-- Phase 2: place triangle(s) based on hover target
 			local target = mAddHoverTarget
 			if not target then
-				-- Empty click: cancel
-				clearAddState()
-				changeSignal:Fire()
-				return
+				-- No hover target (empty-space click, or programmatic use): place the
+				-- apex on the projected plane at worldPos.
+				target = { type = "plane", position = worldPos }
 			end
 
 			pushUndoSnapshot()
@@ -1163,9 +1286,13 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				mSavedVertexPositions = {}
 				changeSignal:Fire()
 			end
-			if mode == "Add" and mAddBoundaryEdge then
-				clearAddState()
-				changeSignal:Fire()
+			if mode == "Add" then
+				-- A miss is empty space: place an Add point there (apex or fresh point)
+				-- by projecting onto the working plane, instead of cancelling.
+				local p = addProjectedPos()
+				if p then
+					handleAddClick(p, nil, nil)
+				end
 			end
 			return
 		end
@@ -1558,6 +1685,13 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				end
 				handleClick()
 			end
+			-- Escape cancels an in-progress Add (now that empty clicks place points).
+			if input.KeyCode == Enum.KeyCode.Escape and not gameProcessed then
+				if currentSettings.Mode == "Add" and (mAddBoundaryEdge or #mAddPoints > 0) then
+					clearAddState()
+					changeSignal:Fire()
+				end
+			end
 		end)
 
 		inputEndedCn = UserInputService.InputEnded:Connect(function(input: InputObject, _gameProcessed: boolean)
@@ -1874,6 +2008,18 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	end
 	session.GetMode = function(): string
 		return currentSettings.Mode
+	end
+	-- Fresh corner positions placed so far in the empty-space Add path (overlay
+	-- preview and tests).
+	session.GetAddPoints = function(): { Vector3 }
+		return table.clone(mAddPoints)
+	end
+	-- Drive one Add click at a world position, as if the cursor were there. Pass
+	-- hitPart when the click is on existing geometry (to grab its boundary edge),
+	-- or nil for an empty-space click. Lets tests exercise the click flow without
+	-- the mouse.
+	session.AddClickAt = function(worldPos: Vector3, hitPart: BasePart?)
+		handleAddClick(worldPos, hitPart, nil)
 	end
 	session.GetAddBoundaryEdge = function(): { v1: number, v2: number }?
 		return mAddBoundaryEdge
