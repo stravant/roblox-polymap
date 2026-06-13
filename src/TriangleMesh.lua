@@ -162,6 +162,37 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		return id
 	end
 
+	-- Read-only tolerant lookup: the id of an existing vertex within
+	-- kVertexMergeTolerance of position, or nil. Mirrors getOrCreateVertex's
+	-- neighbour-cell search. Face-matching during discovery must use this rather
+	-- than an exact mSpatialHash[hashVertex(p)] lookup: a tilted wedge reconstructs
+	-- its shared corners with tiny FP error, so a corner that should coincide with
+	-- an existing vertex can fall a hair into an adjacent hash cell. An exact miss
+	-- there undercounts the surface face, ties the front/back vote, and lets
+	-- discovery pick the back face -- which lands the corner a full thickness off
+	-- its neighbours and cracks the mesh.
+	local function findExistingVertexNear(position: Vector3): VertexId?
+		local hash = hashVertex(position)
+		local existing = mSpatialHash[hash]
+		if existing then
+			return existing
+		end
+		for dx = -1, 1 do
+			for dy = -1, 1 do
+				for dz = -1, 1 do
+					local nvid = mSpatialHash[hash + Vector3.new(dx, dy, dz)]
+					if nvid then
+						local nv = mVertices[nvid]
+						if nv and (nv.position - position).Magnitude < kVertexMergeTolerance then
+							return nvid
+						end
+					end
+				end
+			end
+		end
+		return nil
+	end
+
 	local function getOrCreateEdge(v1Id: VertexId, v2Id: VertexId): EdgeId
 		local v1 = mVertices[v1Id]
 		local v2 = mVertices[v2Id]
@@ -856,10 +887,10 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 				local v1b, v2b, v3b, thicknessB = getWedgeVertices(part, hintB)
 				local matchA, matchB = 0, 0
 				for _, vp in {v1a, v2a, v3a} do
-					if mSpatialHash[hashVertex(vp)] then matchA += 1 end
+					if findExistingVertexNear(vp) then matchA += 1 end
 				end
 				for _, vp in {v1b, v2b, v3b} do
-					if mSpatialHash[hashVertex(vp)] then matchB += 1 end
+					if findExistingVertexNear(vp) then matchB += 1 end
 				end
 				if matchA > matchB then
 					v1, v2, v3, wedgeThickness = v1a, v2a, v3a, thicknessA
@@ -1301,6 +1332,29 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		return nil
 	end
 
+	-- Does this wedge have a triangular-face corner coincident with pos? During a
+	-- region walk we only adopt an undiscovered part when the explore point is
+	-- genuinely one of its corners -- that shared corner gives discoverPart a real
+	-- vertex to orient its face against. Adopting a part from a nearby-but-unshared
+	-- point (a wedge whose bounds merely reach pos) leaves discoverPart guessing the
+	-- face, and on a curved surface it picks the back one: a thickness-offset crack.
+	local function partHasCornerNear(part: BasePart, pos: Vector3): boolean
+		if (part :: Part).Shape ~= Enum.PartType.Wedge then
+			-- Non-wedge parts (e.g. Blocks) keep the prior radius-based behaviour.
+			return true
+		end
+		local hintA = part.CFrame.Position + part.CFrame.RightVector
+		local hintB = part.CFrame.Position - part.CFrame.RightVector
+		local a1, a2, a3 = getWedgeVertices(part, hintA)
+		local b1, b2, b3 = getWedgeVertices(part, hintB)
+		for _, corner in { a1, a2, a3, b1, b2, b3 } do
+			if (corner - pos).Magnitude < kVertexMergeTolerance then
+				return true
+			end
+		end
+		return false
+	end
+
 	local function discoverRegion(seeds: {Vector3}, radius: number): {TriangleId}
 		local discovered = {} :: {[TriangleId]: boolean}
 		local result = {} :: {TriangleId}
@@ -1425,14 +1479,52 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 				local remainingRadius = radius - distToClosestSeed
 				local searchRadius = math.min(getSearchRadius(vertId), math.max(remainingRadius, 0))
 				local nearbyParts = workspace:GetPartBoundsInRadius(pos, searchRadius)
+				-- pos is an already-discovered vertex when vertId is set; nil means we
+				-- are bootstrapping from a fresh seed with nothing yet to share.
+				local posKnown = vertId ~= nil
+
+				-- Does any undiscovered nearby wedge actually have a corner at pos? If
+				-- so, those shared corners let discoverPart orient reliably and we adopt
+				-- only them. Discovering a part from a point that is NOT its corner
+				-- leaves discoverPart guessing the face and, on a curved surface, picking
+				-- the back one -- a thickness-offset crack.
+				local haveCornerMatch = false
+				for _, part in nearbyParts do
+					if
+						part:IsA("BasePart")
+						and not mPartToTriangles[part]
+						and partHasCornerNear(part :: BasePart, pos)
+					then
+						haveCornerMatch = true
+						break
+					end
+				end
+
+				-- Arbitrary-point bootstrap: a seed that is a surface point but not a
+				-- corner (a triangle centroid, a paint/add click) on an as-yet
+				-- undiscovered surface. There is no shared corner to key off, so adopt
+				-- just the single closest part the point sits on; the corner-guarded
+				-- walk then expands from its corners.
+				local bootstrapPart: BasePart? = nil
+				if not posKnown and not haveCornerMatch then
+					local bestD = math.huge
+					for _, part in nearbyParts do
+						if part:IsA("BasePart") and not mPartToTriangles[part] then
+							local d = (part.Position - pos).Magnitude
+							if d < bestD then
+								bestD = d
+								bootstrapPart = part :: BasePart
+							end
+						end
+					end
+				end
+
 				for _, part in nearbyParts do
 					if not part:IsA("BasePart") then continue end
-					-- Discover the part's face only if it has none yet. A region walk
-					-- builds one coherent surface, so we must NOT create a part's
-					-- second (back) face just because this explore point happens to
-					-- sit behind a tilted wedge -- that is what cracked curved meshes.
 					if not mPartToTriangles[part] then
-						discoverPart(part, pos)
+						if partHasCornerNear(part, pos) or part == bootstrapPart then
+							discoverPart(part, pos)
+						end
 					end
 					-- Collect the part's discovered face(s) (e.g. a Block's two tris).
 					local headId = mPartToTriangles[part]

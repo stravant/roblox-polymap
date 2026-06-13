@@ -131,6 +131,62 @@ return function(t: TestTypes.TestContext)
 		end
 	end
 
+	-- Faithful replica of updateHover's discovery (createPolyMapSession ~L437):
+	-- sweep rays out from the camera eye across the work region and call
+	-- discoverPart UNCONDITIONALLY on every wedge hit, exactly as the live cursor
+	-- task does every frame (no "already tracked" guard, unlike discoverRegion).
+	local function faithfulHover(mesh: any)
+		for tx = -16, 16, 2 do
+			for tz = -16, 16, 2 do
+				local target = kRegionCenter + Vector3.new(tx, 0, tz)
+				local dir = target - kCameraEye
+				local hit = workspace:Raycast(kCameraEye, dir * 1.25)
+				if
+					hit
+					and hit.Instance:IsA("Part")
+					and (hit.Instance :: Part).Shape == Enum.PartType.Wedge
+				then
+					mesh.discoverPart(hit.Instance :: BasePart, hit.Position)
+				end
+			end
+		end
+	end
+
+	-- Count edges shared by more than two triangles. A grid surface is a
+	-- manifold-with-boundary: every edge has 1 (boundary) or 2 (interior)
+	-- triangles. Anything higher means phantom/duplicated geometry.
+	local function nonManifoldEdges(mesh: any): number
+		local n = 0
+		for _, e in mesh.getEdges() do
+			local live = 0
+			for _, tid in e.triangles do
+				if mesh.getTriangle(tid) then
+					live += 1
+				end
+			end
+			if live > 2 then
+				n += 1
+			end
+		end
+		return n
+	end
+
+	-- The XZ-nearest live vertex to a world position, ignoring height. Used to
+	-- follow "the vertex at this column" across mesh rebuilds (undo rediscovery
+	-- assigns fresh ids, so we can't track by id).
+	local function vertexAtColumn(mesh: any, xz: Vector3): any
+		local best: any = nil
+		local bestD = math.huge
+		for _, v in mesh.getVertices() do
+			local d = (Vector3.new(v.position.X, 0, v.position.Z) - Vector3.new(xz.X, 0, xz.Z)).Magnitude
+			if d < bestD then
+				bestD = d
+				best = v
+			end
+		end
+		return best
+	end
+
 	t.test("workflow: generate grid, move a vertex, undo restores geometry and selection", function()
 		withSession(function(session, mesh)
 			session.GenerateGrid()
@@ -986,6 +1042,222 @@ return function(t: TestTypes.TestContext)
 			t.expect(countDict(fresh.getTriangles())).toBe(n0T)
 			t.expect(countDict(fresh.getVertices())).toBe(n0V)
 			t.expect(#fresh.getBoundaryEdges()).toBe(n0B)
+		end)
+	end)
+
+	t.test("a move-tool influenced curve rediscovers with no thickness-offset cracks", function()
+		withSession(function(session, mesh, settings)
+			-- Sculpt a smooth dome with the move tool + influence (many gently tilted
+			-- wedges), then rediscover the world from scratch the way rediscoverMesh
+			-- does on undo. The rebuilt mesh must match the live one exactly: a wedge
+			-- discovered on its back face lands its corners a full thickness off its
+			-- neighbours, producing extra vertices and interior boundary edges (cracks)
+			-- that corrupt the topology a later edit walks.
+			settings.GridWidth = 6
+			settings.GridHeight = 6
+			settings.GridSpacing = 4
+			settings.InfluenceRadius = 10
+			session.GenerateGrid()
+
+			local sum = Vector3.zero
+			local cnt = 0
+			for _, v in mesh.getVertices() do
+				sum += v.position
+				cnt += 1
+			end
+			local cXZ = Vector3.new(sum.X / cnt, 0, sum.Z / cnt)
+			local centreV = vertexAtColumn(mesh, cXZ)
+			assert(centreV)
+			session.SelectVerticesNear({ centreV.position })
+			session.MoveSelectedWithInfluence(Vector3.new(0, 8, 0))
+			faithfulHover(mesh)
+
+			local liveT = countDict(mesh.getTriangles())
+			local liveV = countDict(mesh.getVertices())
+			local liveB = #mesh.getBoundaryEdges()
+			t.expect(nonManifoldEdges(mesh)).toBe(0)
+
+			-- Fresh discovery from a surface seed (as rediscoverMesh does on undo).
+			local seed: Vector3? = nil
+			for _, tri in mesh.getTriangles() do
+				local a = mesh.getVertex(tri.vertices[1])
+				local b = mesh.getVertex(tri.vertices[2])
+				local c = mesh.getVertex(tri.vertices[3])
+				if a and b and c then
+					seed = (a.position + b.position + c.position) / 3
+					break
+				end
+			end
+			assert(seed)
+
+			local livePositions: { Vector3 } = {}
+			for _, v in mesh.getVertices() do
+				table.insert(livePositions, v.position)
+			end
+
+			local fresh = createTriangleMesh()
+			fresh.discoverRegion({ seed }, 1000)
+
+			-- Every rediscovered vertex coincides with a live vertex (no thickness
+			-- offset), and the counts match exactly.
+			local orphans = 0
+			for _, fv in fresh.getVertices() do
+				local minD = math.huge
+				for _, lp in livePositions do
+					minD = math.min(minD, (fv.position - lp).Magnitude)
+				end
+				if minD > 0.05 then
+					orphans += 1
+				end
+			end
+			t.expect(orphans).toBe(0)
+			t.expect(countDict(fresh.getTriangles())).toBe(liveT)
+			t.expect(countDict(fresh.getVertices())).toBe(liveV)
+			t.expect(#fresh.getBoundaryEdges()).toBe(liveB)
+			t.expect(nonManifoldEdges(fresh)).toBe(0)
+		end)
+	end)
+
+	t.test("re-drag a still-selected vertex up after undoing a drag down (small influence, hover first)", function()
+		withSession(function(session, mesh, settings)
+			-- Grid larger than the influence, so a drag only deforms a couple of
+			-- triangles around the selected vertex and leaves the rest flat -- the
+			-- partial deformation the user described.
+			settings.GridWidth = 6
+			settings.GridHeight = 6
+			settings.GridSpacing = 4
+			settings.InfluenceRadius = 6
+			session.GenerateGrid()
+			local n0T = countDict(mesh.getTriangles())
+			local n0V = countDict(mesh.getVertices())
+			local n0B = #mesh.getBoundaryEdges()
+
+			-- Hover BEFORE selecting, as the cursor naturally passes over the surface.
+			faithfulHover(mesh)
+			t.expect(countDict(mesh.getTriangles())).toBe(n0T)
+			t.expect(nonManifoldEdges(mesh)).toBe(0)
+
+			-- Select a single interior vertex (influence stays inside the grid).
+			local sum = Vector3.zero
+			local cnt = 0
+			for _, v in mesh.getVertices() do
+				sum += v.position
+				cnt += 1
+			end
+			local cXZ = Vector3.new(sum.X / cnt, 0, sum.Z / cnt)
+			local centreV = vertexAtColumn(mesh, cXZ)
+			assert(centreV)
+			local col = Vector3.new(centreV.position.X, 0, centreV.position.Z)
+			local flatY = centreV.position.Y
+
+			session.SelectVerticesNear({ centreV.position })
+			t.expect(countDict(session.GetSelectedVertices())).toBe(1)
+
+			-- Drag the selection DOWN, hover, then UNDO. The vertex stays selected.
+			session.MoveSelectedWithInfluence(Vector3.new(0, -8, 0))
+			faithfulHover(mesh)
+			t.expect(nonManifoldEdges(mesh)).toBe(0)
+
+			ChangeHistoryService:Undo()
+			settle()
+			faithfulHover(mesh)
+
+			-- After undo: flat grid is back, manifold, and the vertex is still selected
+			-- at its original column near its original (flat) height.
+			t.expect(countDict(mesh.getTriangles())).toBe(n0T)
+			t.expect(countDict(mesh.getVertices())).toBe(n0V)
+			t.expect(#mesh.getBoundaryEdges()).toBe(n0B)
+			t.expect(nonManifoldEdges(mesh)).toBe(0)
+			t.expect(countDict(session.GetSelectedVertices())).toBe(1)
+			local restored = vertexAtColumn(mesh, col)
+			assert(restored)
+			t.expect(math.abs(restored.position.Y - flatY) < 0.5).toBeTruthy()
+
+			-- WITHOUT reselecting, drag the still-selected vertex UP. This is the step
+			-- that "does not work" when the post-undo topology is corrupted.
+			session.MoveSelectedWithInfluence(Vector3.new(0, 8, 0))
+			faithfulHover(mesh)
+
+			-- The drag must actually raise the vertex at that column to ~flatY+8, and
+			-- the mesh must remain a consistent, manifold grid of the same size.
+			local raised = vertexAtColumn(mesh, col)
+			assert(raised)
+			t.expect(math.abs(raised.position.Y - (flatY + 8)) < 0.5).toBeTruthy()
+			t.expect(countDict(mesh.getTriangles())).toBe(n0T)
+			t.expect(countDict(mesh.getVertices())).toBe(n0V)
+			t.expect(#mesh.getBoundaryEdges()).toBe(n0B)
+			t.expect(nonManifoldEdges(mesh)).toBe(0)
+		end)
+	end)
+
+	t.test("re-drag after undo works on an already-curved surface (the back-face case)", function()
+		withSession(function(session, mesh, settings)
+			-- The user's failing case happens on an EXISTING curved surface, where
+			-- undo rediscovers the curve from scratch. Build a dome first (un-undone),
+			-- then drag a slope vertex down, undo (rediscovering the dome), and re-drag
+			-- the still-selected vertex up. Before the discovery fix, the dome came back
+			-- with thickness-offset back-face cracks and the re-drag operated on broken
+			-- topology.
+			settings.GridWidth = 6
+			settings.GridHeight = 6
+			settings.GridSpacing = 4
+			settings.InfluenceRadius = 10
+			session.GenerateGrid()
+			local n0T = countDict(mesh.getTriangles())
+			local n0V = countDict(mesh.getVertices())
+			local n0B = #mesh.getBoundaryEdges()
+
+			-- 1) Sculpt a dome with the move tool (this is the "existing" geometry).
+			local sum = Vector3.zero
+			local cnt = 0
+			for _, v in mesh.getVertices() do
+				sum += v.position
+				cnt += 1
+			end
+			local cXZ = Vector3.new(sum.X / cnt, 0, sum.Z / cnt)
+			local centreV = vertexAtColumn(mesh, cXZ)
+			assert(centreV)
+			session.SelectVerticesNear({ centreV.position })
+			session.MoveSelectedWithInfluence(Vector3.new(0, 8, 0))
+			faithfulHover(mesh)
+
+			-- 2) Select a vertex partway down the slope and record its dome height.
+			local slopeColumn = Vector3.new(cXZ.X + 4, 0, cXZ.Z)
+			local slopeV = vertexAtColumn(mesh, slopeColumn)
+			assert(slopeV)
+			local domeY = slopeV.position.Y
+			t.expect(domeY > 0.5).toBeTruthy() -- genuinely on the raised dome
+			session.SelectVerticesNear({ slopeV.position })
+			t.expect(countDict(session.GetSelectedVertices())).toBe(1)
+
+			-- 3) Drag down, hover, undo (rediscovers the dome), hover.
+			session.MoveSelectedWithInfluence(Vector3.new(0, -6, 0))
+			faithfulHover(mesh)
+			ChangeHistoryService:Undo()
+			settle()
+			faithfulHover(mesh)
+
+			-- After undo the dome is back -- same size, manifold, no cracks -- and the
+			-- slope vertex is restored to its dome height and still selected.
+			t.expect(countDict(mesh.getTriangles())).toBe(n0T)
+			t.expect(countDict(mesh.getVertices())).toBe(n0V)
+			t.expect(#mesh.getBoundaryEdges()).toBe(n0B)
+			t.expect(nonManifoldEdges(mesh)).toBe(0)
+			t.expect(countDict(session.GetSelectedVertices())).toBe(1)
+			local backOnDome = vertexAtColumn(mesh, slopeColumn)
+			assert(backOnDome)
+			t.expect(math.abs(backOnDome.position.Y - domeY) < 0.5).toBeTruthy()
+
+			-- 4) Re-drag the still-selected vertex UP. It must rise from the dome height.
+			session.MoveSelectedWithInfluence(Vector3.new(0, 6, 0))
+			faithfulHover(mesh)
+			local raised = vertexAtColumn(mesh, slopeColumn)
+			assert(raised)
+			t.expect(math.abs(raised.position.Y - (domeY + 6)) < 0.5).toBeTruthy()
+			t.expect(countDict(mesh.getTriangles())).toBe(n0T)
+			t.expect(countDict(mesh.getVertices())).toBe(n0V)
+			t.expect(#mesh.getBoundaryEdges()).toBe(n0B)
+			t.expect(nonManifoldEdges(mesh)).toBe(0)
 		end)
 	end)
 end
