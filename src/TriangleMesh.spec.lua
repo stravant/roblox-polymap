@@ -310,6 +310,43 @@ return function(t: TestTypes.TestContext)
 		folder:Destroy()
 	end)
 
+	t.test("moveVertex regenerates parts at the triangle's own thickness", function()
+		-- A triangle keeps the thickness it was discovered/created with when a
+		-- vertex moves; the regenerated wedge parts must NOT snap to some other
+		-- (e.g. the current global) thickness. fillTriangle makes the thin wedge
+		-- dimension its local X, so part.Size.X is the thickness.
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		local triId = mesh.addTriangle(
+			Vector3.new(700, 0, 0),
+			Vector3.new(704, 0, 0),
+			Vector3.new(702, 0, 3),
+			0.5, folder, nil, Vector3.new(702, 1, 1)
+		)
+		assert(triId)
+		local tri = mesh.getTriangle(triId)
+		assert(tri)
+		t.expect(math.abs(tri.thickness - 0.5) < 1e-4).toBeTruthy()
+		t.expect(math.abs(tri.parts[1].Size.X - 0.5) < 1e-4).toBeTruthy()
+
+		-- Move a vertex, passing a DIFFERENT thickness. It must be ignored: the
+		-- regenerated parts keep the triangle's recorded 0.5 thickness.
+		local vid = mesh.findVertexNear(Vector3.new(702, 0, 3), 0.1)
+		assert(vid)
+		mesh.moveVertex(vid, Vector3.new(702, 2, 5), 0.2)
+
+		local movedTri = mesh.getTriangle(triId)
+		assert(movedTri)
+		t.expect(math.abs(movedTri.thickness - 0.5) < 1e-4).toBeTruthy()
+		for _, part in movedTri.parts do
+			t.expect(math.abs(part.Size.X - 0.5) < 1e-4).toBeTruthy()
+		end
+
+		folder:Destroy()
+	end)
+
 	t.test("moveVertex reuses the same Part instances", function()
 		local mesh = createTriangleMesh()
 		local folder = Instance.new("Folder")

@@ -654,7 +654,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		for _, triId in triIds do
 			local tri = mTriangles[triId]
 			if tri and tri.partsRequireUpgrade then
-				upgradeBlockTriangles(tri, thickness, props)
+				upgradeBlockTriangles(tri, tri.thickness, props)
 			end
 		end
 
@@ -673,14 +673,15 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 					local naturalNormal = computeNormal(v1.position, v2.position, v3.position)
 					local shouldInvert = naturalNormal:Dot(tri.normal) < 0
 
-					-- Rebuild parts in-place
+					-- Rebuild parts in-place at THIS triangle's own thickness (recorded
+					-- at discovery / creation) rather than snapping to the global value,
+					-- so moving a vertex regenerates parts as thick as they already were.
 					local parent = tri.parts[1].Parent
 					local newParts = fillTriangle(
 						v1.position, v2.position, v3.position,
-						thickness, parent :: Instance, props, tri.parts, shouldInvert
+						tri.thickness, parent :: Instance, props, tri.parts, shouldInvert
 					)
 					tri.parts = relinkTriangleParts(tri, newParts)
-					tri.thickness = thickness
 				end
 			end
 		end

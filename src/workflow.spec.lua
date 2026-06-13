@@ -1260,4 +1260,73 @@ return function(t: TestTypes.TestContext)
 			t.expect(nonManifoldEdges(mesh)).toBe(0)
 		end)
 	end)
+
+	t.test("subdivide keeps each triangle's thickness instead of the current setting", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 3
+			settings.GridHeight = 3
+			settings.GridSpacing = 4
+			settings.Thickness = 0.5
+			session.GenerateGrid()
+			t.expect(countDict(mesh.getTriangles()) > 0).toBeTruthy()
+			-- The generated parts are all 0.5 thick (fillTriangle makes the thin
+			-- wedge dimension its local X).
+			for _, tri in mesh.getTriangles() do
+				for _, part in tri.parts do
+					t.expect(math.abs(part.Size.X - 0.5) < 1e-3).toBeTruthy()
+				end
+			end
+
+			-- Change the global thickness, then subdivide the whole grid.
+			settings.Thickness = 0.2
+			local allPos: { Vector3 } = {}
+			for _, v in mesh.getVertices() do
+				table.insert(allPos, v.position)
+			end
+			session.SelectVerticesNear(allPos)
+			session.Subdivide()
+
+			-- Every resulting part keeps the source 0.5 thickness, not the new 0.2.
+			local count = 0
+			for _, tri in mesh.getTriangles() do
+				for _, part in tri.parts do
+					count += 1
+					t.expect(math.abs(part.Size.X - 0.5) < 1e-3).toBeTruthy()
+				end
+			end
+			t.expect(count > 0).toBeTruthy()
+		end)
+	end)
+
+	t.test("simplify keeps each triangle's thickness instead of the current setting", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 3
+			settings.GridHeight = 3
+			settings.GridSpacing = 4
+			settings.Thickness = 0.5
+			session.GenerateGrid()
+			local before = countDict(mesh.getTriangles())
+
+			settings.Thickness = 0.2
+			local allPos: { Vector3 } = {}
+			for _, v in mesh.getVertices() do
+				table.insert(allPos, v.position)
+			end
+			session.SelectVerticesNear(allPos)
+			session.Simplify(1)
+			-- A collapse actually happened (so the re-add path ran).
+			t.expect(countDict(mesh.getTriangles()) < before).toBeTruthy()
+
+			-- The triangles rebuilt around the collapsed edge keep 0.5, not 0.2.
+			local count = 0
+			for _, tri in mesh.getTriangles() do
+				for _, part in tri.parts do
+					count += 1
+					t.expect(math.abs(part.Size.X - 0.5) < 1e-3).toBeTruthy()
+				end
+			end
+			t.expect(count > 0).toBeTruthy()
+		end)
+	end)
+
 end

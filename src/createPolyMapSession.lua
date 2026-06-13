@@ -2022,6 +2022,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			splits: { boolean },
 			color: Color3,
 			material: Enum.Material,
+			thickness: number,
 			hintPoint: Vector3,
 		}
 		local snapshots: { TriSnapshot } = {}
@@ -2049,6 +2050,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 						},
 						color = part.Color,
 						material = part.Material,
+						thickness = tri.thickness,
 						hintPoint = (positions[1] + positions[2] + positions[3]) / 3 + tri.normal * 0.1,
 					})
 				end
@@ -2062,11 +2064,12 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 		-- Re-add with adaptive subdivision
 		local newMidpoints: { Vector3 } = {}
-		local thickness = currentSettings.Thickness
 		local parent = workspace.Terrain
 		for _, snap in snapshots do
 			local p = snap.p
 			local s = snap.splits
+			-- Inherit the source triangle's thickness, not the global setting.
+			local thickness = snap.thickness
 			local props: fillTriangle.TriangleProps = {
 				Color = snap.color,
 				Material = snap.material,
@@ -2198,7 +2201,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			end
 
 			-- Snapshot each triangle, replacing either endpoint with midpoint
-			local snapshots: { { positions: { Vector3 }, color: Color3, material: Enum.Material, hintPoint: Vector3 } } = {}
+			local snapshots: { { positions: { Vector3 }, color: Color3, material: Enum.Material, thickness: number, hintPoint: Vector3 } } = {}
 			for triId in affectedTriIds do
 				local tri = mMesh.getTriangle(triId)
 				if tri then
@@ -2227,6 +2230,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 							positions = positions,
 							color = part.Color,
 							material = part.Material,
+							thickness = tri.thickness,
 							hintPoint = centroid + tri.normal * 0.1,
 						})
 					end
@@ -2252,7 +2256,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				}
 				mMesh.addTriangle(
 					snap.positions[1], snap.positions[2], snap.positions[3],
-					currentSettings.Thickness, workspace.Terrain, props, snap.hintPoint
+					snap.thickness, workspace.Terrain, props, snap.hintPoint
 				)
 			end
 
