@@ -579,14 +579,20 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 	-- Where the next corner would land. The FIRST corner snaps onto hit geometry (so
 	-- a grid can sit on a surface); the second projects onto the first corner's plane.
+	-- Either corner then snaps to a nearby existing vertex so a placed grid lines up
+	-- with the mesh (same snap used by the Add poly tool).
 	local function gridPlacementPos(): Vector3?
+		local pos: Vector3?
 		if not mGridFirstPoint then
 			local result = mouseRaycastLoose()
-			if result then
-				return result.Position
-			end
+			pos = if result then result.Position else gridProjectedPos()
+		else
+			pos = gridProjectedPos()
 		end
-		return gridProjectedPos()
+		if not pos then
+			return nil
+		end
+		return (snapAddPoint(pos))
 	end
 
 	local function updateGridPlaceHover()
@@ -2271,14 +2277,15 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		if not mGridPlacing then
 			return
 		end
+		local pos = (snapAddPoint(worldPos))
 		if not mGridFirstPoint then
-			mGridFirstPoint = worldPos
-			mGridHoverPoint = worldPos
+			mGridFirstPoint = pos
+			mGridHoverPoint = pos
 			changeSignal:Fire()
 		else
 			local p1 = mGridFirstPoint
 			clearGridPlacement()
-			generateGridBetween(p1, worldPos)
+			generateGridBetween(p1, pos)
 		end
 	end
 	-- World-space line segments ({p1, p2}) previewing the grid being placed: corner

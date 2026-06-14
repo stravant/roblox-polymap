@@ -255,6 +255,34 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("Place grid: corner clicks snap to a nearby existing vertex", function()
+		withSession(function(session, mesh, settings)
+			settings.GridType = "Square"
+			settings.GridSpacing = 8
+			-- Existing geometry to snap to.
+			session.GenerateGrid()
+			t.expect(countDict(mesh.getVertices()) > 0).toBeTruthy()
+
+			-- Pick an existing vertex to aim near.
+			local target: Vector3? = nil
+			for _, v in mesh.getVertices() do
+				target = v.position
+				break
+			end
+			assert(target)
+
+			session.StartGridPlacement()
+			-- Click 1 stud off the vertex -- inside the 2-stud snap radius.
+			session.PlaceGridClickAt(target + Vector3.new(1, 0, 0))
+
+			-- The placed first corner (centre of the preview cross) snapped onto the vertex.
+			local lines = session.GetGridPreviewLines()
+			assert(lines and #lines >= 1)
+			local mid = (lines[1][1] + lines[1][2]) / 2
+			t.expect((mid - target).Magnitude < 0.05).toBeTruthy()
+		end)
+	end)
+
 	t.test("workflow: generate grid, move a vertex, undo restores geometry and selection", function()
 		withSession(function(session, mesh)
 			session.GenerateGrid()
