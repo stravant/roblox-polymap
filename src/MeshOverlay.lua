@@ -31,6 +31,7 @@ local HOVER_OUTLINE_COLOR = Color3.fromRGB(100, 150, 255)
 local MARQUEE_BORDER_COLOR = Color3.fromRGB(100, 150, 255)
 local ADD_EDGE_COLOR = Color3.fromRGB(50, 255, 50)
 local ADD_PREVIEW_COLOR = Color3.fromRGB(50, 200, 50)
+local GRID_PREVIEW_COLOR = Color3.fromRGB(80, 200, 255)
 
 local function drawBoundaryEdges(wire: WireframeHandleAdornment, mesh: TriangleMesh.TriangleMesh, triangleIds: { number })
 	-- Build set of triangle IDs for fast lookup
@@ -70,12 +71,14 @@ local function MeshOverlay(props: {
 	AddHighlightEdge: { v1Pos: Vector3, v2Pos: Vector3 }?,
 	AddPreviewTriangles: { { Vector3 } }?,
 	AddPreviewPolyline: { Vector3 }?,
+	GridPreviewLines: { { Vector3 } }?,
 })
 	local mesh = props.Mesh
 	local outlineRef = React.useRef(nil :: any)
 	local influenceRef = React.useRef(nil :: any)
 	local addEdgeRef = React.useRef(nil :: any)
 	local addPreviewRef = React.useRef(nil :: any)
+	local gridPreviewRef = React.useRef(nil :: any)
 
 	local selectedVertices = props.SelectedVertices or {}
 
@@ -184,6 +187,28 @@ local function MeshOverlay(props: {
 		end
 	end)
 
+	-- Draw the interactive grid-placement preview (corner crosses + cell lines).
+	local gridPreviewLines = props.GridPreviewLines
+	React.useEffect(function()
+		local wire = gridPreviewRef.current :: WireframeHandleAdornment?
+		if not wire then
+			return
+		end
+		wire:Clear()
+		if gridPreviewLines then
+			for _, seg in gridPreviewLines do
+				if #seg >= 2 then
+					wire:AddLine(seg[1], seg[2])
+				end
+			end
+		end
+		return function()
+			if wire then
+				wire:Clear()
+			end
+		end
+	end)
+
 	if not mesh then
 		return nil
 	end
@@ -220,6 +245,14 @@ local function MeshOverlay(props: {
 		Color3 = ADD_PREVIEW_COLOR,
 		AlwaysOnTop = true,
 		ref = addPreviewRef,
+	})
+
+	-- Wireframe adornment for the interactive grid-placement preview
+	children.GridPreviewWireframe = e("WireframeHandleAdornment", {
+		Adornee = workspace.Terrain,
+		Color3 = GRID_PREVIEW_COLOR,
+		AlwaysOnTop = true,
+		ref = gridPreviewRef,
 	})
 
 	-- Render selected vertex markers (scale down when many are selected)

@@ -60,7 +60,7 @@ local function loadSettings(plugin: Plugin): PolyMapSettings
 		GridType = raw.GridType or "Square",
 		GridWidth = raw.GridWidth or 10,
 		GridHeight = raw.GridHeight or 10,
-		GridSpacing = raw.GridSpacing or 4,
+		GridSpacing = raw.GridSpacing or 8,
 		PaintColor = raw.PaintColor or { 0.294, 0.592, 0.294 },
 		PaintMaterial = raw.PaintMaterial or "Grass",
 		PaintStrength = raw.PaintStrength or 1.0,

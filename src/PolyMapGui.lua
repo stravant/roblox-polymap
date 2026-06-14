@@ -369,17 +369,51 @@ local function GridPanel(props: {
 				HelpRichText = "Distance between grid vertices in studs.",
 			}),
 		}),
-		GenerateButton = e(OperationButton, {
-			Text = "Generate",
-			Color = Colors.ACTION_BLUE,
-			Disabled = props.Session == nil,
-			Height = 30,
+		Buttons = e("Frame", {
+			Size = UDim2.new(1, 0, 0, 30),
+			BackgroundTransparency = 1,
 			LayoutOrder = nextOrder(),
-			OnClick = function()
-				if props.Session then
-					props.Session.GenerateGrid()
-				end
-			end,
+		}, {
+			Layout = e("UIListLayout", {
+				FillDirection = Enum.FillDirection.Horizontal,
+				Padding = UDim.new(0, 4),
+				SortOrder = Enum.SortOrder.LayoutOrder,
+			}),
+			-- OperationButton fills its parent's width, so each sits in a 50% wrapper.
+			GenerateWrap = e("Frame", {
+				Size = UDim2.new(0.5, -2, 1, 0),
+				BackgroundTransparency = 1,
+				LayoutOrder = 1,
+			}, {
+				Button = e(OperationButton, {
+					Text = "Generate",
+					Color = Colors.ACTION_BLUE,
+					Disabled = props.Session == nil,
+					Height = 30,
+					OnClick = function()
+						if props.Session then
+							props.Session.GenerateGrid()
+						end
+					end,
+				}),
+			}),
+			PlaceWrap = e("Frame", {
+				Size = UDim2.new(0.5, -2, 1, 0),
+				BackgroundTransparency = 1,
+				LayoutOrder = 2,
+			}, {
+				Button = e(OperationButton, {
+					Text = "Place...",
+					Color = Colors.ACTION_BLUE,
+					Disabled = props.Session == nil,
+					Height = 30,
+					OnClick = function()
+						if props.Session then
+							props.Session.StartGridPlacement()
+						end
+					end,
+				}),
+			}),
 		}),
 	})
 end
@@ -1451,6 +1485,9 @@ local function PolyMapGui(props: {
 					end
 				end
 			end
+
+			-- Grid placement preview (independent of mode; only set while placing).
+			overlayProps.GridPreviewLines = session.GetGridPreviewLines()
 
 			return overlayProps
 		end)()),

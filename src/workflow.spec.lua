@@ -214,6 +214,47 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("Place grid: two corners span the exact rectangle as the grid's diagonal", function()
+		withSession(function(session, mesh, settings)
+			settings.GridType = "Square"
+			settings.GridSpacing = 8
+			local c1 = kRegionCenter
+			local c2 = kRegionCenter + Vector3.new(24, 0, 16)
+
+			session.StartGridPlacement()
+			t.expect(session.IsPlacingGrid()).toBe(true)
+
+			-- First corner: still placing, nothing generated yet, a preview is shown.
+			session.PlaceGridClickAt(c1)
+			t.expect(session.IsPlacingGrid()).toBe(true)
+			t.expect(countDict(mesh.getTriangles())).toBe(0)
+			t.expect(session.GetGridPreviewLines() ~= nil).toBeTruthy()
+
+			-- Second corner: the grid is generated and placement ends.
+			session.PlaceGridClickAt(c2)
+			t.expect(session.IsPlacingGrid()).toBe(false)
+			t.expect(session.GetGridPreviewLines() == nil).toBeTruthy()
+
+			-- 24x16 at spacing 8 -> 3x2 cells: 12 triangles, (3+1)x(2+1)=12 vertices.
+			t.expect(countDict(mesh.getTriangles())).toBe(12)
+			t.expect(countDict(mesh.getVertices())).toBe(12)
+
+			-- Exact corners: the discovered vertices span the clicked rectangle in XZ.
+			local minX, maxX = math.huge, -math.huge
+			local minZ, maxZ = math.huge, -math.huge
+			for _, v in mesh.getVertices() do
+				minX = math.min(minX, v.position.X)
+				maxX = math.max(maxX, v.position.X)
+				minZ = math.min(minZ, v.position.Z)
+				maxZ = math.max(maxZ, v.position.Z)
+			end
+			t.expect(math.abs(minX - math.min(c1.X, c2.X)) < 0.1).toBeTruthy()
+			t.expect(math.abs(maxX - math.max(c1.X, c2.X)) < 0.1).toBeTruthy()
+			t.expect(math.abs(minZ - math.min(c1.Z, c2.Z)) < 0.1).toBeTruthy()
+			t.expect(math.abs(maxZ - math.max(c1.Z, c2.Z)) < 0.1).toBeTruthy()
+		end)
+	end)
+
 	t.test("workflow: generate grid, move a vertex, undo restores geometry and selection", function()
 		withSession(function(session, mesh)
 			session.GenerateGrid()

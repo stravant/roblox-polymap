@@ -151,6 +151,13 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local mAddHoverTarget: { type: string, vertexId: number?, edgeKey: string?, position: Vector3? }? = nil
 	local mAddTriangleProps: fillTriangle.TriangleProps? = nil
 
+	-- Interactive "Place grid" state (the Place... button in the Generate panel):
+	-- the user clicks two opposite corners; the grid spans the rectangle between
+	-- them, with those points as its diagonal. Picking mirrors the Add poly tool.
+	local mGridPlacing = false
+	local mGridFirstPoint: Vector3? = nil
+	local mGridHoverPoint: Vector3? = nil
+
 	-- Marquee state
 	local mMarqueeStart: Vector2? = nil
 	local mMarqueeEnd: Vector2? = nil
@@ -481,11 +488,142 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return mMesh.walkSurface(seedTriangleId, worldPos, radius)
 	end
 
+	----------------------------------------------------------------------
+	-- Interactive grid placement (the Place... button)
+	----------------------------------------------------------------------
+	local function clearGridPlacement()
+		mGridPlacing = false
+		mGridFirstPoint = nil
+		mGridHoverPoint = nil
+	end
+
+	-- Generate a cols x rows cell grid (cells cellW x cellH) centred on origin, then
+	-- discover it from the camera-facing surface. Shared by GenerateGrid (settings-
+	-- sized, centred ahead) and the Place tool (spanning two clicked corners).
+	local function generateGridWithParams(origin: CFrame, cols: number, rows: number, cellW: number, cellH: number)
+		runUndoableOperation("PolyMap Generate Grid", function(): boolean
+			generateGrid({
+				GridType = currentSettings.GridType,
+				Width = cols,
+				Height = rows,
+				Spacing = currentSettings.GridSpacing,
+				CellWidth = cellW,
+				CellHeight = cellH,
+				Origin = origin,
+				Thickness = currentSettings.Thickness,
+				Parent = workspace.Terrain,
+				Props = getTriangleProps(),
+			})
+			return true
+		end)
+
+		-- Seed from the camera-facing surface (origin sits on the wedges' back plane;
+		-- a raycast onto the visible front face gives the right side). The radius
+		-- reaches the far corner from the centre.
+		local gridW, gridH = cols * cellW, rows * cellH
+		local gridExtent = math.sqrt(gridW * gridW + gridH * gridH) / 2
+			+ math.max(cellW, cellH, currentSettings.GridSpacing) + 1
+		local seedPoint = origin.Position
+		local camera = workspace.CurrentCamera
+		if camera then
+			local toGrid = origin.Position - camera.CFrame.Position
+			local hit = workspace:Raycast(camera.CFrame.Position, toGrid * 1.5)
+			if hit then
+				seedPoint = hit.Position
+			end
+		end
+		discoverRegionViewed({ seedPoint }, gridExtent)
+		changeSignal:Fire()
+	end
+
+	-- Centre, cell counts and per-axis cell sizes for a grid whose diagonal is
+	-- p1->p2. The count snaps to the spacing (round) and the cell size then stretches
+	-- so the corners land exactly on p1/p2. Shared by the commit and its preview.
+	local function gridLayoutFromCorners(p1: Vector3, p2: Vector3): (Vector3, number, number, number, number)
+		local spacing = math.max(currentSettings.GridSpacing, 0.1)
+		local dx, dz = math.abs(p2.X - p1.X), math.abs(p2.Z - p1.Z)
+		local cols = math.max(1, math.round(dx / spacing))
+		local rows = math.max(1, math.round(dz / spacing))
+		local cellW = if dx > 0.01 then dx / cols else spacing
+		local cellH = if dz > 0.01 then dz / rows else spacing
+		local center = Vector3.new((p1.X + p2.X) / 2, p1.Y, (p1.Z + p2.Z) / 2)
+		return center, cols, rows, cellW, cellH
+	end
+
+	local function generateGridBetween(p1: Vector3, p2: Vector3)
+		local center, cols, rows, cellW, cellH = gridLayoutFromCorners(p1, p2)
+		generateGridWithParams(CFrame.new(center), cols, rows, cellW, cellH)
+	end
+
+	-- The cursor projected onto the placement plane: a horizontal plane through the
+	-- first corner once set, else the ground ahead of the camera. Mirrors the Add
+	-- tool so the two corners stay coplanar (a flat grid).
+	local function gridProjectedPos(): Vector3?
+		local camera = workspace.CurrentCamera
+		if not camera then
+			return nil
+		end
+		local mouseLocation = UserInputService:GetMouseLocation()
+		local ray = camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
+		local planePoint = if mGridFirstPoint then mGridFirstPoint else (groundPointAhead())
+		local denom = ray.Direction:Dot(Vector3.yAxis)
+		if math.abs(denom) < 1e-4 then
+			return nil
+		end
+		local t = (planePoint - ray.Origin):Dot(Vector3.yAxis) / denom
+		if t <= 0 then
+			return nil
+		end
+		return ray.Origin + ray.Direction * t
+	end
+
+	-- Where the next corner would land. The FIRST corner snaps onto hit geometry (so
+	-- a grid can sit on a surface); the second projects onto the first corner's plane.
+	local function gridPlacementPos(): Vector3?
+		if not mGridFirstPoint then
+			local result = mouseRaycastLoose()
+			if result then
+				return result.Position
+			end
+		end
+		return gridProjectedPos()
+	end
+
+	local function updateGridPlaceHover()
+		local newHover = gridPlacementPos()
+		if newHover ~= mGridHoverPoint then
+			mGridHoverPoint = newHover
+			changeSignal:Fire()
+		end
+	end
+
+	-- First click anchors a corner; the second generates the grid and ends placement.
+	local function handleGridPlaceClick()
+		local pos = gridPlacementPos()
+		if not pos then
+			return
+		end
+		if not mGridFirstPoint then
+			mGridFirstPoint = pos
+			mGridHoverPoint = pos
+			changeSignal:Fire()
+		else
+			local p1 = mGridFirstPoint
+			clearGridPlacement()
+			generateGridBetween(p1, pos)
+		end
+	end
+
 	local function updateHover()
 		-- Leaving Add mode abandons any in-progress triangle (edge grab or fresh
 		-- points), so stale state doesn't reappear on returning to Add.
 		if currentSettings.Mode ~= "Add" and (mAddBoundaryEdge or #mAddPoints > 0) then
 			clearAddState()
+			changeSignal:Fire()
+		end
+		-- Leaving the Generate panel abandons an in-progress grid placement.
+		if currentSettings.Mode ~= "Generate" and mGridPlacing then
+			clearGridPlacement()
 			changeSignal:Fire()
 		end
 		-- Hide all hover feedback when the cursor is over the panel, mid-drag, or
@@ -498,6 +636,12 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				mAddHoverTarget = nil
 				changeSignal:Fire()
 			end
+			return
+		end
+
+		-- While placing a grid, the cursor only updates the placement preview.
+		if mGridPlacing then
+			updateGridPlaceHover()
 			return
 		end
 
@@ -1314,6 +1458,12 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			return
 		end
 
+		-- Placing a grid intercepts clicks to drop its two corners.
+		if mGridPlacing then
+			handleGridPlaceClick()
+			return
+		end
+
 		-- Use loose targeting (spherecast fallback) for selection/add modes
 		local mode = currentSettings.Mode
 		local useLoose = mode == "Move" or mode == "Rotate" or mode == "Add"
@@ -1744,6 +1894,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					clearAddState()
 					changeSignal:Fire()
 				end
+				if mGridPlacing then
+					clearGridPlacement()
+					changeSignal:Fire()
+				end
 			end
 		end)
 
@@ -2095,41 +2249,81 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local origin = if currentSettings.GridType == "Square"
 			then CFrame.new(pos)
 			else CFrame.lookAlong(pos, flatLook)
+		local spacing = currentSettings.GridSpacing
+		generateGridWithParams(origin, currentSettings.GridWidth, currentSettings.GridHeight, spacing, spacing)
+	end
 
-		runUndoableOperation("PolyMap Generate Grid", function(): boolean
-			generateGrid({
-				GridType = currentSettings.GridType,
-				Width = currentSettings.GridWidth,
-				Height = currentSettings.GridHeight,
-				Spacing = currentSettings.GridSpacing,
-				Origin = origin,
-				Thickness = currentSettings.Thickness,
-				Parent = workspace.Terrain,
-				Props = getTriangleProps(),
-			})
-			return true
-		end)
-
-		-- Discover the generated grid parts instead of full rescan
-		local gridExtent = math.max(currentSettings.GridWidth, currentSettings.GridHeight)
-			* currentSettings.GridSpacing / 2 + currentSettings.GridSpacing
-		-- Seed the discovery from the camera-facing surface, the way an on-demand
-		-- hover does. Each grid triangle is a thin wedge with two faces a thickness
-		-- apart; origin.Position lies on the input (back) plane, so seeding there
-		-- adopts the BACK face -- the freshly-generated grid then moves the wrong way
-		-- until the plugin is reopened and hover discovery re-finds it from the top.
-		-- A raycast from the camera to the grid lands on the visible front face.
-		local seedPoint = origin.Position
-		local camera = workspace.CurrentCamera
-		if camera then
-			local toGrid = origin.Position - camera.CFrame.Position
-			local hit = workspace:Raycast(camera.CFrame.Position, toGrid * 1.5)
-			if hit then
-				seedPoint = hit.Position
+	-- Enter the interactive "Place grid" tool: the next two clicks pick the grid's
+	-- diagonal corners (Escape cancels). Triggered by the Place... button.
+	session.StartGridPlacement = function()
+		clearAddState()
+		mGridPlacing = true
+		mGridFirstPoint = nil
+		mGridHoverPoint = nil
+		changeSignal:Fire()
+	end
+	session.IsPlacingGrid = function(): boolean
+		return mGridPlacing
+	end
+	-- Drive placement clicks at explicit world positions (for tests, as the mouse-
+	-- driven path uses gridPlacementPos): first call anchors a corner, second commits.
+	session.PlaceGridClickAt = function(worldPos: Vector3)
+		if not mGridPlacing then
+			return
+		end
+		if not mGridFirstPoint then
+			mGridFirstPoint = worldPos
+			mGridHoverPoint = worldPos
+			changeSignal:Fire()
+		else
+			local p1 = mGridFirstPoint
+			clearGridPlacement()
+			generateGridBetween(p1, worldPos)
+		end
+	end
+	-- World-space line segments ({p1, p2}) previewing the grid being placed: corner
+	-- crosses, plus the full cell grid once the first corner is down. nil when idle.
+	session.GetGridPreviewLines = function(): { { Vector3 } }?
+		if not mGridPlacing then
+			return nil
+		end
+		local lines: { { Vector3 } } = {}
+		local function cross(p: Vector3)
+			local s = 0.6
+			table.insert(lines, { p - Vector3.new(s, 0, 0), p + Vector3.new(s, 0, 0) })
+			table.insert(lines, { p - Vector3.new(0, 0, s), p + Vector3.new(0, 0, s) })
+		end
+		if not mGridFirstPoint then
+			if mGridHoverPoint then
+				cross(mGridHoverPoint)
+			end
+			return lines
+		end
+		cross(mGridFirstPoint)
+		local hover = mGridHoverPoint
+		if not hover then
+			return lines
+		end
+		local center, cols, rows, cellW, cellH = gridLayoutFromCorners(mGridFirstPoint, hover)
+		local halfW, halfH = cols * cellW / 2, rows * cellH / 2
+		-- Always the outline; the internal cell lines too unless the grid is huge.
+		local drawCells = cols <= 40 and rows <= 40
+		local x0, x1 = center.X - halfW, center.X + halfW
+		local z0, z1 = center.Z - halfH, center.Z + halfH
+		local y = center.Y
+		for j = 0, rows do
+			if drawCells or j == 0 or j == rows then
+				local z = z0 + j * cellH
+				table.insert(lines, { Vector3.new(x0, y, z), Vector3.new(x1, y, z) })
 			end
 		end
-		discoverRegionViewed({ seedPoint }, gridExtent)
-		changeSignal:Fire()
+		for i = 0, cols do
+			if drawCells or i == 0 or i == cols then
+				local x = x0 + i * cellW
+				table.insert(lines, { Vector3.new(x, y, z0), Vector3.new(x, y, z1) })
+			end
+		end
+		return lines
 	end
 	session.ImportHeightmap = function()
 		if mImportProgress then

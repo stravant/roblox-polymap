@@ -6,7 +6,12 @@ export type GridParams = {
 	GridType: string, -- "Square" or "Triangular"
 	Width: number, -- number of cells wide
 	Height: number, -- number of cells tall
-	Spacing: number, -- distance between adjacent vertices
+	Spacing: number, -- distance between adjacent vertices (square cells)
+	-- Optional per-axis cell sizes for a Square grid spanning an exact rectangle
+	-- (e.g. placed by two diagonal corners). Default to Spacing for both. Ignored
+	-- by the equilateral Triangular grid.
+	CellWidth: number?,
+	CellHeight: number?,
 	Origin: CFrame, -- center CFrame of the grid
 	Thickness: number,
 	Parent: Instance,
@@ -16,19 +21,20 @@ export type GridParams = {
 local function generateSquareGrid(params: GridParams)
 	local cols = params.Width
 	local rows = params.Height
-	local spacing = params.Spacing
+	local cellW = params.CellWidth or params.Spacing
+	local cellH = params.CellHeight or params.Spacing
 	local origin = params.Origin
 
 	-- Grid is centered on origin
-	local halfW = cols * spacing / 2
-	local halfH = rows * spacing / 2
+	local halfW = cols * cellW / 2
+	local halfH = rows * cellH / 2
 
 	-- Generate vertices in a (cols+1) x (rows+1) grid
 	local vertices: { { Vector3 } } = {}
 	for r = 0, rows do
 		local row: { Vector3 } = {}
 		for c = 0, cols do
-			local localPos = Vector3.new(c * spacing - halfW, 0, r * spacing - halfH)
+			local localPos = Vector3.new(c * cellW - halfW, 0, r * cellH - halfH)
 			local worldPos = origin:PointToWorldSpace(localPos)
 			table.insert(row, worldPos)
 		end
