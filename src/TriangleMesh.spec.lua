@@ -644,6 +644,85 @@ return function(t: TestTypes.TestContext)
 		folder:Destroy()
 	end)
 
+	t.test("upgrading a Block to Wedges preserves its colour and material", function()
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		-- A distinctly coloured/materialed block, not the wedge default grey.
+		local block = Instance.new("Part")
+		block.Shape = Enum.PartType.Block
+		block.Size = Vector3.new(4, 0.2, 3)
+		block.CFrame = CFrame.new(1300, 10, 0)
+		block.Anchored = true
+		block.Color = Color3.fromRGB(200, 40, 40)
+		block.Material = Enum.Material.Slate
+		block.Transparency = 0.25
+		block.Parent = folder
+
+		mesh.discoverPart(block, Vector3.new(1300, 10.2, 0))
+
+		-- Editing a vertex triggers the Block -> Wedge upgrade.
+		local vid = mesh.findVertexNear(Vector3.new(1302, 10.1, 1.5), 1)
+		assert(vid)
+		mesh.moveVertex(vid, Vector3.new(1302, 12, 1.5), 0.2)
+		t.expect(block.Parent).toBe(nil)
+
+		-- The generated wedges must inherit the block's appearance.
+		local wedges = 0
+		for _, tri in mesh.getTriangles() do
+			for _, part in tri.parts do
+				wedges += 1
+				t.expect((part :: Part).Shape).toBe(Enum.PartType.Wedge)
+				t.expect(part.Material).toBe(Enum.Material.Slate)
+				local c = part.Color
+				t.expect(math.abs(c.R - 200 / 255) < 0.01).toBeTruthy()
+				t.expect(math.abs(c.G - 40 / 255) < 0.01).toBeTruthy()
+				t.expect(math.abs(c.B - 40 / 255) < 0.01).toBeTruthy()
+				t.expect(math.abs(part.Transparency - 0.25) < 0.001).toBeTruthy()
+			end
+		end
+		t.expect(wedges > 0).toBeTruthy()
+
+		folder:Destroy()
+	end)
+
+	t.test("discoverPart uses the viewpoint to pick a thin Block's camera-facing face", function()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+		local function makeBlock(x: number): BasePart
+			local block = Instance.new("Part")
+			block.Shape = Enum.PartType.Block
+			block.Size = Vector3.new(4, 0.2, 3) -- thin along Y, centred at Y=10
+			block.CFrame = CFrame.new(x, 10, 0)
+			block.Anchored = true
+			block.Parent = folder
+			return block
+		end
+
+		-- A hit grazing just BELOW centre -- as the cursor crossing the slab's side
+		-- does -- would pick the bottom face on its own. A viewpoint high above must
+		-- override it and adopt the TOP face (corners at Y ~ 10.1).
+		local meshTop = createTriangleMesh()
+		meshTop.discoverPart(makeBlock(1340), Vector3.new(1342, 9.96, 0), Vector3.new(1340, 40, 0))
+		local topCount = 0
+		for _, v in meshTop.getVertices() do
+			topCount += 1
+			t.expect(v.position.Y > 10.0).toBeTruthy()
+		end
+		t.expect(topCount).toBe(4)
+
+		-- And the converse: a hit just above centre with a viewpoint below adopts the
+		-- BOTTOM face -- proving the viewpoint, not the hit point, decides the side.
+		local meshBot = createTriangleMesh()
+		meshBot.discoverPart(makeBlock(1360), Vector3.new(1362, 10.04, 0), Vector3.new(1360, -20, 0))
+		for _, v in meshBot.getVertices() do
+			t.expect(v.position.Y < 10.0).toBeTruthy()
+		end
+
+		folder:Destroy()
+	end)
+
 	t.test("walkSurface returns seed triangle with small radius", function()
 		-- Clean up any foreign parts in the test area
 		for _, p in workspace:GetPartBoundsInRadius(Vector3.new(402, 0, 0), 10) do

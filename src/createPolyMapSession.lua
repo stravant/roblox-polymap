@@ -466,6 +466,15 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return mMesh.walkSurface(seedTriangleId, worldPos, radius)
 	end
 
+	-- discoverPart with the camera eye as the face-disambiguation viewpoint, so a
+	-- thin Block is converted to triangles on the face the user is looking at rather
+	-- than the side the cursor first crossed. For wedges the viewpoint is ignored.
+	local function discoverPartViewed(part: BasePart, hitPoint: Vector3): number?
+		local camera = workspace.CurrentCamera
+		local viewPoint = if camera then camera.CFrame.Position else nil
+		return mMesh.discoverPart(part, hitPoint, viewPoint)
+	end
+
 	local function updateHover()
 		-- Leaving Add mode abandons any in-progress triangle (edge grab or fresh
 		-- points), so stale state doesn't reappear on returning to Add.
@@ -521,7 +530,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local hitTriangleId: number? = nil
 		if result and result.Instance:IsA("BasePart") then
 			-- Discover the part under the cursor (O(1) for already-tracked parts)
-			mMesh.discoverPart(result.Instance, result.Position)
+			discoverPartViewed(result.Instance, result.Position)
 			hitTriangleId = mMesh.getPartTriangle(result.Instance :: BasePart, result.Position)
 		end
 
@@ -779,7 +788,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				placeFreshPoint(worldPos)
 				return
 			end
-			mMesh.discoverPart(hitPart, worldPos)
+			discoverPartViewed(hitPart, worldPos)
 			-- Discover neighbors so we can tell which edges are truly boundary
 			local size = hitPart.Size
 			local extent = math.sqrt(size.X * size.X + size.Y * size.Y + size.Z * size.Z)
@@ -911,7 +920,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			mStrokePlaneNormal = result.Normal
 			-- Track seed triangle for surface walking
 			if result.Instance:IsA("BasePart") then
-				mMesh.discoverPart(result.Instance :: BasePart, result.Position)
+				discoverPartViewed(result.Instance :: BasePart, result.Position)
 				local hitTriId = mMesh.getPartTriangle(result.Instance :: BasePart, result.Position)
 				if hitTriId then
 					mStrokeSeedTriangleId = hitTriId
@@ -952,7 +961,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 		-- Track seed triangle for surface walking
 		if result and result.Instance:IsA("BasePart") then
-			mMesh.discoverPart(result.Instance :: BasePart, result.Position)
+			discoverPartViewed(result.Instance :: BasePart, result.Position)
 			local hitTriId = mMesh.getPartTriangle(result.Instance :: BasePart, result.Position)
 			if hitTriId then
 				mStrokeSeedTriangleId = hitTriId
@@ -1008,7 +1017,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local result = mouseRaycast()
 		if result and result.Instance:IsA("BasePart") then
 			-- Track seed triangle for surface walking
-			mMesh.discoverPart(result.Instance :: BasePart, result.Position)
+			discoverPartViewed(result.Instance :: BasePart, result.Position)
 			local hitTriId = mMesh.getPartTriangle(result.Instance :: BasePart, result.Position)
 			if hitTriId then
 				mStrokeSeedTriangleId = hitTriId
@@ -2292,7 +2301,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 		-- Mirror applyPaintAtCursor's discovery: discover the hit part, then the
 		-- radius region just before walking it (see discoverAndWalkSurface).
-		mMesh.discoverPart(hitPart, worldPos)
+		discoverPartViewed(hitPart, worldPos)
 
 		pushUndoSnapshot()
 		local recording = ChangeHistoryService:TryBeginRecording("PolyMap Paint")

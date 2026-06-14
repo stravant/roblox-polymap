@@ -71,7 +71,7 @@ export type TriangleMesh = {
 	walkSurface: (seedTriangleId: TriangleId, center: Vector3, radius: number) -> ({ TriangleId }, { VertexId }),
 
 	-- Discovery / Scanning
-	discoverPart: (part: BasePart, hintPoint: Vector3, nearbyResolver: ((Vector3, number) -> { Instance })?) -> number?,
+	discoverPart: (part: BasePart, hintPoint: Vector3, viewPoint: Vector3?, nearbyResolver: ((Vector3, number) -> { Instance })?) -> number?,
 	discoverRegion: (seeds: { Vector3 }, radius: number) -> { TriangleId },
 	getPartTriangle: (part: BasePart, hintPoint: Vector3) -> number?,
 	getPartTriangles: (part: BasePart) -> { TriangleId },
@@ -305,9 +305,17 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 	-- Upgrade a Block-backed triangle to use Wedge parts via fillTriangle.
 	-- This replaces the block part with 1-2 wedge parts and clears the upgrade flag.
 	-- If the block has other triangles linked (sibling quads), they are upgraded too.
-	local function upgradeBlockTriangles(tri: Triangle, thickness: number, props: fillTriangle.TriangleProps?)
+	local function upgradeBlockTriangles(tri: Triangle, thickness: number)
 		local block = tri.parts[1]
 		local parent = block.Parent
+
+		-- The generated wedges inherit the block's appearance, so converting a box
+		-- to triangles is visually seamless rather than snapping to the default grey.
+		local blockProps: fillTriangle.TriangleProps = {
+			Color = block.Color,
+			Material = block.Material,
+			Transparency = block.Transparency,
+		}
 
 		-- Collect all triangles backed by this block
 		local blockTriangles = {} :: {Triangle}
@@ -340,7 +348,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			-- Create new wedge parts
 			local newParts = fillTriangle(
 				v1.position, v2.position, v3.position,
-				thickness, parent :: Instance, props, nil, shouldInvert
+				thickness, parent :: Instance, blockProps, nil, shouldInvert
 			)
 
 			-- Update triangle
@@ -667,7 +675,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		for _, triId in triIds do
 			local tri = mTriangles[triId]
 			if tri and tri.partsRequireUpgrade then
-				upgradeBlockTriangles(tri, tri.thickness, props)
+				upgradeBlockTriangles(tri, tri.thickness)
 			end
 		end
 
@@ -934,7 +942,11 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 	-- unbounded rebuild (discoverRegion at radius == math.huge) passes one backed
 	-- by a prebuilt corner index, turning thousands of workspace queries per undo
 	-- into in-memory probes. Interactive callers omit it and keep the live query.
-	local function discoverPart(part: BasePart, hintPoint: Vector3, nearbyResolver: ((Vector3, number) -> { Instance })?): number?
+	-- viewPoint (the camera eye, when an interactive caller supplies it) disambiguates
+	-- which face of a thin Block to adopt: the one facing the viewer, rather than the
+	-- side the cursor happened to cross first. Falls back to hintPoint when absent
+	-- (the rebuild and tests), and is ignored for wedges.
+	local function discoverPart(part: BasePart, hintPoint: Vector3, viewPoint: Vector3?, nearbyResolver: ((Vector3, number) -> { Instance })?): number?
 		-- A wedge part backs exactly one single-sided triangle. Once it is
 		-- discovered, return that triangle regardless of which face the hint is on.
 		-- Crucially we must NOT spawn a second triangle on the opposite face: grids
@@ -1279,6 +1291,12 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			local size = part.Size
 			local cf = part.CFrame
 
+			-- Choose the face by the viewer's position when we have it, so the quad we
+			-- adopt is the one facing the camera -- not whichever side of the thin slab
+			-- the cursor first grazed (which is usually the back). Without a viewpoint
+			-- (rebuild/tests) fall back to the hit point, the original behaviour.
+			local faceHint = viewPoint or hintPoint
+
 			-- Find the thin dimension
 			local dims = {size.X, size.Y, size.Z}
 			local axes = {cf.RightVector, cf.UpVector, cf.LookVector}
@@ -1292,9 +1310,9 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			end
 
 			local thinThickness = dims[minIdx]
-			local localHint = cf:PointToObjectSpace(hintPoint)
+			local localHint = cf:PointToObjectSpace(faceHint)
 
-			-- Get the quad corners on the face closest to hintPoint
+			-- Get the quad corners on the face the viewer is looking at
 			local halfSize = size / 2
 			local corners: {Vector3}
 			if minIdx == 1 then
@@ -1340,7 +1358,9 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 
 			local faceNormal = computeNormal(c1, c2, c3)
 			local faceCentroid = (c1 + c2 + c3 + c4) / 4
-			local faceToHint = hintPoint - faceCentroid
+			-- Orient the adopted face outward toward the viewer (same hint as the face
+			-- choice), so the wedge normals face the camera rather than into the slab.
+			local faceToHint = faceHint - faceCentroid
 			if faceNormal:Dot(faceToHint) < 0 then
 				faceNormal = -faceNormal
 			end
@@ -1900,7 +1920,9 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 					if not part:IsA("BasePart") then continue end
 					if not mPartToTriangles[part] then
 						if partHasCornerNear(part, pos) or part == bootstrapPart then
-							discoverPart(part, pos, nearbyResolver)
+							-- viewPoint nil: the rebuild has no camera, and pos (a mesh corner)
+							-- already disambiguates a block's face. nearbyResolver stays.
+							discoverPart(part, pos, nil, nearbyResolver)
 						end
 					end
 					-- Collect the part's discovered face(s) (e.g. a Block's two tris).
