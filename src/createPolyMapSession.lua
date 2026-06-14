@@ -780,6 +780,14 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	end
 
 	local function handleAddClick(worldPos: Vector3, hitPart: BasePart?, hitNormal: Vector3?)
+		-- Discover the clicked part with the camera viewpoint BEFORE the region scan
+		-- below. That scan (discoverRegion) has no viewpoint and is seeded at the click
+		-- point, which on a thin box often lies on the back side -- discovering it
+		-- there first would lock the wrong (back) face. Pinning the hit part to its
+		-- camera-facing face first makes the scan a no-op for it.
+		if hitPart then
+			discoverPartViewed(hitPart, worldPos)
+		end
 		mMesh.discoverRegion({worldPos}, 15)
 		if not mAddBoundaryEdge then
 			-- No edge selected yet. Place a fresh point when over empty space, or once
@@ -788,7 +796,6 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				placeFreshPoint(worldPos)
 				return
 			end
-			discoverPartViewed(hitPart, worldPos)
 			-- Discover neighbors so we can tell which edges are truly boundary
 			local size = hitPart.Size
 			local extent = math.sqrt(size.X * size.X + size.Y * size.Y + size.Z * size.Z)

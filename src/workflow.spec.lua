@@ -1161,6 +1161,35 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("Add: grabbing a box edge uses the camera-facing (top) face", function()
+		withSession(function(session, mesh, settings)
+			settings.Mode = "Add"
+			-- A thin square tile (thin along Y) centred at the region, raised to Y=10.
+			-- The pinned camera sits at Y=30, well above it, so the top face wins.
+			local box = Instance.new("Part")
+			box.Shape = Enum.PartType.Block
+			box.Size = Vector3.new(4, 0.2, 4)
+			box.CFrame = CFrame.new(kRegionCenter + Vector3.new(0, 10, 0))
+			box.Anchored = true
+			box.Parent = workspace.Terrain
+
+			-- Click on the +X side just BELOW the mid-plane (Y=9.96) -- where a cursor
+			-- crossing the slab's side first lands. The hint-only path discovers the
+			-- bottom face here; handleAddClick must discover with the camera FIRST (it
+			-- did not before, because discoverRegion ran first) and grab a TOP edge.
+			session.AddClickAt(kRegionCenter + Vector3.new(2.0, 9.96, 0), box)
+
+			local edge = session.GetAddBoundaryEdge()
+			assert(edge)
+			local a = mesh.getVertex(edge.v1)
+			local b = mesh.getVertex(edge.v2)
+			assert(a and b)
+			-- Top face corners are at Y=10.1, bottom at 9.9.
+			t.expect(a.position.Y > 10.0).toBeTruthy()
+			t.expect(b.position.Y > 10.0).toBeTruthy()
+		end)
+	end)
+
 	t.test("Add: three empty-space clicks form a fresh disconnected triangle", function()
 		withSession(function(session, mesh, settings)
 			settings.Mode = "Add"
