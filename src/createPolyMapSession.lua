@@ -161,6 +161,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 	-- Dragger state
 	local mIsDraggingHandle = false
+	-- Assigned once the move/rotate handles exist (far below). Reports whether the
+	-- cursor is currently over a handle, so the hover outline can hide -- mirroring
+	-- how the dragger's own HoverTracker suppresses surface hover over a handle.
+	local queryMouseOverHandle: (() -> boolean)? = nil
 	local mDragRecording: string? = nil
 	local mSavedVertexPositions: { [number]: Vector3 } = {}
 	local mInfluencedVertices: { [number]: { position: Vector3, factor: number } } = {}
@@ -469,7 +473,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			clearAddState()
 			changeSignal:Fire()
 		end
-		if mIsOverUI or mIsDraggingHandle then
+		-- Hide all hover feedback when the cursor is over the panel, mid-drag, or
+		-- over a Move/Rotate handle (the dragger hovers the handle, not the surface).
+		if mIsOverUI or mIsDraggingHandle or (queryMouseOverHandle ~= nil and queryMouseOverHandle()) then
 			if mHoverVertexId ~= nil or mHoverEdgeKey ~= nil or #mHoverTriangleIds > 0 or mAddHoverTarget ~= nil then
 				mHoverVertexId = nil
 				mHoverEdgeKey = nil
@@ -1643,6 +1649,21 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			return currentSettings.Mode == "Rotate" and getSelectedVertexCount() > 0 and not mMarqueeEnd
 		end,
 	})
+
+	-- Now that the handles exist, wire up the over-handle query used by updateHover.
+	-- Replicates the dragger's HoverTracker check (handles:hitTest with the same
+	-- args), so the surface hover outline hides exactly when the dragger is hovering
+	-- a handle instead of the surface. The handles are alwaysOnTop and don't bias
+	-- towards parts, so a non-nil hitTest is an unambiguous "over a handle".
+	queryMouseOverHandle = function(): boolean
+		local mode = currentSettings.Mode
+		if mode == "Move" then
+			return (moveHandles:hitTest(draggerContext:getMouseRay(), false)) ~= nil
+		elseif mode == "Rotate" then
+			return (rotateHandles:hitTest(draggerContext:getMouseRay(), false)) ~= nil
+		end
+		return false
+	end
 
 	local rootElement = Roact.createElement(DraggerToolComponent, {
 		Mouse = plugin:GetMouse(),
