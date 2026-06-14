@@ -648,7 +648,7 @@ local function InfluencePanel(props: {
 				Label = "Radius",
 				Value = props.Settings.InfluenceRadius,
 				Min = 0,
-				Max = 30,
+				Max = 50,
 				Step = 1,
 				ValueChanged = function(newValue: number)
 					props.Settings.InfluenceRadius = newValue

@@ -75,6 +75,9 @@ local function Slider(props: {
 		then TextService:GetTextSize(props.Label, 18, Enum.Font.SourceSans, Vector2.new(1000, 1000)).X
 		else 0
 	local valueWidth = 36
+	-- Gap between the track's right end and the value text. Must clear the thumb,
+	-- which is centred on the track end at max value and so half-overhangs it.
+	local kTrackValueGap = 14
 
 	return e("Frame", {
 		Size = UDim2.new(1, 0, 0, 24),
@@ -96,7 +99,7 @@ local function Slider(props: {
 			ref = trackVisualRef,
 			AnchorPoint = Vector2.new(0, 0.5),
 			Position = UDim2.new(0, labelWidth + 8, 0.5, 2),
-			Size = UDim2.new(1, -(labelWidth + 8 + valueWidth + 4), 0, 8),
+			Size = UDim2.new(1, -(labelWidth + 8 + valueWidth + kTrackValueGap), 0, 8),
 			BackgroundColor3 = Colors.GREY,
 		}, {
 			Corner = e("UICorner", {
@@ -128,7 +131,7 @@ local function Slider(props: {
 			BackgroundTransparency = 1,
 			AutoButtonColor = false,
 			Position = UDim2.new(0, labelWidth + 8 - kHitOverlap, 0, 0),
-			Size = UDim2.new(1, -(labelWidth + 8 + valueWidth + 4) + kHitOverlap * 2, 1, 0),
+			Size = UDim2.new(1, -(labelWidth + 8 + valueWidth + kTrackValueGap) + kHitOverlap * 2, 1, 0),
 			ZIndex = 3,
 			ref = trackRef,
 			[React.Event.MouseButton1Down] = function(_self: TextButton, x: number, _y: number)
