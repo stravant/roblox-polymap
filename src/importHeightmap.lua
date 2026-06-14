@@ -2,7 +2,7 @@
 
 local AssetService = game:GetService("AssetService")
 
-local fillTriangle = require("./fillTriangle")
+local buildHeightmapMesh = require("./buildHeightmapMesh")
 
 export type ImportParams = {
 	ImageId: string,
@@ -15,8 +15,6 @@ export type ImportParams = {
 	Parent: Instance,
 	OnProgress: ((fraction: number) -> ())?,
 }
-
-local kYieldCellInterval = 200 -- yield every N cells (2 triangles each)
 
 local function importHeightmap(params: ImportParams)
 	local imageId = params.ImageId
@@ -77,51 +75,9 @@ local function importHeightmap(params: ImportParams)
 		table.insert(vertexColors, colorRow)
 	end
 
-	-- Each cell produces 2 triangles, colored by averaging vertex colors
-	local totalCells = rows * cols
-	local cellsDone = 0
-	local cellsSinceYield = 0
-	for r = 1, rows do
-		for c = 1, cols do
-			local tl = vertices[r][c]
-			local tr = vertices[r][c + 1]
-			local bl = vertices[r + 1][c]
-			local br = vertices[r + 1][c + 1]
-
-			local ctlr = vertexColors[r][c]
-			local ctrr = vertexColors[r][c + 1]
-			local cblr = vertexColors[r + 1][c]
-			local cbrr = vertexColors[r + 1][c + 1]
-
-			-- Triangle 1: tl, tr, bl - average of 3 vertex colors
-			local r1 = (ctlr[1] + ctrr[1] + cblr[1]) / 3
-			local g1 = (ctlr[2] + ctrr[2] + cblr[2]) / 3
-			local b1 = (ctlr[3] + ctrr[3] + cblr[3]) / 3
-			local props1: fillTriangle.TriangleProps = {
-				Color = Color3.new(r1, g1, b1),
-			}
-			fillTriangle(tl, tr, bl, thickness, parent, props1)
-
-			-- Triangle 2: tr, br, bl - average of 3 vertex colors
-			local r2 = (ctrr[1] + cbrr[1] + cblr[1]) / 3
-			local g2 = (ctrr[2] + cbrr[2] + cblr[2]) / 3
-			local b2 = (ctrr[3] + cbrr[3] + cblr[3]) / 3
-			local props2: fillTriangle.TriangleProps = {
-				Color = Color3.new(r2, g2, b2),
-			}
-			fillTriangle(tr, br, bl, thickness, parent, props2)
-
-			cellsDone += 1
-			cellsSinceYield += 1
-			if cellsSinceYield >= kYieldCellInterval then
-				cellsSinceYield = 0
-				if onProgress then
-					onProgress(cellsDone / totalCells)
-				end
-				task.wait()
-			end
-		end
-	end
+	-- Each cell produces 2 triangles, colored by averaging vertex colors. Generated
+	-- facing up (smooth surface on top, thickness hanging below).
+	buildHeightmapMesh(vertices, vertexColors, thickness, parent, onProgress)
 
 	if onProgress then
 		onProgress(1)
