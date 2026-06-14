@@ -582,9 +582,20 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	-- Either corner then snaps to a nearby existing vertex so a placed grid lines up
 	-- with the mesh (same snap used by the Add poly tool).
 	local function gridPlacementPos(): Vector3?
+		local result = mouseRaycastLoose()
+		-- Discover the part under the cursor (and its neighbours) so there are real
+		-- vertices to snap to, exactly as the Add poly tool does before snapAddPoint.
+		-- Without this we could only snap to parts that some earlier action already
+		-- discovered; discoverRegion is incremental so re-running it as the cursor
+		-- moves only costs for newly entered geometry.
+		if result and result.Instance:IsA("BasePart") then
+			local hitPart = result.Instance :: BasePart
+			local size = hitPart.Size
+			local extent = math.sqrt(size.X * size.X + size.Y * size.Y + size.Z * size.Z)
+			discoverRegionViewed({ result.Position }, extent)
+		end
 		local pos: Vector3?
 		if not mGridFirstPoint then
-			local result = mouseRaycastLoose()
 			pos = if result then result.Position else gridProjectedPos()
 		else
 			pos = gridProjectedPos()
@@ -2273,9 +2284,16 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	end
 	-- Drive placement clicks at explicit world positions (for tests, as the mouse-
 	-- driven path uses gridPlacementPos): first call anchors a corner, second commits.
-	session.PlaceGridClickAt = function(worldPos: Vector3)
+	session.PlaceGridClickAt = function(worldPos: Vector3, hitPart: BasePart?)
 		if not mGridPlacing then
 			return
+		end
+		-- Mirror gridPlacementPos: discover the clicked part (and its neighbours) so a
+		-- corner can snap to freshly-discovered vertices, not only pre-discovered ones.
+		if hitPart then
+			local size = hitPart.Size
+			local extent = math.sqrt(size.X * size.X + size.Y * size.Y + size.Z * size.Z)
+			discoverRegionViewed({ worldPos }, extent)
 		end
 		local pos = (snapAddPoint(worldPos))
 		if not mGridFirstPoint then

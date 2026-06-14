@@ -283,6 +283,47 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("Place grid: a corner discovers an undiscovered part and snaps to its vertex", function()
+		withSession(function(session, mesh, settings)
+			settings.GridType = "Square"
+			settings.GridSpacing = 8
+			-- Build geometry, note a vertex, and find its wedge part.
+			session.GenerateGrid()
+			local target: Vector3? = nil
+			for _, v in mesh.getVertices() do
+				target = v.position
+				break
+			end
+			assert(target)
+			local hitPart: BasePart? = nil
+			for _, p in workspace:GetPartBoundsInRadius(target, 2) do
+				if p:IsA("Part") and p.Shape == Enum.PartType.Wedge then
+					hitPart = p
+					break
+				end
+			end
+			assert(hitPart)
+
+			-- Forget it: the workspace parts remain but the in-memory mesh is empty,
+			-- like a freshly reopened plugin that has discovered nothing yet.
+			mesh.clear()
+			t.expect(countDict(mesh.getVertices())).toBe(0)
+
+			session.StartGridPlacement()
+			-- Click 1 stud off the (now-undiscovered) vertex, passing the part the cursor
+			-- would be over. Placement must discover it and snap onto the vertex.
+			session.PlaceGridClickAt(target + Vector3.new(1, 0, 0), hitPart)
+
+			-- Discovery happened on the click...
+			t.expect(countDict(mesh.getVertices()) > 0).toBeTruthy()
+			-- ...and the corner snapped onto the rediscovered vertex.
+			local lines = session.GetGridPreviewLines()
+			assert(lines and #lines >= 1)
+			local mid = (lines[1][1] + lines[1][2]) / 2
+			t.expect((mid - target).Magnitude < 0.05).toBeTruthy()
+		end)
+	end)
+
 	t.test("workflow: generate grid, move a vertex, undo restores geometry and selection", function()
 		withSession(function(session, mesh)
 			session.GenerateGrid()
