@@ -116,30 +116,45 @@ local function StatusText(props: {
 	if text == "" then
 		return nil
 	end
-	return e("TextLabel", {
+	-- Inset the grey background from the container edges so it lines up with the
+	-- panels' bordered boxes (SubPanel insets its box by 6px a side) rather than
+	-- bleeding to the very edges. A transparent full-width frame supplies the inset;
+	-- the label fills what's left.
+	local INSET = 6
+	return e("Frame", {
 		Size = UDim2.fromScale(1, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
-		BackgroundTransparency = 0,
-		BackgroundColor3 = Colors.GREY,
-		BorderSizePixel = 0,
-		Font = Enum.Font.SourceSans,
-		TextSize = 18,
-		TextColor3 = Colors.WHITE,
-		RichText = true,
-		Text = `<i>{text}</i>`,
-		TextWrapped = true,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		TextYAlignment = Enum.TextYAlignment.Top,
+		BackgroundTransparency = 1,
 		LayoutOrder = props.LayoutOrder,
 	}, {
 		Padding = e("UIPadding", {
-			PaddingTop = UDim.new(0, 2),
-			PaddingBottom = UDim.new(0, 2),
-			PaddingLeft = UDim.new(0, 4),
-			PaddingRight = UDim.new(0, 4),
+			PaddingLeft = UDim.new(0, INSET),
+			PaddingRight = UDim.new(0, INSET),
 		}),
-		Corner = e("UICorner", {
-			CornerRadius = UDim.new(0, 4),
+		Label = e("TextLabel", {
+			Size = UDim2.fromScale(1, 0),
+			AutomaticSize = Enum.AutomaticSize.Y,
+			BackgroundTransparency = 0,
+			BackgroundColor3 = Colors.GREY,
+			BorderSizePixel = 0,
+			Font = Enum.Font.SourceSans,
+			TextSize = 18,
+			TextColor3 = Colors.WHITE,
+			RichText = true,
+			Text = `<i>{text}</i>`,
+			TextWrapped = true,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextYAlignment = Enum.TextYAlignment.Top,
+		}, {
+			Padding = e("UIPadding", {
+				PaddingTop = UDim.new(0, 2),
+				PaddingBottom = UDim.new(0, 2),
+				PaddingLeft = UDim.new(0, 4),
+				PaddingRight = UDim.new(0, 4),
+			}),
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 4),
+			}),
 		}),
 	})
 end
