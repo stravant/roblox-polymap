@@ -169,6 +169,51 @@ return function(t: TestTypes.TestContext)
 		return best
 	end
 
+	t.test("generate grid discovers the camera-facing side, like a hover", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 4
+			settings.GridHeight = 4
+
+			-- Map each triangle (keyed by its XZ centroid) to its discovered facing.
+			local function recordByCentroid(m: any): { [string]: number }
+				local out: { [string]: number } = {}
+				for _, tri in m.getTriangles() do
+					local c = Vector3.zero
+					for _, vid in tri.vertices do
+						c += m.getVertex(vid).position
+					end
+					c /= 3
+					out[string.format("%.1f_%.1f", c.X, c.Z)] = tri.normal.Y
+				end
+				return out
+			end
+
+			session.GenerateGrid()
+			local genNormals = recordByCentroid(mesh)
+
+			-- Rediscover from scratch the way a freshly reopened plugin does: raycasts
+			-- from the camera, discoverPart on each hit. This is the reference facing.
+			mesh.clear()
+			faithfulHover(mesh)
+			local hoverNormals = recordByCentroid(mesh)
+
+			-- The generate-populated facing must match the hover-populated facing, or a
+			-- move right after generate rebuilds the wedges on the wrong side.
+			local total, mismatches = 0, 0
+			for key, hoverY in hoverNormals do
+				local genY = genNormals[key]
+				if genY ~= nil then
+					total += 1
+					if (genY >= 0) ~= (hoverY >= 0) then
+						mismatches += 1
+					end
+				end
+			end
+			t.expect(total > 0).toBeTruthy()
+			t.expect(mismatches).toBe(0)
+		end)
+	end)
+
 	t.test("workflow: generate grid, move a vertex, undo restores geometry and selection", function()
 		withSession(function(session, mesh)
 			session.GenerateGrid()

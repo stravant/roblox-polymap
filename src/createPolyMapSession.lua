@@ -2113,8 +2113,22 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		-- Discover the generated grid parts instead of full rescan
 		local gridExtent = math.max(currentSettings.GridWidth, currentSettings.GridHeight)
 			* currentSettings.GridSpacing / 2 + currentSettings.GridSpacing
-		-- TODO: Do we need a discover here? We could discover on demand
-		discoverRegionViewed({origin.Position}, gridExtent)
+		-- Seed the discovery from the camera-facing surface, the way an on-demand
+		-- hover does. Each grid triangle is a thin wedge with two faces a thickness
+		-- apart; origin.Position lies on the input (back) plane, so seeding there
+		-- adopts the BACK face -- the freshly-generated grid then moves the wrong way
+		-- until the plugin is reopened and hover discovery re-finds it from the top.
+		-- A raycast from the camera to the grid lands on the visible front face.
+		local seedPoint = origin.Position
+		local camera = workspace.CurrentCamera
+		if camera then
+			local toGrid = origin.Position - camera.CFrame.Position
+			local hit = workspace:Raycast(camera.CFrame.Position, toGrid * 1.5)
+			if hit then
+				seedPoint = hit.Position
+			end
+		end
+		discoverRegionViewed({ seedPoint }, gridExtent)
 		changeSignal:Fire()
 	end
 	session.ImportHeightmap = function()

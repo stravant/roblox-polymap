@@ -1618,8 +1618,15 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		-- Track explored positions to avoid re-processing
 		local explored = {} :: {[VertexHash]: boolean}
 
-		-- Queue of positions to explore incrementally
-		local exploreQueue = {} :: {Vector3}
+		-- Two queues so each seed's walk finishes before the next seed is touched.
+		-- walkQueue (positions reached by the topology walk) drains BEFORE the next
+		-- initial seed in seedQueue. This matters on the undo rebuild: a few good
+		-- seeds (the reverted snapshot) must fully discover the connected mesh first,
+		-- so that the many stale seeds (post-op positions, some landing a thickness
+		-- off on a back-face plane) then find every part already tracked and become
+		-- no-ops instead of corner-matching and adopting the back face.
+		local seedQueue = {} :: {Vector3}
+		local walkQueue = {} :: {Vector3}
 
 		-- Helper: add a triangle to results and queue its unexplored vertices
 		local function collectTriangle(triId: TriangleId)
@@ -1633,7 +1640,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 					if v then
 						local h = hashVertex(v.position)
 						if not explored[h] then
-							table.insert(exploreQueue, v.position)
+							table.insert(walkQueue, v.position)
 						end
 					end
 				end
@@ -1776,9 +1783,9 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			return out
 		end
 
-		-- Seed the queue with starting positions
+		-- Seed the (low-priority) seed queue with starting positions
 		for _, seed in seeds do
-			table.insert(exploreQueue, seed)
+			table.insert(seedQueue, seed)
 		end
 
 		-- Only built for the unbounded rebuild; nil keeps every bounded
@@ -1811,12 +1818,19 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			end
 		end
 
-		-- Dequeue via a moving head index, not table.remove(queue, 1): the latter
+		-- Dequeue via moving head indices, not table.remove(queue, 1): the latter
 		-- shifts every remaining element on each pop, making a full rebuild O(n^2).
-		local exploreHead = 1
-		while exploreHead <= #exploreQueue do
-			local pos = exploreQueue[exploreHead]
-			exploreHead += 1
+		-- Always drain walkQueue first (a seed's full walk) before the next seed.
+		local seedHead, walkHead = 1, 1
+		while walkHead <= #walkQueue or seedHead <= #seedQueue do
+			local pos: Vector3
+			if walkHead <= #walkQueue then
+				pos = walkQueue[walkHead]
+				walkHead += 1
+			else
+				pos = seedQueue[seedHead]
+				seedHead += 1
+			end
 			local posHash = hashVertex(pos)
 			if explored[posHash] then continue end
 			explored[posHash] = true
