@@ -461,18 +461,24 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	-- Move tool's influence drag already discovers-then-walks the same way; this
 	-- gives the brush tools the same. discoverRegion is incremental, so repeated
 	-- calls as the cursor moves only discover newly-entered geometry.
-	local function discoverAndWalkSurface(seedTriangleId: number, worldPos: Vector3, radius: number)
-		mMesh.discoverRegion({ worldPos }, radius)
-		return mMesh.walkSurface(seedTriangleId, worldPos, radius)
+	-- The camera eye, used as the face-disambiguation viewpoint for discovery: a thin
+	-- Block adopts the face the user is looking at rather than the side the cursor
+	-- crossed (or, on a baseplate, the bottom plane the region scan's seed sits on).
+	-- For wedges the viewpoint is ignored.
+	local function cameraViewPoint(): Vector3?
+		local camera = workspace.CurrentCamera
+		return if camera then camera.CFrame.Position else nil
+	end
+	local function discoverPartViewed(part: BasePart, hitPoint: Vector3): number?
+		return mMesh.discoverPart(part, hitPoint, cameraViewPoint())
+	end
+	local function discoverRegionViewed(seeds: { Vector3 }, radius: number)
+		return mMesh.discoverRegion(seeds, radius, cameraViewPoint())
 	end
 
-	-- discoverPart with the camera eye as the face-disambiguation viewpoint, so a
-	-- thin Block is converted to triangles on the face the user is looking at rather
-	-- than the side the cursor first crossed. For wedges the viewpoint is ignored.
-	local function discoverPartViewed(part: BasePart, hitPoint: Vector3): number?
-		local camera = workspace.CurrentCamera
-		local viewPoint = if camera then camera.CFrame.Position else nil
-		return mMesh.discoverPart(part, hitPoint, viewPoint)
+	local function discoverAndWalkSurface(seedTriangleId: number, worldPos: Vector3, radius: number)
+		discoverRegionViewed({ worldPos }, radius)
+		return mMesh.walkSurface(seedTriangleId, worldPos, radius)
 	end
 
 	local function updateHover()
@@ -588,7 +594,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				local hitPart = result.Instance :: BasePart
 				local size = hitPart.Size
 				local extent = math.sqrt(size.X * size.X + size.Y * size.Y + size.Z * size.Z)
-				mMesh.discoverRegion({worldPos}, extent)
+				discoverRegionViewed({worldPos}, extent)
 				-- Hover the nearest boundary edge of the hit face. Filter to triangles
 				-- facing the same way as the hit normal so we don't pick a back face.
 				local partTriIds = mMesh.getPartTriangles(hitPart)
@@ -725,7 +731,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	end
 
 	local function handleSelectClick(worldPos: Vector3, hitPart: BasePart?)
-		mMesh.discoverRegion({worldPos}, 15)
+		discoverRegionViewed({worldPos}, 15)
 		local hitTriangleId = if hitPart then mMesh.getPartTriangle(hitPart, worldPos) else nil
 		local vid = findNearestVertex(worldPos, hitTriangleId)
 		if vid then
@@ -788,7 +794,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		if hitPart then
 			discoverPartViewed(hitPart, worldPos)
 		end
-		mMesh.discoverRegion({worldPos}, 15)
+		discoverRegionViewed({worldPos}, 15)
 		if not mAddBoundaryEdge then
 			-- No edge selected yet. Place a fresh point when over empty space, or once
 			-- the fresh-point path has started; otherwise grab a boundary edge below.
@@ -799,7 +805,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			-- Discover neighbors so we can tell which edges are truly boundary
 			local size = hitPart.Size
 			local extent = math.sqrt(size.X * size.X + size.Y * size.Y + size.Z * size.Z)
-			mMesh.discoverRegion({worldPos}, extent)
+			discoverRegionViewed({worldPos}, extent)
 			-- Filter to triangles facing the same way as the hit normal
 			local partTriIds = mMesh.getPartTriangles(hitPart)
 			if hitNormal then
@@ -982,7 +988,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				then mMesh.getPartTriangle(result.Instance :: BasePart, result.Position)
 				else nil
 			if hitTriangleId then
-				mMesh.discoverRegion({worldPos}, 15)
+				discoverRegionViewed({worldPos}, 15)
 				local vid = findNearestVertex(worldPos, hitTriangleId)
 				if vid then
 					local vertex = mMesh.getVertex(vid)
@@ -1086,7 +1092,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			local _
 			_, walkVertexIds = discoverAndWalkSurface(mStrokeSeedTriangleId, worldPos.hit, radius)
 		else
-			mMesh.discoverRegion({worldPos.hit}, radius + 5)
+			discoverRegionViewed({worldPos.hit}, radius + 5)
 		end
 
 		-- Save vertex positions on first encounter during this stroke
@@ -1197,7 +1203,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			local _
 			_, walkVertexIds = discoverAndWalkSurface(mStrokeSeedTriangleId, worldPos.hit, radius)
 		else
-			mMesh.discoverRegion({worldPos.hit}, radius + 5)
+			discoverRegionViewed({worldPos.hit}, radius + 5)
 		end
 
 		-- Find all vertices within radius using current positions
@@ -1403,7 +1409,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			local depth = (centerHit.Position - camera.CFrame.Position).Magnitude
 			local cornerWorld = cornerRay.Origin + cornerRay.Direction * depth
 			local halfDiag = (cornerWorld - centerHit.Position).Magnitude
-			mMesh.discoverRegion({centerHit.Position}, halfDiag + 10)
+			discoverRegionViewed({centerHit.Position}, halfDiag + 10)
 		end
 
 		local minX = math.min(mMarqueeStart.X, mMarqueeEnd.X)
@@ -1478,7 +1484,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			table.insert(seedPositions, origPos)
 		end
 		if #seedPositions > 0 then
-			mMesh.discoverRegion(seedPositions, radius)
+			discoverRegionViewed(seedPositions, radius)
 		end
 
 		-- Walk already-discovered topology outward from selected vertices,
@@ -1970,7 +1976,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		-- the seed vertices, filtering by XZ distance. This is the same
 		-- discover-then-walk the move drag and the brush tools use, so the hover /
 		-- selection outline is correct even on a freshly opened mesh.
-		mMesh.discoverRegion(seedPositions, radius)
+		discoverRegionViewed(seedPositions, radius)
 
 		local affectedVids: { [number]: boolean } = {}
 		for vid in seedVids do
@@ -2108,7 +2114,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local gridExtent = math.max(currentSettings.GridWidth, currentSettings.GridHeight)
 			* currentSettings.GridSpacing / 2 + currentSettings.GridSpacing
 		-- TODO: Do we need a discover here? We could discover on demand
-		mMesh.discoverRegion({origin.Position}, gridExtent)
+		discoverRegionViewed({origin.Position}, gridExtent)
 		changeSignal:Fire()
 	end
 	session.ImportHeightmap = function()
@@ -2161,7 +2167,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				local gridExtent = math.max(importWidth, importHeight)
 					* importSpacing / 2 + importSpacing
 				-- TODO: Do we need a discover here? We could discover on demand
-				mMesh.discoverRegion({origin.Position}, gridExtent)
+				discoverRegionViewed({origin.Position}, gridExtent)
 			else
 				warn("PolyMap Import failed: " .. tostring(err))
 			end
@@ -2245,7 +2251,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	-- finds the edge directly via getBoundaryEdges() so it stays independent of
 	-- the hit-part / hover state the interactive Add path threads through.
 	session.AddTriangleOffEdge = function(nearEdgeWorldPos: Vector3, apexWorldPos: Vector3): number?
-		mMesh.discoverRegion({ nearEdgeWorldPos }, 15)
+		discoverRegionViewed({ nearEdgeWorldPos }, 15)
 		local edge: any = nil
 		local bestDist = math.huge
 		for _, candidate in mMesh.getBoundaryEdges() do

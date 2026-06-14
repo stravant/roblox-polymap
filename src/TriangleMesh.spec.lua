@@ -723,6 +723,49 @@ return function(t: TestTypes.TestContext)
 		folder:Destroy()
 	end)
 
+	t.test("discoverRegion adopts a box-on-baseplate's camera-facing face", function()
+		-- The user's bug: a thin box sitting on a baseplate is grabbed on its BACK
+		-- (bottom) face. When the cursor is near the box, its raycast hits the
+		-- baseplate, and the Add tool's region scan is seeded at that point -- on the
+		-- box's BOTTOM plane (= the baseplate's top). Without a viewpoint discoverRegion
+		-- bootstraps the box from there and locks the bottom face. With the camera eye
+		-- high above it must adopt the TOP face instead.
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		local baseplate = Instance.new("Part")
+		baseplate.Shape = Enum.PartType.Block
+		baseplate.Size = Vector3.new(40, 1, 40)
+		baseplate.CFrame = CFrame.new(1380, 9.4, 0) -- top surface at Y=9.9
+		baseplate.Anchored = true
+		baseplate.Parent = folder
+
+		local box = Instance.new("Part")
+		box.Shape = Enum.PartType.Block
+		box.Size = Vector3.new(4, 0.2, 4) -- thin along Y; bottom 9.9, top 10.1
+		box.CFrame = CFrame.new(1380, 10, 0)
+		box.Anchored = true
+		box.Parent = folder
+
+		-- Seed on the box's bottom plane (where the baseplate hit lands), camera above.
+		mesh.discoverRegion({ Vector3.new(1380, 9.9, 0) }, 6, Vector3.new(1380, 40, 0))
+
+		local boxTris = mesh.getPartTriangles(box)
+		t.expect(#boxTris > 0).toBeTruthy()
+		for _, tid in boxTris do
+			local tri = mesh.getTriangle(tid)
+			assert(tri)
+			for _, vid in tri.vertices do
+				local v = mesh.getVertex(vid)
+				assert(v)
+				t.expect(v.position.Y > 10.0).toBeTruthy() -- top face, not bottom
+			end
+		end
+
+		folder:Destroy()
+	end)
+
 	t.test("walkSurface returns seed triangle with small radius", function()
 		-- Clean up any foreign parts in the test area
 		for _, p in workspace:GetPartBoundsInRadius(Vector3.new(402, 0, 0), 10) do

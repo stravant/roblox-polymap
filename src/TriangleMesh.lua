@@ -72,7 +72,7 @@ export type TriangleMesh = {
 
 	-- Discovery / Scanning
 	discoverPart: (part: BasePart, hintPoint: Vector3, viewPoint: Vector3?, nearbyResolver: ((Vector3, number) -> { Instance })?) -> number?,
-	discoverRegion: (seeds: { Vector3 }, radius: number) -> { TriangleId },
+	discoverRegion: (seeds: { Vector3 }, radius: number, viewPoint: Vector3?) -> { TriangleId },
 	getPartTriangle: (part: BasePart, hintPoint: Vector3) -> number?,
 	getPartTriangles: (part: BasePart) -> { TriangleId },
 	clear: () -> (),
@@ -1606,7 +1606,12 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		end
 	end
 
-	local function discoverRegion(seeds: {Vector3}, radius: number): {TriangleId}
+	-- viewPoint (the camera eye, from interactive callers) disambiguates which face
+	-- of a thin Block to adopt when this region scan bootstraps one -- e.g. a box
+	-- sitting on a baseplate, where the seed point lands on the box's bottom plane
+	-- and would otherwise lock the back face. Threaded down to discoverPart; nil for
+	-- the rebuild (radius == math.huge, where boxes resolve from their own corners).
+	local function discoverRegion(seeds: {Vector3}, radius: number, viewPoint: Vector3?): {TriangleId}
 		local discovered = {} :: {[TriangleId]: boolean}
 		local result = {} :: {TriangleId}
 
@@ -1920,9 +1925,9 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 					if not part:IsA("BasePart") then continue end
 					if not mPartToTriangles[part] then
 						if partHasCornerNear(part, pos) or part == bootstrapPart then
-							-- viewPoint nil: the rebuild has no camera, and pos (a mesh corner)
-							-- already disambiguates a block's face. nearbyResolver stays.
-							discoverPart(part, pos, nil, nearbyResolver)
+							-- Pass the region's viewPoint so a bootstrapped Block adopts its
+							-- camera-facing face (nil on the rebuild, where pos is a corner).
+							discoverPart(part, pos, viewPoint, nearbyResolver)
 						end
 					end
 					-- Collect the part's discovered face(s) (e.g. a Block's two tris).
