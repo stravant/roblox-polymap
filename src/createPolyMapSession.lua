@@ -157,6 +157,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local mGridPlacing = false
 	local mGridFirstPoint: Vector3? = nil
 	local mGridHoverPoint: Vector3? = nil
+	-- Whether the first corner snapped onto an existing mesh vertex. If so the grid is
+	-- placed a thickness lower so its discovered vertices land ON that vertex (aligning
+	-- with the existing mesh) rather than a thickness above it (sitting on top).
+	local mGridFirstSnapped = false
 
 	-- Marquee state
 	local mMarqueeStart: Vector2? = nil
@@ -495,6 +499,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		mGridPlacing = false
 		mGridFirstPoint = nil
 		mGridHoverPoint = nil
+		mGridFirstSnapped = false
 	end
 
 	-- Generate a cols x rows cell grid (cells cellW x cellH) centred on origin, then
@@ -550,8 +555,16 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return center, cols, rows, cellW, cellH
 	end
 
-	local function generateGridBetween(p1: Vector3, p2: Vector3)
+	local function generateGridBetween(p1: Vector3, p2: Vector3, firstSnapped: boolean)
 		local center, cols, rows, cellW, cellH = gridLayoutFromCorners(p1, p2)
+		-- Discovered vertices land a thickness above the generation plane. When the
+		-- first corner snapped to an existing vertex, lower the plane by that thickness
+		-- so the new vertices land ON the existing one (aligned) instead of on top of
+		-- it. When it did not snap (e.g. on the baseplate) keep the plane so the grid
+		-- sits on top of whatever surface was clicked.
+		if firstSnapped then
+			center -= Vector3.new(0, currentSettings.Thickness, 0)
+		end
 		generateGridWithParams(CFrame.new(center), cols, rows, cellW, cellH)
 	end
 
@@ -577,11 +590,12 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return ray.Origin + ray.Direction * t
 	end
 
-	-- Where the next corner would land. The FIRST corner snaps onto hit geometry (so
-	-- a grid can sit on a surface); the second projects onto the first corner's plane.
-	-- Either corner then snaps to a nearby existing vertex so a placed grid lines up
-	-- with the mesh (same snap used by the Add poly tool).
-	local function gridPlacementPos(): Vector3?
+	-- Where the next corner would land, and whether it snapped onto an existing vertex.
+	-- The FIRST corner snaps onto hit geometry (so a grid can sit on a surface); the
+	-- second projects onto the first corner's plane. Either corner then snaps to a
+	-- nearby existing vertex so a placed grid lines up with the mesh (same snap used by
+	-- the Add poly tool).
+	local function gridPlacementPos(): (Vector3?, boolean)
 		local result = mouseRaycastLoose()
 		-- Discover the part under the cursor (and its neighbours) so there are real
 		-- vertices to snap to, exactly as the Add poly tool does before snapAddPoint.
@@ -601,9 +615,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			pos = gridProjectedPos()
 		end
 		if not pos then
-			return nil
+			return nil, false
 		end
-		return (snapAddPoint(pos))
+		local snapped, snapVid = snapAddPoint(pos)
+		return snapped, snapVid ~= nil
 	end
 
 	local function updateGridPlaceHover()
@@ -616,18 +631,20 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 	-- First click anchors a corner; the second generates the grid and ends placement.
 	local function handleGridPlaceClick()
-		local pos = gridPlacementPos()
+		local pos, snapped = gridPlacementPos()
 		if not pos then
 			return
 		end
 		if not mGridFirstPoint then
 			mGridFirstPoint = pos
+			mGridFirstSnapped = snapped
 			mGridHoverPoint = pos
 			changeSignal:Fire()
 		else
 			local p1 = mGridFirstPoint
+			local firstSnapped = mGridFirstSnapped
 			clearGridPlacement()
-			generateGridBetween(p1, pos)
+			generateGridBetween(p1, pos, firstSnapped)
 		end
 	end
 
@@ -2295,15 +2312,17 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			local extent = math.sqrt(size.X * size.X + size.Y * size.Y + size.Z * size.Z)
 			discoverRegionViewed({ worldPos }, extent)
 		end
-		local pos = (snapAddPoint(worldPos))
+		local pos, snapVid = snapAddPoint(worldPos)
 		if not mGridFirstPoint then
 			mGridFirstPoint = pos
+			mGridFirstSnapped = snapVid ~= nil
 			mGridHoverPoint = pos
 			changeSignal:Fire()
 		else
 			local p1 = mGridFirstPoint
+			local firstSnapped = mGridFirstSnapped
 			clearGridPlacement()
-			generateGridBetween(p1, pos)
+			generateGridBetween(p1, pos, firstSnapped)
 		end
 	end
 	-- World-space line segments ({p1, p2}) previewing the grid being placed: corner

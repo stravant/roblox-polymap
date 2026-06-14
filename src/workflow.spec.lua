@@ -324,6 +324,59 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("Place grid: snapping a corner drops the grid a thickness so it aligns, not on top", function()
+		withSession(function(session, mesh, settings)
+			settings.GridType = "Square"
+			settings.GridSpacing = 8
+			settings.Thickness = 1
+
+			-- G1 in empty space: the first corner does NOT snap, so the grid sits on
+			-- top of its click plane (Y=0) -- discovered vertices a thickness above it.
+			local a = Vector3.new(kRegionCenter.X, 0, kRegionCenter.Z)
+			local b = a + Vector3.new(16, 0, 16)
+			session.StartGridPlacement()
+			session.PlaceGridClickAt(a)
+			session.PlaceGridClickAt(b)
+			local g1Count = countDict(mesh.getVertices())
+			local g1Y: number? = nil
+			for _, v in mesh.getVertices() do
+				g1Y = v.position.Y
+				break
+			end
+			assert(g1Y)
+			-- On top: discovered a thickness above the (Y=0) click plane.
+			t.expect(math.abs(g1Y - (a.Y + settings.Thickness)) < 0.05).toBeTruthy()
+
+			-- A corner vertex of G1 and the wedge under it.
+			local v = Vector3.new(b.X, g1Y, b.Z)
+			assert(mesh.findVertexNear(v, 0.1))
+			local hitPart: BasePart? = nil
+			for _, p in workspace:GetPartBoundsInRadius(v, 2) do
+				if p:IsA("Part") and p.Shape == Enum.PartType.Wedge then
+					hitPart = p
+					break
+				end
+			end
+			assert(hitPart)
+
+			-- G2: the first corner snaps onto that vertex, extending away from G1.
+			session.StartGridPlacement()
+			session.PlaceGridClickAt(v + Vector3.new(1, 0, 0), hitPart) -- snaps to v
+			session.PlaceGridClickAt(v + Vector3.new(16, 0, 16)) -- empty space
+
+			-- G2 added geometry, and EVERY vertex now sits at G1's level: the snapped
+			-- grid dropped a thickness to align instead of stacking a thickness on top.
+			t.expect(countDict(mesh.getVertices()) > g1Count).toBeTruthy()
+			local minY, maxY = math.huge, -math.huge
+			for _, vert in mesh.getVertices() do
+				minY = math.min(minY, vert.position.Y)
+				maxY = math.max(maxY, vert.position.Y)
+			end
+			t.expect(maxY - minY < 0.1).toBeTruthy()
+			t.expect(math.abs(minY - g1Y) < 0.1).toBeTruthy()
+		end)
+	end)
+
 	t.test("workflow: generate grid, move a vertex, undo restores geometry and selection", function()
 		withSession(function(session, mesh)
 			session.GenerateGrid()
