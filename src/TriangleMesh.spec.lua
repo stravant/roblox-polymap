@@ -766,6 +766,43 @@ return function(t: TestTypes.TestContext)
 		folder:Destroy()
 	end)
 
+	t.test("discovery ignores parts literally named Baseplate", function()
+		for _, p in workspace:GetPartBoundsInRadius(Vector3.new(1500, 10, 0), 80) do
+			if p:IsA("BasePart") then p:Destroy() end
+		end
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		-- A block named "Baseplate": a seed on its top would normally bootstrap it into
+		-- two giant triangles. It must be skipped so no tool ever turns it into mesh.
+		local baseplate = Instance.new("Part")
+		baseplate.Name = "Baseplate"
+		baseplate.Shape = Enum.PartType.Block
+		baseplate.Size = Vector3.new(40, 1, 40)
+		baseplate.CFrame = CFrame.new(1500, 9.5, 0) -- top at Y=10
+		baseplate.Anchored = true
+		baseplate.Parent = folder
+
+		mesh.discoverRegion({ Vector3.new(1500, 10, 0) }, 6, Vector3.new(1500, 40, 0))
+		t.expect(#mesh.getPartTriangles(baseplate)).toBe(0)
+
+		-- An identically-shaped block with any other name still discovers, proving the
+		-- filter is by name rather than a blanket block on Blocks.
+		local box = Instance.new("Part")
+		box.Name = "Box"
+		box.Shape = Enum.PartType.Block
+		box.Size = Vector3.new(4, 1, 4)
+		box.CFrame = CFrame.new(1540, 9.5, 0) -- top at Y=10, clear of the baseplate
+		box.Anchored = true
+		box.Parent = folder
+
+		mesh.discoverRegion({ Vector3.new(1540, 10, 0) }, 6, Vector3.new(1540, 40, 0))
+		t.expect(#mesh.getPartTriangles(box) > 0).toBeTruthy()
+
+		folder:Destroy()
+	end)
+
 	t.test("walkSurface returns seed triangle with small radius", function()
 		-- Clean up any foreign parts in the test area
 		for _, p in workspace:GetPartBoundsInRadius(Vector3.new(402, 0, 0), 10) do

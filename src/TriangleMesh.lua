@@ -947,6 +947,12 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 	-- side the cursor happened to cross first. Falls back to hintPoint when absent
 	-- (the rebuild and tests), and is ignored for wedges.
 	local function discoverPart(part: BasePart, hintPoint: Vector3, viewPoint: Vector3?, nearbyResolver: ((Vector3, number) -> { Instance })?): number?
+		-- Never adopt the template baseplate as mesh, even when a seed point lands on
+		-- it (the region scan bootstraps any part the point sits inside). People keep
+		-- terrain Locked, so this filters the baseplate by name, not by Locked.
+		if part.Name == "Baseplate" then
+			return nil
+		end
 		-- A wedge part backs exactly one single-sided triangle. Once it is
 		-- discovered, return that triangle regardless of which face the hint is on.
 		-- Crucially we must NOT spawn a second triangle on the opposite face: grids

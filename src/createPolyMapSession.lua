@@ -44,6 +44,30 @@ local function groundPointAhead(): (Vector3, Vector3)
 	return Vector3.new(pos.X, 0, pos.Z), flatLook
 end
 
+-- The template baseplate is skipped by the cursor (and discovery) across every
+-- tool, so it's never targeted or turned into mesh. People keep terrain Locked, so
+-- we filter this one part by name rather than ignoring all Locked parts.
+local kIgnoredPartName = "Baseplate"
+
+-- Run a cast, skipping any hit on an ignored part by excluding it and re-casting,
+-- so the part behind it (or empty space) is returned instead. Bounded in case
+-- several ignored parts stack.
+local function castSkippingIgnored(cast: (RaycastParams) -> RaycastResult?): RaycastResult?
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	local exclude: { Instance } = {}
+	params.FilterDescendantsInstances = exclude
+	for _ = 1, 8 do
+		local result = cast(params)
+		if not result or result.Instance.Name ~= kIgnoredPartName then
+			return result
+		end
+		table.insert(exclude, result.Instance)
+		params.FilterDescendantsInstances = exclude
+	end
+	return nil
+end
+
 local function mouseRaycast(): RaycastResult?
 	local mouseLocation = UserInputService:GetMouseLocation()
 	local camera = workspace.CurrentCamera
@@ -51,10 +75,9 @@ local function mouseRaycast(): RaycastResult?
 		return nil
 	end
 	local ray = camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = {}
-	return workspace:Raycast(ray.Origin, ray.Direction * 10000, params)
+	return castSkippingIgnored(function(params)
+		return workspace:Raycast(ray.Origin, ray.Direction * 10000, params)
+	end)
 end
 
 -- Raycast with a spherecast fallback for modes that want loose targeting
@@ -65,14 +88,15 @@ local function mouseRaycastLoose(): RaycastResult?
 		return nil
 	end
 	local ray = camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = {}
-	local result = workspace:Raycast(ray.Origin, ray.Direction * 10000, params)
+	local result = castSkippingIgnored(function(params)
+		return workspace:Raycast(ray.Origin, ray.Direction * 10000, params)
+	end)
 	if result then
 		return result
 	end
-	return workspace:Spherecast(ray.Origin, kSpherecastRadius, ray.Direction * 1000, params)
+	return castSkippingIgnored(function(params)
+		return workspace:Spherecast(ray.Origin, kSpherecastRadius, ray.Direction * 1000, params)
+	end)
 end
 
 local function createCFrameDraggerSchema(isEmptyFunc, getBoundingBoxFunc)
