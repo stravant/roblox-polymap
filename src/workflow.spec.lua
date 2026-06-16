@@ -1422,6 +1422,80 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("Add: a fresh corner on a surface lifts a thickness, empty space does not", function()
+		withSession(function(session, mesh, settings)
+			settings.Mode = "Add"
+			settings.Thickness = 1
+			-- A throwaway part far overhead stands in for "a surface was hit" without
+			-- adding geometry near our fresh corners (it discovers up around Y=500).
+			local farPart = Instance.new("Part")
+			farPart.Anchored = true
+			farPart.Size = Vector3.new(4, 4, 4)
+			farPart.Position = kRegionCenter + Vector3.new(0, 500, 0)
+			farPart.Parent = workspace
+
+			local p1 = kRegionCenter + Vector3.new(0, 0, 0)
+			local p2 = kRegionCenter + Vector3.new(12, 0, 0)
+			local p3 = kRegionCenter + Vector3.new(0, 0, 12)
+
+			session.AddClickAt(p1, nil) -- empty space: stays put
+			session.AddClickAt(p2, farPart) -- "on a surface": lifts a thickness
+			session.AddClickAt(p3, farPart) -- "on a surface": lifts, commits
+
+			farPart:Destroy()
+
+			t.expect(#session.GetAddPoints()).toBe(0)
+			-- The empty-space corner stays at the click; the surface corners rise a
+			-- thickness so the new (face-up) triangle rests on top, not sunk in.
+			t.expect(mesh.findVertexNear(p1, 0.1) ~= nil).toBeTruthy()
+			t.expect(mesh.findVertexNear(p2 + Vector3.yAxis, 0.1) ~= nil).toBeTruthy()
+			t.expect(mesh.findVertexNear(p3 + Vector3.yAxis, 0.1) ~= nil).toBeTruthy()
+			t.expect(mesh.findVertexNear(p2, 0.1) == nil).toBeTruthy()
+			t.expect(mesh.findVertexNear(p3, 0.1) == nil).toBeTruthy()
+		end)
+	end)
+
+	t.test("Add: a fresh corner that snaps to a vertex sits flush, not lifted", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 3
+			settings.GridHeight = 3
+			settings.GridSpacing = 4
+			session.GenerateGrid()
+			settings.Mode = "Add"
+			settings.Thickness = 1
+			local vertsBefore = countDict(mesh.getVertices())
+
+			-- An existing grid vertex and a wedge under it to act as the hit surface.
+			local v: Vector3? = nil
+			for _, vert in mesh.getVertices() do
+				v = vert.position
+				break
+			end
+			assert(v)
+			local wedge: BasePart? = nil
+			for _, p in workspace:GetPartBoundsInRadius(v, 2) do
+				if p:IsA("Part") and p.Shape == Enum.PartType.Wedge then
+					wedge = p
+					break
+				end
+			end
+			assert(wedge)
+
+			-- Two corners far out in empty space, and one clicked on the surface 1 stud
+			-- off the existing vertex -- close enough to snap.
+			local p1 = v + Vector3.new(40, 0, 0)
+			local p3 = v + Vector3.new(40, 0, 40)
+			session.AddClickAt(p1, nil)
+			session.AddClickAt(v + Vector3.new(1, 0, 0), wedge) -- snaps to v
+			session.AddClickAt(p3, nil)
+
+			-- The snapped corner reused the existing vertex (only p1 and p3 are new), and
+			-- did NOT lift to sit a thickness above it.
+			t.expect(countDict(mesh.getVertices())).toBe(vertsBefore + 2)
+			t.expect(mesh.findVertexNear(v + Vector3.new(1, 1, 0), 0.1) == nil).toBeTruthy()
+		end)
+	end)
+
 	t.test("Add: connect a boundary edge to a fresh vertex in empty space", function()
 		withSession(function(session, mesh, settings)
 			settings.GridWidth = 3

@@ -465,6 +465,18 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return worldPos, nil
 	end
 
+	-- A fresh Add point that landed on a surface (rather than snapping to an existing
+	-- vertex, or floating in empty space) is lifted a thickness straight up, so the
+	-- new face-up triangle rests ON the surface instead of sinking its thickness into
+	-- it. Mirrors the Add Grid place tool: a snapped point sits flush ("below"), an
+	-- unsnapped point on a surface sits on top ("above").
+	local function liftFreshPoint(worldPos: Vector3, onSurface: boolean): Vector3
+		if onSurface then
+			return worldPos + Vector3.yAxis * currentSettings.Thickness
+		end
+		return worldPos
+	end
+
 	-- Walk the surface within radius of worldPos, discovering it first. walkSurface
 	-- only traverses ALREADY-discovered triangles, and on a freshly opened tool only
 	-- the single part directly under the cursor has been discovered -- so the brush
@@ -788,12 +800,16 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			if grabbedEdge then
 				newHoverEdge = grabbedEdge
 			elseif worldPos then
-				-- No edge nearby: offer fresh vertex placement (snap to a near vertex).
+				-- No edge nearby: offer fresh vertex placement. Snap to a near vertex if
+				-- there is one (sits flush), otherwise lift onto the hit surface so the
+				-- fresh triangle previews sitting on top -- matching where it will land.
 				local snapped, snapVid = snapAddPoint(worldPos)
 				if snapVid then
 					newHoverVertex = snapVid
+					mAddHoverTarget = { type = "freshVertex", position = snapped }
+				else
+					mAddHoverTarget = { type = "freshVertex", position = liftFreshPoint(worldPos, result ~= nil) }
 				end
-				mAddHoverTarget = { type = "freshVertex", position = snapped }
 			end
 		end
 
@@ -951,10 +967,12 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		changeSignal:Fire()
 	end
 
-	-- Place one fresh corner (snapped to a nearby vertex). The third corner commits
-	-- the triangle.
-	local function placeFreshPoint(worldPos: Vector3)
-		local p = snapAddPoint(worldPos)
+	-- Place one fresh corner: snap to a nearby vertex if there is one, otherwise lift
+	-- it onto the surface it was placed on (if any). The third corner commits the
+	-- triangle.
+	local function placeFreshPoint(worldPos: Vector3, onSurface: boolean)
+		local snapped, vid = snapAddPoint(worldPos)
+		local p = if vid then snapped else liftFreshPoint(worldPos, onSurface)
 		table.insert(mAddPoints, p)
 		if #mAddPoints >= 3 then
 			commitFreshTriangle()
@@ -977,7 +995,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			-- No edge selected yet. Place a fresh point when over empty space, or once
 			-- the fresh-point path has started; otherwise grab a boundary edge below.
 			if not hitPart or #mAddPoints > 0 then
-				placeFreshPoint(worldPos)
+				placeFreshPoint(worldPos, hitPart ~= nil)
 				return
 			end
 			-- Discover neighbors so we can tell which edges are truly boundary
@@ -1024,10 +1042,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					end
 					changeSignal:Fire()
 				else
-					placeFreshPoint(worldPos)
+					placeFreshPoint(worldPos, hitPart ~= nil)
 				end
 			else
-				placeFreshPoint(worldPos)
+				placeFreshPoint(worldPos, hitPart ~= nil)
 			end
 		else
 			-- Phase 2: place triangle(s) based on hover target
