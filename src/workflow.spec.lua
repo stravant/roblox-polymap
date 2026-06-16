@@ -1431,8 +1431,8 @@ return function(t: TestTypes.TestContext)
 			local p3 = kRegionCenter + Vector3.new(0, 0, 12)
 
 			session.AddClickAt(p1, nil)
-			-- The in-progress preview already reflects the lift the triangle will get.
-			t.expect(session.GetAddPoints()[1].Y).toBe(p1.Y + settings.Thickness)
+			-- The preview shows the corner at the cursor; the lift is applied at commit.
+			t.expect(session.GetAddPoints()[1].Y).toBe(p1.Y)
 			session.AddClickAt(p2, nil)
 			session.AddClickAt(p3, nil)
 
@@ -1456,34 +1456,75 @@ return function(t: TestTypes.TestContext)
 			settings.Thickness = 1
 			local vertsBefore = countDict(mesh.getVertices())
 
-			-- An existing grid vertex and a wedge under it to act as the hit surface.
 			local v: Vector3? = nil
 			for _, vert in mesh.getVertices() do
 				v = vert.position
 				break
 			end
 			assert(v)
-			local wedge: BasePart? = nil
-			for _, p in workspace:GetPartBoundsInRadius(v, 2) do
-				if p:IsA("Part") and p.Shape == Enum.PartType.Wedge then
-					wedge = p
-					break
-				end
-			end
-			assert(wedge)
 
-			-- Two corners far out in empty space, and one clicked on the surface 1 stud
-			-- off the existing vertex -- close enough to snap.
+			-- Two corners far out in empty space, and one over empty space 1 stud off the
+			-- existing vertex -- close enough to snap onto it.
 			local p1 = v + Vector3.new(40, 0, 0)
 			local p3 = v + Vector3.new(40, 0, 40)
 			session.AddClickAt(p1, nil)
-			session.AddClickAt(v + Vector3.new(1, 0, 0), wedge) -- snaps to v
+			session.AddClickAt(v + Vector3.new(1, 0, 0), nil) -- snaps to v
 			session.AddClickAt(p3, nil)
 
 			-- The snapped corner reused the existing vertex (only p1 and p3 are new), and
 			-- did NOT lift to sit a thickness above it.
 			t.expect(countDict(mesh.getVertices())).toBe(vertsBefore + 2)
 			t.expect(mesh.findVertexNear(v + Vector3.new(1, 1, 0), 0.1) == nil).toBeTruthy()
+		end)
+	end)
+
+	t.test("Add: place an apex then click an existing edge to extend it (either order)", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 3
+			settings.GridHeight = 3
+			settings.GridSpacing = 8 -- long edges, so the midpoint is clear of vertex snap
+			session.GenerateGrid()
+			settings.Mode = "Add"
+			settings.Thickness = 1
+			local before = countDict(mesh.getTriangles())
+			t.expect(before > 0).toBeTruthy()
+
+			-- A boundary edge, the part backing it, its midpoint, and the grid's height.
+			local boundary = mesh.getBoundaryEdges()
+			t.expect(#boundary > 0).toBeTruthy()
+			local edge = boundary[1]
+			local a = mesh.getVertex(edge.v1)
+			local b = mesh.getVertex(edge.v2)
+			local tri = mesh.getTriangle(edge.triangles[1])
+			assert(a and b and tri)
+			local part = tri.parts[1]
+			local edgeMid = (a.position + b.position) / 2
+			local gridY = a.position.Y
+
+			-- An apex out past the edge, raised well off the grid plane to prove it gets
+			-- dropped onto that plane when the edge closes.
+			local sum, cnt = Vector3.zero, 0
+			for _, vv in mesh.getVertices() do
+				sum += vv.position
+				cnt += 1
+			end
+			local outward = (edgeMid - sum / cnt) * Vector3.new(1, 0, 1)
+			outward = if outward.Magnitude > 0.1 then outward.Unit else Vector3.new(1, 0, 0)
+			local apex = edgeMid + outward * 5 + Vector3.new(0, 6, 0)
+
+			-- Apex FIRST, then the edge -- the order the user said was broken.
+			session.AddClickAt(apex, nil)
+			t.expect(countDict(mesh.getTriangles())).toBe(before) -- nothing committed yet
+			t.expect(#session.GetAddPoints()).toBe(1)
+			session.AddClickAt(edgeMid, part)
+
+			-- One triangle was added, the in-progress state cleared, the apex dropped onto
+			-- the grid plane (coplanar extension, not left floating 6 studs up), and the
+			-- edge is now shared rather than on the boundary.
+			t.expect(countDict(mesh.getTriangles())).toBe(before + 1)
+			t.expect(#session.GetAddPoints()).toBe(0)
+			t.expect(mesh.findVertexNear(Vector3.new(apex.X, gridY, apex.Z), 0.3) ~= nil).toBeTruthy()
+			t.expect(mesh.findVertexNear(apex, 0.3) == nil).toBeTruthy()
 		end)
 	end)
 

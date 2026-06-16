@@ -504,6 +504,30 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return mMesh.walkSurface(seedTriangleId, worldPos, radius)
 	end
 
+	-- The nearest boundary edge of the part under the cursor, or nil. Discovers the
+	-- part's neighbours first (so interior edges aren't mistaken for boundary) and,
+	-- given a hit normal, prefers edges of the camera-facing face over a back face.
+	-- Shared by the Add tool's edge-grab (edge first) and edge-close (apex first).
+	local function boundaryEdgeAt(worldPos: Vector3, hitPart: BasePart, normal: Vector3?): string?
+		local size = hitPart.Size
+		local extent = math.sqrt(size.X * size.X + size.Y * size.Y + size.Z * size.Z)
+		discoverRegionViewed({ worldPos }, extent)
+		local partTriIds = mMesh.getPartTriangles(hitPart)
+		if normal then
+			local filtered = {}
+			for _, triId in partTriIds do
+				local tri = mMesh.getTriangle(triId)
+				if tri and tri.normal:Dot(normal) > 0 then
+					table.insert(filtered, triId)
+				end
+			end
+			if #filtered > 0 then
+				partTriIds = filtered
+			end
+		end
+		return findNearestBoundaryEdge(worldPos, partTriIds, nil)
+	end
+
 	----------------------------------------------------------------------
 	-- Interactive grid placement (the Place... button)
 	----------------------------------------------------------------------
@@ -776,42 +800,23 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 
 		if mode == "Add" and not mAddBoundaryEdge then
-			-- Phase 1 / fresh-point start. Only try to grab a boundary edge before any
-			-- fresh point has been placed and only when actually over geometry.
+			-- Phase 1: highlight a boundary edge of geometry under the cursor. With no
+			-- fresh point yet a click would grab it (build from the edge); with one
+			-- placed a click would close the apex onto it (extend the edge). Either way
+			-- show the highlight so both build orders read the same.
 			local grabbedEdge: string? = nil
-			if worldPos and #mAddPoints == 0 and result and result.Instance:IsA("BasePart") then
-				-- Discover neighbors so we can tell which edges are truly boundary
-				local hitPart = result.Instance :: BasePart
-				local size = hitPart.Size
-				local extent = math.sqrt(size.X * size.X + size.Y * size.Y + size.Z * size.Z)
-				discoverRegionViewed({worldPos}, extent)
-				-- Hover the nearest boundary edge of the hit face. Filter to triangles
-				-- facing the same way as the hit normal so we don't pick a back face.
-				local partTriIds = mMesh.getPartTriangles(hitPart)
-				local filtered = {}
-				for _, triId in partTriIds do
-					local tri = mMesh.getTriangle(triId)
-					if tri and tri.normal:Dot(result.Normal) > 0 then
-						table.insert(filtered, triId)
-					end
-				end
-				grabbedEdge = findNearestBoundaryEdge(worldPos, if #filtered > 0 then filtered else partTriIds, nil)
+			if worldPos and #mAddPoints <= 1 and result and result.Instance:IsA("BasePart") then
+				grabbedEdge = boundaryEdgeAt(worldPos, result.Instance :: BasePart, result.Normal)
 			end
 			if grabbedEdge then
 				newHoverEdge = grabbedEdge
 			elseif worldPos then
-				-- No edge nearby: offer fresh vertex placement. Snap to a near vertex if
-				-- there is one (sits flush); otherwise preview it lifted a thickness --
-				-- matching where the unconnected triangle will land -- unless a corner
-				-- already snapped, in which case the triangle stays put to connect.
+				-- No edge nearby: offer fresh vertex placement (snap to a near vertex).
 				local snapped, snapVid = snapAddPoint(worldPos)
 				if snapVid then
 					newHoverVertex = snapVid
-					mAddHoverTarget = { type = "freshVertex", position = snapped }
-				else
-					local pos = if mAddSnappedAny then snapped else snapped + freshLift()
-					mAddHoverTarget = { type = "freshVertex", position = pos }
 				end
+				mAddHoverTarget = { type = "freshVertex", position = snapped }
 			end
 		end
 
@@ -993,6 +998,55 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 	end
 
+	-- Vertically project a point onto a triangle's plane (keeping its X/Z), so a fresh
+	-- apex closed onto an existing edge lands coplanar with that triangle.
+	local function projectOntoTriPlane(p: Vector3, tri: createTriangleMesh.Triangle): Vector3
+		local v = mMesh.getVertex(tri.vertices[1])
+		if not v or math.abs(tri.normal.Y) < 1e-4 then
+			return p
+		end
+		local n, o = tri.normal, v.position
+		local y = o.Y - (n.X * (p.X - o.X) + n.Z * (p.Z - o.Z)) / n.Y
+		return Vector3.new(p.X, y, p.Z)
+	end
+
+	-- Close the single placed fresh apex onto an existing boundary edge, building one
+	-- triangle that extends the existing surface (the reverse order of grabbing the
+	-- edge first). The apex is dropped onto the edge's plane so the result is coplanar,
+	-- and addTriangle matches the neighbour's winding so the thickness lines up.
+	local function closeFreshOntoEdge(edgeKey: string)
+		local edge = mMesh.getEdges()[edgeKey]
+		if not edge then
+			return
+		end
+		local a = mMesh.getVertex(edge.v1)
+		local b = mMesh.getVertex(edge.v2)
+		if not a or not b then
+			return
+		end
+		local apex = mAddPoints[#mAddPoints]
+		local edgeMid = (a.position + b.position) / 2
+		local hint = edgeMid + Vector3.yAxis
+		local props = getTriangleProps()
+		local parentTri = if edge.triangles[1] then mMesh.getTriangle(edge.triangles[1]) else nil
+		if parentTri then
+			apex = projectOntoTriPlane(apex, parentTri)
+			hint = edgeMid + parentTri.normal * 0.5
+			local part = parentTri.parts[1]
+			if part then
+				props = { Color = part.Color, Material = part.Material }
+			end
+		end
+		pushUndoSnapshot()
+		local recording = ChangeHistoryService:TryBeginRecording("PolyMap Add Triangle")
+		mMesh.addTriangle(apex, a.position, b.position, currentSettings.Thickness, workspace.Terrain, props, hint)
+		clearAddState()
+		if recording then
+			ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+		end
+		changeSignal:Fire()
+	end
+
 	local function handleAddClick(worldPos: Vector3, hitPart: BasePart?, hitNormal: Vector3?)
 		-- Discover the clicked part with the camera viewpoint BEFORE the region scan
 		-- below. That scan (discoverRegion) has no viewpoint and is seeded at the click
@@ -1004,31 +1058,23 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 		discoverRegionViewed({worldPos}, 15)
 		if not mAddBoundaryEdge then
-			-- No edge selected yet. Place a fresh point when over empty space, or once
-			-- the fresh-point path has started; otherwise grab a boundary edge below.
+			-- A single fresh apex placed and now clicking an existing boundary edge:
+			-- close the triangle onto that edge to extend the surface (the reverse of
+			-- grabbing the edge first, which is just as common a way to build).
+			if #mAddPoints == 1 and hitPart then
+				local closeKey = boundaryEdgeAt(worldPos, hitPart, hitNormal)
+				if closeKey then
+					closeFreshOntoEdge(closeKey)
+					return
+				end
+			end
+			-- Otherwise place a fresh point when over empty space, or once the fresh-
+			-- point path has started; else grab a boundary edge to build from.
 			if not hitPart or #mAddPoints > 0 then
 				placeFreshPoint(worldPos)
 				return
 			end
-			-- Discover neighbors so we can tell which edges are truly boundary
-			local size = hitPart.Size
-			local extent = math.sqrt(size.X * size.X + size.Y * size.Y + size.Z * size.Z)
-			discoverRegionViewed({worldPos}, extent)
-			-- Filter to triangles facing the same way as the hit normal
-			local partTriIds = mMesh.getPartTriangles(hitPart)
-			if hitNormal then
-				local filtered = {}
-				for _, triId in partTriIds do
-					local tri = mMesh.getTriangle(triId)
-					if tri and tri.normal:Dot(hitNormal) > 0 then
-						table.insert(filtered, triId)
-					end
-				end
-				if #filtered > 0 then
-					partTriIds = filtered
-				end
-			end
-			local edgeKey = findNearestBoundaryEdge(worldPos, partTriIds, nil)
+			local edgeKey = boundaryEdgeAt(worldPos, hitPart, hitNormal)
 			if edgeKey then
 				local edge = mMesh.getEdges()[edgeKey]
 				if edge then
@@ -2285,18 +2331,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return currentSettings.Mode
 	end
 	-- Fresh corner positions placed so far in the empty-space Add path (overlay
-	-- preview and tests). Returned where they will actually commit: lifted a thickness
-	-- when nothing has snapped (the triangle will rest above its placement plane), or
-	-- as-placed once a corner has snapped (it will connect flush).
+	-- preview and tests). These are where the cursor placed them; the lift a
+	-- disconnected triangle gets is applied at commit, not shown in the preview.
 	session.GetAddPoints = function(): { Vector3 }
-		local pts = table.clone(mAddPoints)
-		if not mAddSnappedAny then
-			local lift = freshLift()
-			for i, p in pts do
-				pts[i] = p + lift
-			end
-		end
-		return pts
+		return table.clone(mAddPoints)
 	end
 	-- Drive one Add click at a world position, as if the cursor were there. Pass
 	-- hitPart when the click is on existing geometry (to grab its boundary edge),
