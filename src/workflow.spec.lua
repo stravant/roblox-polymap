@@ -1422,36 +1422,27 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
-	t.test("Add: a fresh corner on a surface lifts a thickness, empty space does not", function()
+	t.test("Add: a fresh disconnected triangle lifts a thickness above the click plane", function()
 		withSession(function(session, mesh, settings)
 			settings.Mode = "Add"
 			settings.Thickness = 1
-			-- A throwaway part far overhead stands in for "a surface was hit" without
-			-- adding geometry near our fresh corners (it discovers up around Y=500).
-			local farPart = Instance.new("Part")
-			farPart.Anchored = true
-			farPart.Size = Vector3.new(4, 4, 4)
-			farPart.Position = kRegionCenter + Vector3.new(0, 500, 0)
-			farPart.Parent = workspace
-
 			local p1 = kRegionCenter + Vector3.new(0, 0, 0)
 			local p2 = kRegionCenter + Vector3.new(12, 0, 0)
 			local p3 = kRegionCenter + Vector3.new(0, 0, 12)
 
-			session.AddClickAt(p1, nil) -- empty space: stays put
-			session.AddClickAt(p2, farPart) -- "on a surface": lifts a thickness
-			session.AddClickAt(p3, farPart) -- "on a surface": lifts, commits
+			session.AddClickAt(p1, nil)
+			-- The in-progress preview already reflects the lift the triangle will get.
+			t.expect(session.GetAddPoints()[1].Y).toBe(p1.Y + settings.Thickness)
+			session.AddClickAt(p2, nil)
+			session.AddClickAt(p3, nil)
 
-			farPart:Destroy()
-
-			t.expect(#session.GetAddPoints()).toBe(0)
-			-- The empty-space corner stays at the click; the surface corners rise a
-			-- thickness so the new (face-up) triangle rests on top, not sunk in.
-			t.expect(mesh.findVertexNear(p1, 0.1) ~= nil).toBeTruthy()
+			-- Nothing snapped: the whole triangle rises a thickness so it rests ABOVE the
+			-- click plane (its face-up wedge hangs down to the plane) instead of below it.
+			t.expect(countDict(mesh.getTriangles())).toBe(1)
+			t.expect(mesh.findVertexNear(p1 + Vector3.yAxis, 0.1) ~= nil).toBeTruthy()
 			t.expect(mesh.findVertexNear(p2 + Vector3.yAxis, 0.1) ~= nil).toBeTruthy()
 			t.expect(mesh.findVertexNear(p3 + Vector3.yAxis, 0.1) ~= nil).toBeTruthy()
-			t.expect(mesh.findVertexNear(p2, 0.1) == nil).toBeTruthy()
-			t.expect(mesh.findVertexNear(p3, 0.1) == nil).toBeTruthy()
+			t.expect(mesh.findVertexNear(p1, 0.1) == nil).toBeTruthy()
 		end)
 	end)
 
