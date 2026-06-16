@@ -33,6 +33,7 @@ local function makeSettings(): Settings.PolyMapSettings
 		DeleteRadius = 0,
 		PaintRadius = 0,
 		Thickness = 0.2,
+		MatchThickness = true,
 		InfluenceRadius = 0,
 		InfluenceFalloff = "Smooth",
 		GridType = "Square",
@@ -1525,6 +1526,121 @@ return function(t: TestTypes.TestContext)
 			t.expect(#session.GetAddPoints()).toBe(0)
 			t.expect(mesh.findVertexNear(Vector3.new(apex.X, gridY, apex.Z), 0.3) ~= nil).toBeTruthy()
 			t.expect(mesh.findVertexNear(apex, 0.3) == nil).toBeTruthy()
+		end)
+	end)
+
+	-- Thickness of whatever triangle reaches `pos`, or nil. The new Add triangle is the
+	-- only one out at its far corner, so this identifies it among the existing grid.
+	local function triThicknessAt(mesh: any, pos: Vector3): number?
+		for _, tri in mesh.getTriangles() do
+			for _, vid in tri.vertices do
+				local vert = mesh.getVertex(vid)
+				if vert and (vert.position - pos).Magnitude < 0.3 then
+					return tri.thickness
+				end
+			end
+		end
+		return nil
+	end
+
+	t.test("Add: MatchThickness gives a snapped triangle the existing geometry's thickness", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 3
+			settings.GridHeight = 3
+			settings.GridSpacing = 4
+			settings.Thickness = 2
+			session.GenerateGrid() -- grid triangles built at thickness 2
+			settings.Mode = "Add"
+			settings.MatchThickness = true
+			settings.Thickness = 0.5 -- fallback, deliberately different from the grid
+
+			local v: Vector3? = nil
+			for _, vert in mesh.getVertices() do
+				v = vert.position
+				break
+			end
+			assert(v)
+
+			-- Two corners out in empty space, the third snapping onto a grid vertex.
+			local p1 = v + Vector3.new(40, 0, 0)
+			session.AddClickAt(p1, nil)
+			session.AddClickAt(v + Vector3.new(40, 0, 40), nil)
+			session.AddClickAt(v + Vector3.new(1, 0, 0), nil) -- snaps to v, commits
+
+			-- It inherited the grid's thickness (2), not the 0.5 setting.
+			local th = triThicknessAt(mesh, p1)
+			assert(th)
+			t.expect(math.abs(th - 2) < 0.01).toBeTruthy()
+		end)
+	end)
+
+	t.test("Add: MatchThickness off uses the Thickness setting even when snapping", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 3
+			settings.GridHeight = 3
+			settings.GridSpacing = 4
+			settings.Thickness = 2
+			session.GenerateGrid()
+			settings.Mode = "Add"
+			settings.MatchThickness = false
+			settings.Thickness = 0.5
+
+			local v: Vector3? = nil
+			for _, vert in mesh.getVertices() do
+				v = vert.position
+				break
+			end
+			assert(v)
+
+			local p1 = v + Vector3.new(40, 0, 0)
+			session.AddClickAt(p1, nil)
+			session.AddClickAt(v + Vector3.new(40, 0, 40), nil)
+			session.AddClickAt(v + Vector3.new(1, 0, 0), nil) -- snaps to v
+
+			local th = triThicknessAt(mesh, p1)
+			assert(th)
+			t.expect(math.abs(th - 0.5) < 0.01).toBeTruthy()
+		end)
+	end)
+
+	t.test("Add: MatchThickness matches the edge thickness when closing onto an edge", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 3
+			settings.GridHeight = 3
+			settings.GridSpacing = 8 -- long edges so the midpoint clears vertex snap
+			settings.Thickness = 2
+			session.GenerateGrid()
+			settings.Mode = "Add"
+			settings.MatchThickness = true
+			settings.Thickness = 0.5
+
+			local boundary = mesh.getBoundaryEdges()
+			local edge = boundary[1]
+			local a = mesh.getVertex(edge.v1)
+			local b = mesh.getVertex(edge.v2)
+			local tri = mesh.getTriangle(edge.triangles[1])
+			assert(a and b and tri)
+			local part = tri.parts[1]
+			local edgeMid = (a.position + b.position) / 2
+			local gridY = a.position.Y
+
+			-- Apex out past the edge (away from the grid centre), then click the edge.
+			local sum, cnt = Vector3.zero, 0
+			for _, vv in mesh.getVertices() do
+				sum += vv.position
+				cnt += 1
+			end
+			local outward = (edgeMid - sum / cnt) * Vector3.new(1, 0, 1)
+			outward = if outward.Magnitude > 0.1 then outward.Unit else Vector3.new(1, 0, 0)
+			local apex = edgeMid + outward * 5 + Vector3.new(0, 6, 0)
+			session.AddClickAt(apex, nil)
+			session.AddClickAt(edgeMid, part)
+
+			-- The closing triangle (reaching the apex, dropped onto the grid plane) took
+			-- the edge's thickness (2), not the 0.5 setting.
+			local th = triThicknessAt(mesh, Vector3.new(apex.X, gridY, apex.Z))
+			assert(th)
+			t.expect(math.abs(th - 2) < 0.01).toBeTruthy()
 		end)
 	end)
 

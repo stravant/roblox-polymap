@@ -11,6 +11,7 @@ export type PolyMapSettings = PluginGuiTypes.PluginGuiSettings & {
 	DeleteRadius: number,
 	PaintRadius: number,
 	Thickness: number,
+	MatchThickness: boolean,
 	InfluenceRadius: number,
 	InfluenceFalloff: string,
 	GridType: string,
@@ -55,6 +56,7 @@ local function loadSettings(plugin: Plugin): PolyMapSettings
 		DeleteRadius = raw.DeleteRadius or 0,
 		PaintRadius = raw.PaintRadius or 0,
 		Thickness = 1, --raw.Thickness or 0.2, -- TODO uncomment
+		MatchThickness = if raw.MatchThickness ~= nil then raw.MatchThickness else true,
 		InfluenceRadius = raw.InfluenceRadius or 10,
 		InfluenceFalloff = raw.InfluenceFalloff or "Smooth",
 		GridType = raw.GridType or "Square",
@@ -95,6 +97,7 @@ local function saveSettings(plugin: Plugin, settings: PolyMapSettings)
 		DeleteRadius = settings.DeleteRadius,
 		PaintRadius = settings.PaintRadius,
 		Thickness = settings.Thickness,
+		MatchThickness = settings.MatchThickness,
 		InfluenceRadius = settings.InfluenceRadius,
 		InfluenceFalloff = settings.InfluenceFalloff,
 		GridType = settings.GridType,

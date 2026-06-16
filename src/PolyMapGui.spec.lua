@@ -28,6 +28,7 @@ local function makeSettings(mode: string): Settings.PolyMapSettings
 		DeleteRadius = 0,
 		PaintRadius = 0,
 		Thickness = 0.2,
+		MatchThickness = true,
 		InfluenceRadius = 10,
 		InfluenceFalloff = "Smooth",
 		GridType = "Square",

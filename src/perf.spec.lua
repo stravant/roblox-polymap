@@ -31,6 +31,7 @@ local function makeSettings(width: number, height: number): Settings.PolyMapSett
 		DeleteRadius = 0,
 		PaintRadius = 0,
 		Thickness = 0.2,
+		MatchThickness = true,
 		InfluenceRadius = 0,
 		InfluenceFalloff = "Smooth",
 		GridType = "Square",

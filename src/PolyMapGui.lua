@@ -14,6 +14,7 @@ local Slider = require("./PluginGui/Slider")
 local HelpGui = require("./PluginGui/HelpGui")
 local OverlayGui = require("./PluginGui/OverlayGui")
 local MaterialDropdown = require("./PluginGui/MaterialDropdown")
+local Checkbox = require("./PluginGui/Checkbox")
 local Settings = require("./Settings")
 local PluginGuiTypes = require("./PluginGui/Types")
 local MeshOverlay = require("./MeshOverlay")
@@ -607,6 +608,7 @@ local function ThicknessPanel(props: {
 	Settings: Settings.PolyMapSettings,
 	UpdatedSettings: () -> (),
 	LayoutOrder: number?,
+	ShowMatchThickness: boolean?,
 })
 	return e(SubPanel, {
 		Title = "Thickness",
@@ -630,6 +632,21 @@ local function ThicknessPanel(props: {
 			}),
 			Help = e(HelpGui.BasicTooltip, {
 				HelpRichText = "Thickness of the wedge parts forming the mesh.",
+			}),
+		}),
+		-- Add mode only: match the thickness of geometry the new triangle snaps to.
+		MatchThickness = props.ShowMatchThickness and e(HelpGui.WithHelpIcon, {
+			LayoutOrder = 2,
+			Subject = e(Checkbox, {
+				Label = "Match Thickness",
+				Checked = props.Settings.MatchThickness,
+				Changed = function(checked: boolean)
+					props.Settings.MatchThickness = checked
+					props.UpdatedSettings()
+				end,
+			}),
+			Help = e(HelpGui.BasicTooltip, {
+				HelpRichText = "When the new triangle snaps to existing geometry, give it that geometry's thickness instead of the value above.",
 			}),
 		}),
 	})
@@ -1528,6 +1545,7 @@ local function PolyMapGui(props: {
 				Settings = currentSettings,
 				UpdatedSettings = props.UpdatedSettings,
 				LayoutOrder = nextOrder(),
+				ShowMatchThickness = mode == "Add",
 			}),
 			InfluencePanel = showInfluence and e(InfluencePanel, {
 				Settings = currentSettings,

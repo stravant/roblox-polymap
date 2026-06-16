@@ -174,6 +174,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	-- fresh triangle is lifted a thickness so it rests ABOVE where it was placed; one
 	-- that snapped stays put to connect flush ("below").
 	local mAddSnappedAny = false
+	-- Thickness of the existing geometry this triangle snaps onto (a snapped corner's
+	-- triangle, or a grabbed/closed boundary edge's). With MatchThickness on it is used
+	-- in place of the Thickness setting so the new triangle matches what it connects to.
+	local mAddSnappedThickness: number? = nil
 	local mAddPlanePoint: Vector3? = nil
 	local mAddPlaneNormal: Vector3? = nil
 	local mAddHoverTarget: { type: string, vertexId: number?, edgeKey: string?, position: Vector3? }? = nil
@@ -303,6 +307,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		mAddBoundaryEdge = nil
 		mAddPoints = {}
 		mAddSnappedAny = false
+		mAddSnappedThickness = nil
 		mAddPlanePoint = nil
 		mAddPlaneNormal = nil
 		mAddHoverTarget = nil
@@ -499,6 +504,30 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	-- this the body would sit below the click plane / sink into the clicked surface.
 	local function freshLift(): Vector3
 		return Vector3.yAxis * currentSettings.Thickness
+	end
+
+	-- Thickness of a triangle the given vertex belongs to, or nil if it is loose.
+	local function vertexThickness(vertexId: number): number?
+		local v = mMesh.getVertex(vertexId)
+		if v then
+			for _, triId in v.triangles do
+				local tri = mMesh.getTriangle(triId)
+				if tri then
+					return tri.thickness
+				end
+			end
+		end
+		return nil
+	end
+
+	-- The thickness to build an Add triangle with: the snapped/connected geometry's
+	-- thickness when MatchThickness is on and we connected to something, else the
+	-- Thickness setting.
+	local function resolveAddThickness(connectedThickness: number?): number
+		if currentSettings.MatchThickness and connectedThickness then
+			return connectedThickness
+		end
+		return currentSettings.Thickness
 	end
 
 	-- Walk the surface within radius of worldPos, discovering it first. walkSurface
@@ -1000,7 +1029,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local centroid = (p1 + p2 + p3) / 3
 		mMesh.addTriangle(
 			p1, p2, p3,
-			currentSettings.Thickness, workspace.Terrain, getTriangleProps(), centroid + Vector3.yAxis
+			resolveAddThickness(mAddSnappedThickness), workspace.Terrain, getTriangleProps(), centroid + Vector3.yAxis
 		)
 		clearAddState()
 		if recording then
@@ -1016,6 +1045,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local snapped, vid = snapAddPoint(worldPos)
 		if vid then
 			mAddSnappedAny = true
+			if not mAddSnappedThickness then
+				mAddSnappedThickness = vertexThickness(vid)
+			end
 		end
 		table.insert(mAddPoints, snapped)
 		if #mAddPoints >= 3 then
@@ -1066,7 +1098,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 		pushUndoSnapshot()
 		local recording = ChangeHistoryService:TryBeginRecording("PolyMap Add Triangle")
-		mMesh.addTriangle(apex, a.position, b.position, currentSettings.Thickness, workspace.Terrain, props, hint)
+		local thickness = resolveAddThickness(if parentTri then parentTri.thickness else nil)
+		mMesh.addTriangle(apex, a.position, b.position, thickness, workspace.Terrain, props, hint)
 		clearAddState()
 		if recording then
 			ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
@@ -1116,6 +1149,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 								mAddPlanePoint = tv.position
 							end
 							mAddPlaneNormal = tri.normal
+							mAddSnappedThickness = tri.thickness
 							local part = tri.parts[1]
 							if part then
 								mAddTriangleProps = {
@@ -1162,7 +1196,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					if tv then
 						mMesh.addTriangle(
 							v1.position, v2.position, tv.position,
-							currentSettings.Thickness, workspace.Terrain, addProps, addHintPoint
+							resolveAddThickness(mAddSnappedThickness), workspace.Terrain, addProps, addHintPoint
 						)
 					end
 				elseif target.type == "edge" and target.edgeKey then
@@ -1180,18 +1214,18 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 							end
 							mMesh.addTriangle(
 								v1.position, v2.position, ta.position,
-								currentSettings.Thickness, workspace.Terrain, addProps, addHintPoint
+								resolveAddThickness(mAddSnappedThickness), workspace.Terrain, addProps, addHintPoint
 							)
 							mMesh.addTriangle(
 								v2.position, tb.position, ta.position,
-								currentSettings.Thickness, workspace.Terrain, addProps, addHintPoint
+								resolveAddThickness(mAddSnappedThickness), workspace.Terrain, addProps, addHintPoint
 							)
 						end
 					end
 				elseif target.type == "plane" and target.position then
 					mMesh.addTriangle(
 						v1.position, v2.position, target.position,
-						currentSettings.Thickness, workspace.Terrain, addProps, addHintPoint
+						resolveAddThickness(mAddSnappedThickness), workspace.Terrain, addProps, addHintPoint
 					)
 				end
 			end
