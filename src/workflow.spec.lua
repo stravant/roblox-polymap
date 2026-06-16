@@ -1603,7 +1603,11 @@ return function(t: TestTypes.TestContext)
 			settings.PaintColor = { 1, 0, 0 }
 			settings.PaintRadius = 8
 
-			session.PaintAt(kRegionCenter)
+			-- Seed at the camera-facing surface the way the real brush does (raycast
+			-- from the pinned camera), not the grid's bottom plane at kRegionCenter.
+			local hit = workspace:Raycast(kCameraEye, (kRegionCenter - kCameraEye) * 1.5)
+			assert(hit)
+			session.PaintAt(hit.Position)
 
 			-- A radius-8 brush must colour a region of triangles -- not just the one
 			-- under the cursor, which is all an un-discovered surface walk would find.

@@ -946,7 +946,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 	-- which face of a thin Block to adopt: the one facing the viewer, rather than the
 	-- side the cursor happened to cross first. Falls back to hintPoint when absent
 	-- (the rebuild and tests), and is ignored for wedges.
-	local function discoverPart(part: BasePart, hintPoint: Vector3, viewPoint: Vector3?, nearbyResolver: ((Vector3, number) -> { Instance })?): number?
+	local function discoverPart(part: BasePart, hintPoint: Vector3, viewPoint: Vector3?, nearbyResolver: ((Vector3, number) -> { Instance })?, refuseAwayFace: boolean?): number?
 		-- Never adopt the template baseplate as mesh, even when a seed point lands on
 		-- it (the region scan bootstraps any part the point sits inside). People keep
 		-- terrain Locked, so this filters the baseplate by name, not by Locked.
@@ -1003,6 +1003,30 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			-- which then propagates outward through the walk.
 			local toHint = hintPoint - part.Position
 			local shouldInvert = natural:Dot(toHint) < 0
+
+			-- Refuse to START a fresh surface on the wedge's FAR thin face -- the one on
+			-- the opposite side of the slab from the camera. That is the back face the
+			-- cursor locks onto when it first grazes a part's thin edge before reaching
+			-- the front. We compare the chosen face's SIDE (its thin-axis offset from the
+			-- part centre) to the camera, not its normal: grids are generated back-facing,
+			-- so the front face's normal already points away from the camera and a
+			-- normal test would wrongly reject the whole mesh. This only blocks the START
+			-- -- a face sharing a vertex with already-discovered geometry (a topology-walk
+			-- continuation) is allowed to face any way, so curved surfaces still discover
+			-- fully. Opt-in (refuseAwayFace): only the interactive single-part hover sets
+			-- it; region scans and rebuilds must adopt whatever side their seed sits on.
+			if refuseAwayFace and viewPoint then
+				local right = part.CFrame.RightVector -- the thin axis for our wedges
+				local centroid = (v1 + v2 + v3) / 3
+				local faceSide = (centroid - part.Position):Dot(right)
+				local cameraSide = (viewPoint - part.Position):Dot(right)
+				local sharesExisting = findExistingVertexNear(v1)
+					or findExistingVertexNear(v2)
+					or findExistingVertexNear(v3)
+				if not sharesExisting and faceSide * cameraSide < 0 then
+					return nil
+				end
+			end
 
 			local v1Id = getOrCreateVertex(v1)
 			local v2Id = getOrCreateVertex(v2)

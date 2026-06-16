@@ -428,6 +428,67 @@ return function(t: TestTypes.TestContext)
 		folder:Destroy()
 	end)
 
+	t.test("discoverPart with refuseAwayFace skips the far thin face, keeps the near one", function()
+		for _, p in workspace:GetPartBoundsInRadius(Vector3.new(2200, 10, 0), 30) do
+			if p:IsA("BasePart") then p:Destroy() end
+		end
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		local parts = fillTriangle(
+			Vector3.new(2200, 10, 0), Vector3.new(2204, 10, 0), Vector3.new(2202, 10, 3),
+			0.2, folder
+		)
+		local wedge = parts[1]
+		assert(wedge)
+		local center = wedge.CFrame.Position
+		local right = wedge.CFrame.RightVector -- the wedge's thin axis
+		local viewPoint = center + right * 50 -- camera on the near (+Right) side
+		local farHint = center - right -- grazing the far side
+		local nearHint = center + right -- the camera-facing side
+
+		-- An interactive hover (refuseAwayFace=true) grazing the far side adopts nothing...
+		local farId = mesh.discoverPart(wedge, farHint, viewPoint, nil, true)
+		t.expect(farId == nil).toBeTruthy()
+		t.expect(#mesh.getPartTriangles(wedge)).toBe(0)
+
+		-- ...the camera-facing side discovers normally.
+		local nearId = mesh.discoverPart(wedge, nearHint, viewPoint, nil, true)
+		t.expect(nearId ~= nil).toBeTruthy()
+		t.expect(#mesh.getPartTriangles(wedge) > 0).toBeTruthy()
+
+		folder:Destroy()
+	end)
+
+	t.test("discoverPart without refuseAwayFace still adopts the far face (region/rebuild)", function()
+		for _, p in workspace:GetPartBoundsInRadius(Vector3.new(2240, 10, 0), 30) do
+			if p:IsA("BasePart") then p:Destroy() end
+		end
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		local parts = fillTriangle(
+			Vector3.new(2240, 10, 0), Vector3.new(2244, 10, 0), Vector3.new(2242, 10, 3),
+			0.2, folder
+		)
+		local wedge = parts[1]
+		assert(wedge)
+		local center = wedge.CFrame.Position
+		local right = wedge.CFrame.RightVector
+		local viewPoint = center + right * 50
+		local farHint = center - right
+
+		-- Region scans and the undo rebuild must adopt whatever side their seed sits
+		-- on, so the camera filter is OFF (refuseAwayFace nil) -- the far side discovers.
+		local id = mesh.discoverPart(wedge, farHint, viewPoint, nil, nil)
+		t.expect(id ~= nil).toBeTruthy()
+		t.expect(#mesh.getPartTriangles(wedge) > 0).toBeTruthy()
+
+		folder:Destroy()
+	end)
+
 	t.test("discoverPart returns cached ID on repeat call", function()
 		local mesh = createTriangleMesh()
 		local folder = Instance.new("Folder")

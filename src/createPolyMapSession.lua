@@ -517,7 +517,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return if camera then camera.CFrame.Position else nil
 	end
 	local function discoverPartViewed(part: BasePart, hitPoint: Vector3): number?
-		return mMesh.discoverPart(part, hitPoint, cameraViewPoint())
+		-- refuseAwayFace = true: a single interactive hover/click must not START a
+		-- part's discovery on the far (back) face the cursor grazes at its thin edge;
+		-- it waits until the cursor is genuinely over the camera-facing side.
+		return mMesh.discoverPart(part, hitPoint, cameraViewPoint(), nil, true)
 	end
 	local function discoverRegionViewed(seeds: { Vector3 }, radius: number)
 		return mMesh.discoverRegion(seeds, radius, cameraViewPoint())
