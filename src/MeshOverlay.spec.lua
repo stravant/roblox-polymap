@@ -9,6 +9,7 @@ local React = require(Packages.React)
 local ReactRoblox = require(Packages.ReactRoblox)
 
 local MeshOverlay = require("./MeshOverlay")
+local VertexMarkers = require("./VertexMarkers")
 local createTriangleMesh = require("./TriangleMesh")
 local TestTypes = require("./TestTypes")
 
@@ -275,6 +276,126 @@ return function(t: TestTypes.TestContext)
 			end
 		end
 		t.expect(checked).toBe(vertexCount)
+	end)
+
+	t.test("discovered markers resize on camera movement", function()
+		-- A large mesh so the cost is representative (~1024 vertices).
+		local perfFolder = Instance.new("Folder")
+		perfFolder.Name = "$MeshOverlayPerfParts"
+		perfFolder.Parent = workspace
+		local perfMesh = createTriangleMesh()
+		local center = Vector3.new(0, 1000, 0)
+		local N = 31 -- N*N cells -> (N+1)^2 vertices
+		local extent = N * SPACING
+		for r = 0, N - 1 do
+			for c = 0, N - 1 do
+				local base = center + Vector3.new(c * SPACING - extent / 2, 0, r * SPACING - extent / 2)
+				perfMesh.addTriangle(base, base + Vector3.new(SPACING, 0, 0), base + Vector3.new(0, 0, SPACING), THICKNESS, perfFolder, nil, Vector3.new(0, 1, 0))
+				perfMesh.addTriangle(base + Vector3.new(SPACING, 0, 0), base + Vector3.new(SPACING, 0, SPACING), base + Vector3.new(0, 0, SPACING), THICKNESS, perfFolder, nil, Vector3.new(0, 1, 0))
+			end
+		end
+		local vertexCount = 0
+		for _ in perfMesh.getVertices() do
+			vertexCount += 1
+		end
+
+		local cam = workspace.CurrentCamera
+		local savedCF = if cam then cam.CFrame else nil
+		local savedType = if cam then cam.CameraType else nil
+		if cam then
+			cam.CameraType = Enum.CameraType.Scriptable
+			cam.CFrame = CFrame.lookAt(center + Vector3.new(0, 80, 150), center)
+		end
+
+		local perfScreen = Instance.new("ScreenGui")
+		perfScreen.Name = "$MeshOverlayPerf"
+		perfScreen.Parent = CoreGui
+		local perfRoot = ReactRoblox.createRoot(perfScreen)
+
+		ReactRoblox.act(function()
+			perfRoot:render(e(VertexMarkers, {
+				Mesh = perfMesh,
+				ShowDiscoveredVertices = true,
+			}))
+		end)
+		for _ = 1, 2 do
+			RunService.Heartbeat:Wait()
+		end
+
+		local function radiusSum(): number
+			local s = 0
+			for _, d in perfScreen:GetDescendants() do
+				if d:IsA("SphereHandleAdornment") then
+					s += d.Radius
+				end
+			end
+			return s
+		end
+		local function markerCount(): number
+			local n = 0
+			for _, d in perfScreen:GetDescendants() do
+				if d:IsA("SphereHandleAdornment") then
+					n += 1
+				end
+			end
+			return n
+		end
+
+		-- One marker per discovered vertex.
+		t.expect(vertexCount > 1000).toBeTruthy()
+		t.expect(markerCount()).toBe(vertexCount)
+
+		-- Moving the camera resizes the markers: each marker's Radius is a binding
+		-- off a "camera tick" that the camera-move listener bumps -- no React
+		-- re-render. (Property-changed signals are Deferred in this place, so yield a
+		-- few frames for the listener and the binding write to land.)
+		local before = radiusSum()
+		if cam then
+			cam.CFrame = cam.CFrame * CFrame.new(0, 0, -25)
+		end
+		for _ = 1, 4 do
+			RunService.Heartbeat:Wait()
+		end
+		t.expect(math.abs(radiusSum() - before) > 0.001).toBe(true)
+
+		-- The per-frame resize work (depth recompute + Radius write per marker) is a
+		-- few ms even at ~1000 markers -- far below the cost of React re-rendering
+		-- every marker each frame -- so camera movement stays smooth.
+		local adorns = {}
+		for _, d in perfScreen:GetDescendants() do
+			if d:IsA("SphereHandleAdornment") then
+				table.insert(adorns, d)
+			end
+		end
+		local FRAMES = 60
+		local t0 = os.clock()
+		for _ = 1, FRAMES do
+			if cam then
+				cam.CFrame = cam.CFrame * CFrame.new(0, 0, -0.25)
+			end
+			for _, d in adorns do
+				local depth = if cam then math.abs(cam:WorldToViewportPoint(d.CFrame.Position).Z) else 150
+				d.Radius = depth / 150 * 1.2
+			end
+		end
+		local workMs = (os.clock() - t0) / FRAMES * 1000
+
+		ReactRoblox.act(function()
+			perfRoot:unmount()
+		end)
+		perfScreen:Destroy()
+		perfFolder:Destroy()
+		if cam then
+			if savedCF then
+				cam.CFrame = savedCF
+			end
+			if savedType then
+				cam.CameraType = savedType
+			end
+		end
+
+		-- Generous bound (measured ~3ms): documents the cost and isn't flaky.
+		t.expect(workMs < 20).toBeTruthy()
 	end)
 
 	-- Clean up

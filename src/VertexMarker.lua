@@ -9,7 +9,7 @@ local e = React.createElement
 local function VertexMarker(props: {
 	Position: Vector3,
 	Color: Color3,
-	Radius: number,
+	Radius: any, -- number, or a React binding<number> (so it can resize on camera move)
 	ZIndexOffset: number?,
 	Transparency: number?,
 	AlwaysOnTop: boolean?,

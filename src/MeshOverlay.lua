@@ -7,27 +7,11 @@ local Packages = Plugin.Packages
 local React = require(Packages.React)
 local ReactRoblox = require(Packages.ReactRoblox)
 
-local VertexMarker = require("./VertexMarker")
+local VertexMarkers = require("./VertexMarkers")
 local TriangleMesh = require("./TriangleMesh")
 
 local e = React.createElement
 
-local function scaleForDepth(point: Vector3): number
-	local camera = workspace.CurrentCamera
-	if camera then
-		local depth = math.abs(camera:WorldToViewportPoint(point).Z)
-		return depth / 150
-	end
-	return 1
-end
-
-local SELECTED_VERTEX_RADIUS = 2.5
-local HOVER_VERTEX_RADIUS = 2.0
-local DISCOVERED_VERTEX_RADIUS = 1.2
-
-local SELECTED_VERTEX_COLOR = Color3.fromRGB(255, 200, 50)
-local HOVER_VERTEX_COLOR = Color3.fromRGB(100, 150, 255)
-local DISCOVERED_VERTEX_COLOR = Color3.fromRGB(255, 255, 255)
 local OUTLINE_COLOR = Color3.fromRGB(255, 200, 50)
 local HOVER_OUTLINE_COLOR = Color3.fromRGB(100, 150, 255)
 local MARQUEE_BORDER_COLOR = Color3.fromRGB(100, 150, 255)
@@ -82,8 +66,6 @@ local function MeshOverlay(props: {
 	local addEdgeRef = React.useRef(nil :: any)
 	local addPreviewRef = React.useRef(nil :: any)
 	local gridPreviewRef = React.useRef(nil :: any)
-
-	local selectedVertices = props.SelectedVertices or {}
 
 	-- Draw outline around outlined triangle set (boundary edges only)
 	local outlineTriangleIds = props.OutlineTriangleIds or {}
@@ -258,58 +240,15 @@ local function MeshOverlay(props: {
 		ref = gridPreviewRef,
 	})
 
-	-- Render selected vertex markers (scale down when many are selected)
-	local selectedCount = 0
-	for _ in selectedVertices do
-		selectedCount += 1
-	end
-	local selectionScale = math.max(0.4, 1 / math.sqrt(math.max(1, selectedCount)))
-
-	for id in selectedVertices do
-		local vertex = mesh.getVertex(id)
-		if vertex then
-			local scale = scaleForDepth(vertex.position)
-			children["V_" .. tostring(id)] = e(VertexMarker, {
-				Position = vertex.position,
-				Color = SELECTED_VERTEX_COLOR,
-				Radius = scale * SELECTED_VERTEX_RADIUS * selectionScale,
-				ZIndexOffset = 5,
-			})
-		end
-	end
-
-	-- Render hovered vertex marker
-	if props.HoverVertexId and not selectedVertices[props.HoverVertexId] then
-		local vertex = mesh.getVertex(props.HoverVertexId)
-		if vertex then
-			local scale = scaleForDepth(vertex.position)
-			children["V_hover"] = e(VertexMarker, {
-				Position = vertex.position,
-				Color = HOVER_VERTEX_COLOR,
-				Radius = scale * HOVER_VERTEX_RADIUS,
-				ZIndexOffset = 4,
-			})
-		end
-	end
-
-	-- Render every discovered vertex in a faint, de-emphasized state (opt-in via
-	-- the global "Show discovered vertices" setting). Skip ones already drawn as
-	-- selected or hovered so those stay prominent.
-	if props.ShowDiscoveredVertices then
-		for id, vertex in mesh.getVertices() do
-			if not selectedVertices[id] and props.HoverVertexId ~= id then
-				local scale = scaleForDepth(vertex.position)
-				children["D_" .. tostring(id)] = e(VertexMarker, {
-					Position = vertex.position,
-					Color = DISCOVERED_VERTEX_COLOR,
-					Radius = scale * DISCOVERED_VERTEX_RADIUS,
-					Transparency = 0.1,
-					AlwaysOnTop = false,
-					ZIndexOffset = 1,
-				})
-			end
-		end
-	end
+	-- Vertex markers (selected / hovered / discovered) render in their own
+	-- component so they can resize on camera movement without re-running the
+	-- wireframe-drawing effects above every frame.
+	children.VertexMarkers = e(VertexMarkers, {
+		Mesh = mesh,
+		SelectedVertices = props.SelectedVertices,
+		HoverVertexId = props.HoverVertexId,
+		ShowDiscoveredVertices = props.ShowDiscoveredVertices,
+	})
 
 	-- Marquee selection rectangle
 	if props.MarqueeStart and props.MarqueeEnd then
