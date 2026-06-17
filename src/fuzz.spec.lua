@@ -37,6 +37,7 @@ local function makeSettings(): Settings.PolyMapSettings
 		PaintRadius = 0,
 		Thickness = 0.2,
 		MatchThickness = true,
+		AddNonSnapped = "Extend",
 		InfluenceRadius = 0,
 		InfluenceFalloff = "Smooth",
 		GridType = "Square",

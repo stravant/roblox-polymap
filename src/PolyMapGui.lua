@@ -652,6 +652,58 @@ local function ThicknessPanel(props: {
 	})
 end
 
+-- Add mode: how the corners of a new triangle that DON'T snap onto existing
+-- geometry are oriented. Flat keeps the triangle as horizontal as possible; Extend
+-- lays it in the plane of whatever it snapped to (matching that surface's normal).
+local function FreePointsPanel(props: {
+	Settings: Settings.PolyMapSettings,
+	UpdatedSettings: () -> (),
+	LayoutOrder: number?,
+})
+	local current = props.Settings.AddNonSnapped
+	return e(SubPanel, {
+		Title = "Free Points",
+		LayoutOrder = props.LayoutOrder,
+		Padding = UDim.new(0, 4),
+	}, {
+		Row = e(HelpGui.WithHelpIcon, {
+			LayoutOrder = 1,
+			Subject = e("Frame", {
+				Size = UDim2.fromScale(1, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
+				BackgroundTransparency = 1,
+			}, {
+				ListLayout = e("UIListLayout", {
+					FillDirection = Enum.FillDirection.Horizontal,
+					SortOrder = Enum.SortOrder.LayoutOrder,
+					Padding = UDim.new(0, 4),
+				}),
+				Flat = e(ChipForToggle, {
+					Text = "Flat",
+					IsCurrent = current == "Flat",
+					LayoutOrder = 1,
+					OnClick = function()
+						props.Settings.AddNonSnapped = "Flat"
+						props.UpdatedSettings()
+					end,
+				}),
+				Extend = e(ChipForToggle, {
+					Text = "Extend",
+					IsCurrent = current == "Extend",
+					LayoutOrder = 2,
+					OnClick = function()
+						props.Settings.AddNonSnapped = "Extend"
+						props.UpdatedSettings()
+					end,
+				}),
+			}),
+			Help = e(HelpGui.BasicTooltip, {
+				HelpRichText = "Where a new triangle's corners that don't snap to geometry go.<br /><b>Flat</b>: as close to horizontal as possible.<br /><b>Extend</b>: in the plane of the snapped triangle, matching its normal.",
+			}),
+		}),
+	})
+end
+
 local function InfluencePanel(props: {
 	Settings: Settings.PolyMapSettings,
 	UpdatedSettings: () -> (),
@@ -1546,6 +1598,11 @@ local function PolyMapGui(props: {
 				UpdatedSettings = props.UpdatedSettings,
 				LayoutOrder = nextOrder(),
 				ShowMatchThickness = mode == "Add",
+			}),
+			FreePointsPanel = (mode == "Add") and e(FreePointsPanel, {
+				Settings = currentSettings,
+				UpdatedSettings = props.UpdatedSettings,
+				LayoutOrder = nextOrder(),
 			}),
 			InfluencePanel = showInfluence and e(InfluencePanel, {
 				Settings = currentSettings,

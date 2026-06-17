@@ -34,6 +34,7 @@ local function makeSettings(): Settings.PolyMapSettings
 		PaintRadius = 0,
 		Thickness = 0.2,
 		MatchThickness = true,
+		AddNonSnapped = "Extend",
 		InfluenceRadius = 0,
 		InfluenceFalloff = "Smooth",
 		GridType = "Square",
@@ -1607,6 +1608,74 @@ return function(t: TestTypes.TestContext)
 		end
 		return nil
 	end
+
+	-- Y of the (unique) vertex at the given X/Z, ignoring height, or nil.
+	local function vertexYAt(mesh: any, x: number, z: number): number?
+		for _, v in mesh.getVertices() do
+			if math.abs(v.position.X - x) < 0.3 and math.abs(v.position.Z - z) < 0.3 then
+				return v.position.Y
+			end
+		end
+		return nil
+	end
+
+	-- A standalone, clearly TILTED triangle whose plane is y = z - (kRegionCenter.Z),
+	-- plus its horizontal base edge (both ends at y=0) and the part backing it. Used to
+	-- tell Flat (apex at the edge height) from Extend (apex following the tilt) apart.
+	local function makeTiltedTriangle(session: any, mesh: any)
+		local v1 = kRegionCenter + Vector3.new(0, 0, 0)
+		local v2 = kRegionCenter + Vector3.new(8, 0, 0)
+		local v3 = kRegionCenter + Vector3.new(4, 8, 8)
+		mesh.addTriangle(v1, v2, v3, 1, workspace.Terrain, nil, kRegionCenter + Vector3.new(4, 20, 0))
+		local edge, a, b
+		for _, ee in mesh.getBoundaryEdges() do
+			local ea, eb = mesh.getVertex(ee.v1), mesh.getVertex(ee.v2)
+			if ea and eb and math.abs(ea.position.Y) < 0.1 and math.abs(eb.position.Y) < 0.1 then
+				edge, a, b = ee, ea, eb
+				break
+			end
+		end
+		assert(edge and a and b)
+		local part = mesh.getTriangle(edge.triangles[1]).parts[1]
+		return part, (a.position + b.position) / 2
+	end
+
+	t.test("Add: Extend places a non-snapped apex in the snapped triangle's plane", function()
+		withSession(function(session, mesh, settings)
+			settings.Mode = "Add"
+			settings.MatchThickness = false
+			settings.AddNonSnapped = "Extend"
+			local part, edgeMid = makeTiltedTriangle(session, mesh)
+
+			-- Apex out past the edge in +Z (so the tilt matters), then close onto it.
+			local apexXZ = kRegionCenter + Vector3.new(4, 0, 16) -- (X, _, Z=center.Z+16)
+			session.AddClickAt(apexXZ + Vector3.new(0, 5, 0), nil)
+			session.AddClickAt(edgeMid, part)
+
+			-- The plane is y = z - center.Z, so at apexXZ.Z the apex sits 16 high.
+			local apexY = vertexYAt(mesh, apexXZ.X, apexXZ.Z)
+			assert(apexY)
+			t.expect(math.abs(apexY - 16) < 0.3).toBeTruthy()
+		end)
+	end)
+
+	t.test("Add: Flat places a non-snapped apex level with the edge, not following the tilt", function()
+		withSession(function(session, mesh, settings)
+			settings.Mode = "Add"
+			settings.MatchThickness = false
+			settings.AddNonSnapped = "Flat"
+			local part, edgeMid = makeTiltedTriangle(session, mesh)
+
+			local apexXZ = kRegionCenter + Vector3.new(4, 0, 16)
+			session.AddClickAt(apexXZ + Vector3.new(0, 5, 0), nil)
+			session.AddClickAt(edgeMid, part)
+
+			-- Flat keeps the apex level with the (horizontal, y=0) edge, not at y=16.
+			local apexY = vertexYAt(mesh, apexXZ.X, apexXZ.Z)
+			assert(apexY)
+			t.expect(math.abs(apexY - 0) < 0.3).toBeTruthy()
+		end)
+	end)
 
 	t.test("Add: MatchThickness gives a snapped triangle the existing geometry's thickness", function()
 		withSession(function(session, mesh, settings)

@@ -178,6 +178,12 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	-- triangle, or a grabbed/closed boundary edge's). With MatchThickness on it is used
 	-- in place of the Thickness setting so the new triangle matches what it connects to.
 	local mAddSnappedThickness: number? = nil
+	-- Plane (a point on the snapped geometry and its triangle normal) of the first
+	-- corner that snapped. With AddNonSnapped == "Extend" the remaining non-snapped
+	-- corners are projected onto this plane so the new triangle stays coplanar with
+	-- what it connects to; "Flat" ignores the normal and keeps them horizontal.
+	local mAddSnappedPoint: Vector3? = nil
+	local mAddSnappedNormal: Vector3? = nil
 	local mAddPlanePoint: Vector3? = nil
 	local mAddPlaneNormal: Vector3? = nil
 	local mAddHoverTarget: { type: string, vertexId: number?, edgeKey: string?, position: Vector3? }? = nil
@@ -308,6 +314,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		mAddPoints = {}
 		mAddSnappedAny = false
 		mAddSnappedThickness = nil
+		mAddSnappedPoint = nil
+		mAddSnappedNormal = nil
 		mAddPlanePoint = nil
 		mAddPlaneNormal = nil
 		mAddHoverTarget = nil
@@ -446,9 +454,11 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	end
 
 	-- The cursor's world position projected onto a sensible plane, so Add can place
-	-- points over empty space where the raycast misses. Plane = the selected edge's
-	-- surface (extend it flat), a horizontal plane through the first placed fresh
-	-- point, or the ground (Y=0) for the very first point.
+	-- points over empty space where the raycast misses. When the new triangle has
+	-- connected to existing geometry (a grabbed edge or a snapped corner), the
+	-- AddNonSnapped setting picks the plane: "Extend" lays it in the snapped surface's
+	-- plane (its normal), "Flat" keeps it horizontal. Unconnected points fall back to a
+	-- horizontal plane through the first point, or the ground for the very first point.
 	local function addProjectedPos(): Vector3?
 		local camera = workspace.CurrentCamera
 		if not camera then
@@ -456,10 +466,15 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 		local mouseLocation = UserInputService:GetMouseLocation()
 		local ray = camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
+		local extend = currentSettings.AddNonSnapped == "Extend"
 		local planePoint: Vector3
 		local planeNormal: Vector3
 		if mAddBoundaryEdge and mAddPlanePoint and mAddPlaneNormal then
-			planePoint, planeNormal = mAddPlanePoint, mAddPlaneNormal
+			planePoint = mAddPlanePoint
+			planeNormal = if extend then mAddPlaneNormal else Vector3.yAxis
+		elseif mAddSnappedPoint then
+			planePoint = mAddSnappedPoint
+			planeNormal = if extend and mAddSnappedNormal then mAddSnappedNormal else Vector3.yAxis
 		elseif #mAddPoints > 0 then
 			planePoint, planeNormal = mAddPoints[1], Vector3.yAxis
 		else
@@ -514,6 +529,20 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				local tri = mMesh.getTriangle(triId)
 				if tri then
 					return tri.thickness
+				end
+			end
+		end
+		return nil
+	end
+
+	-- Normal of a triangle the given vertex belongs to, or nil if it is loose.
+	local function vertexNormal(vertexId: number): Vector3?
+		local v = mMesh.getVertex(vertexId)
+		if v then
+			for _, triId in v.triangles do
+				local tri = mMesh.getTriangle(triId)
+				if tri then
+					return tri.normal
 				end
 			end
 		end
@@ -1048,6 +1077,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			if not mAddSnappedThickness then
 				mAddSnappedThickness = vertexThickness(vid)
 			end
+			if not mAddSnappedNormal then
+				mAddSnappedNormal = vertexNormal(vid)
+				mAddSnappedPoint = snapped
+			end
 		end
 		table.insert(mAddPoints, snapped)
 		if #mAddPoints >= 3 then
@@ -1089,12 +1122,18 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local props = getTriangleProps()
 		local parentTri = if edge.triangles[1] then mMesh.getTriangle(edge.triangles[1]) else nil
 		if parentTri then
-			apex = projectOntoTriPlane(apex, parentTri)
-			hint = edgeMid + parentTri.normal * 0.5
 			local part = parentTri.parts[1]
 			if part then
 				props = { Color = part.Color, Material = part.Material }
 			end
+		end
+		-- Place the apex in the edge triangle's plane (Extend) so the surface stays
+		-- smooth, or on a horizontal plane through the edge (Flat) so it stays level.
+		if currentSettings.AddNonSnapped == "Extend" and parentTri then
+			apex = projectOntoTriPlane(apex, parentTri)
+			hint = edgeMid + parentTri.normal * 0.5
+		else
+			apex = Vector3.new(apex.X, edgeMid.Y, apex.Z)
 		end
 		pushUndoSnapshot()
 		local recording = ChangeHistoryService:TryBeginRecording("PolyMap Add Triangle")
