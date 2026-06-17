@@ -345,18 +345,23 @@ return function(t: TestTypes.TestContext)
 		t.expect(vertexCount > 1000).toBeTruthy()
 		t.expect(markerCount()).toBe(vertexCount)
 
-		-- Moving the camera resizes the markers: each marker's Radius is a binding
-		-- off a "camera tick" that the camera-move listener bumps -- no React
-		-- re-render. (Property-changed signals are Deferred in this place, so yield a
-		-- few frames for the listener and the binding write to land.)
-		local before = radiusSum()
+		-- Marker size is depth-scaled to the camera: render at one distance, then move
+		-- the camera much farther and re-render -- the radii must grow. Each marker's
+		-- Radius is a binding off a "camera tick"; in the live plugin a RenderStepped
+		-- poll bumps that tick every frame the camera moves (no React re-render), but
+		-- RenderStepped doesn't fire in this headless harness, so drive the
+		-- re-evaluation with an explicit re-render here.
+		local nearSum = radiusSum()
 		if cam then
-			cam.CFrame = cam.CFrame * CFrame.new(0, 0, -25)
+			cam.CFrame = CFrame.lookAt(center + Vector3.new(0, 300, 600), center)
 		end
-		for _ = 1, 4 do
-			RunService.Heartbeat:Wait()
-		end
-		t.expect(math.abs(radiusSum() - before) > 0.001).toBe(true)
+		ReactRoblox.act(function()
+			perfRoot:render(e(VertexMarkers, {
+				Mesh = perfMesh,
+				ShowDiscoveredVertices = true,
+			}))
+		end)
+		t.expect(radiusSum() > nearSum).toBe(true)
 
 		-- The per-frame resize work (depth recompute + Radius write per marker) is a
 		-- few ms even at ~1000 markers -- far below the cost of React re-rendering

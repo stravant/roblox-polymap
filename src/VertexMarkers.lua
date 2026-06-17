@@ -1,5 +1,7 @@
 --!strict
 
+local RunService = game:GetService("RunService")
+
 local Plugin = script.Parent.Parent
 local Packages = Plugin.Packages
 local React = require(Packages.React)
@@ -55,34 +57,23 @@ local function VertexMarkers(props: {
 		if not hasContent then
 			return
 		end
-		-- Bump the tick whenever the camera CFrame changes (i.e. the user
-		-- navigates), which is exactly when the depth scale needs recomputing.
+		-- Poll the camera every render frame and bump the tick when it has moved.
+		-- RenderStepped runs synchronously just before the frame is drawn, so the
+		-- recomputed radii land in the SAME frame. (The camera's property-changed
+		-- signal can be Deferred -- firing a frame late -- which made the marker
+		-- sizes visibly lag the camera, most noticeably at low framerates.)
 		local n = 0
-		local cameraConn: RBXScriptConnection? = nil
-		local function bump()
-			n += 1
-			setCameraTick(n)
-		end
-		local function watch()
-			if cameraConn then
-				cameraConn:Disconnect()
-				cameraConn = nil
-			end
+		local lastCF: CFrame? = nil
+		local conn = RunService.RenderStepped:Connect(function()
 			local cam = workspace.CurrentCamera
-			if cam then
-				cameraConn = cam:GetPropertyChangedSignal("CFrame"):Connect(bump)
+			if cam and cam.CFrame ~= lastCF then
+				lastCF = cam.CFrame
+				n += 1
+				setCameraTick(n)
 			end
-		end
-		watch()
-		local swapConn = workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
-			watch()
-			bump()
 		end)
 		return function()
-			if cameraConn then
-				cameraConn:Disconnect()
-			end
-			swapConn:Disconnect()
+			conn:Disconnect()
 		end
 	end, { hasContent } :: { any })
 

@@ -36,15 +36,20 @@ return function(plugin: Plugin, panel: DockWidgetPluginGui, buttonClicked: Signa
 		end
 	end
 	local function createReactRoot()
+		-- A synchronous (legacy) root: ChangeSignal-driven re-renders commit in the
+		-- same frame as the geometry edit that fired them, instead of being deferred
+		-- a frame by the concurrent scheduler. That keeps the overlay markers locked
+		-- to the geometry while dragging, rather than trailing it by a frame (very
+		-- visible at the low framerates a large drag already runs at).
 		if panel.Enabled then
-			reactRoot = ReactRoblox.createRoot(panel)
+			reactRoot = ReactRoblox.createLegacyRoot(panel)
 		else
 			local screen = Instance.new("ScreenGui")
 			screen.Name = "PolyMapMainGui"
 			screen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 			screen.Parent = CoreGui
 			reactScreenGui = screen
-			reactRoot = ReactRoblox.createRoot(screen)
+			reactRoot = ReactRoblox.createLegacyRoot(screen)
 		end
 	end
 
