@@ -1956,4 +1956,84 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	-- Build a triangle centred on `center`, lying in the plane perpendicular to the
+	-- view direction D (so a ray along D hits its interior). Faces the camera.
+	local function buildFacingTri(mesh: any, center: Vector3, D: Vector3)
+		local up = if math.abs(D.Y) < 0.9 then Vector3.yAxis else Vector3.xAxis
+		local u = D:Cross(up).Unit
+		local v = D:Cross(u).Unit
+		local s = 3.5
+		mesh.addTriangle(center + u * s, center - u * s + v * s, center - u * s - v * s, 1, workspace.Terrain, nil, -D)
+	end
+
+	t.test("Delete: a lingering click removes one part, not the parts behind it", function()
+		withSession(function(session, mesh, settings)
+			settings.Mode = "Delete"
+			settings.DeleteTarget = "Face"
+			settings.DeleteRadius = 0
+
+			local cam = workspace.CurrentCamera
+			assert(cam)
+			-- Aim at the work region; stack two triangles along that view ray so the
+			-- near one occludes the far one.
+			local vp = cam:WorldToViewportPoint(kRegionCenter)
+			local sp = Vector2.new(vp.X, vp.Y)
+			local ray = cam:ViewportPointToRay(sp.X, sp.Y)
+			local O, D = ray.Origin, ray.Direction.Unit
+			buildFacingTri(mesh, O + D * 18, D) -- front (nearer the camera)
+			buildFacingTri(mesh, O + D * 34, D) -- back (directly behind it)
+
+			local before = countDict(mesh.getTriangles())
+			t.expect(before).toBe(2)
+
+			-- Linger: hit the same screen pixel 8 times, as holding a click does.
+			local linger: { Vector2 } = {}
+			for _ = 1, 8 do
+				table.insert(linger, sp)
+			end
+			session.DebugDeleteStroke(linger)
+
+			-- Only the front part went; the one behind it survived the lingering click.
+			local mid = countDict(mesh.getTriangles())
+			t.expect(before - mid).toBe(1)
+
+			-- A fresh stroke at the same spot now removes the (newly frontmost) back
+			-- part -- proving it was reachable along the ray, so the guard (not mere
+			-- unreachability) is what spared it above.
+			session.DebugDeleteStroke(linger)
+			t.expect(mid - countDict(mesh.getTriangles())).toBe(1)
+		end)
+	end)
+
+	t.test("Delete: dragging the cursor sweeps across and deletes multiple parts", function()
+		withSession(function(session, mesh, settings)
+			settings.Mode = "Delete"
+			settings.DeleteTarget = "Face"
+			settings.DeleteRadius = 0
+
+			local cam = workspace.CurrentCamera
+			assert(cam)
+			local vp = cam:WorldToViewportPoint(kRegionCenter)
+			local ray = cam:ViewportPointToRay(vp.X, vp.Y)
+			local O, D = ray.Origin, ray.Direction.Unit
+			local up = if math.abs(D.Y) < 0.9 then Vector3.yAxis else Vector3.xAxis
+			local u = D:Cross(up).Unit
+
+			-- Three parts side by side (no occlusion), at three distinct screen spots.
+			local screenPositions: { Vector2 } = {}
+			for _, off in { -9, 0, 9 } do
+				local center = O + D * 24 + u * off
+				buildFacingTri(mesh, center, D)
+				local cvp = cam:WorldToViewportPoint(center)
+				table.insert(screenPositions, Vector2.new(cvp.X, cvp.Y))
+			end
+			t.expect(countDict(mesh.getTriangles())).toBe(3)
+
+			-- A drag visiting each part's screen position removes all three (the
+			-- cursor moves well past the guard distance between them).
+			session.DebugDeleteStroke(screenPositions)
+			t.expect(countDict(mesh.getTriangles())).toBe(0)
+		end)
+	end)
+
 end

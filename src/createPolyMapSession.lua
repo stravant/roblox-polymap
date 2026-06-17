@@ -23,6 +23,13 @@ local importHeightmap = require("./importHeightmap")
 
 local kSpherecastRadius = 2
 
+-- Minimum on-screen cursor travel (pixels) between successive deletions within one
+-- Delete stroke. Without it, a cursor lingering over a spot chews straight back
+-- through the parts behind the one just deleted (the raycast re-hits whatever is
+-- newly frontmost each frame). Requiring movement keeps a click to the single part
+-- under it while still letting a drag sweep across the surface.
+local kDeleteMinDragPixels = 10
+
 -- Key for the edge between two vertex ids, matching how TriangleMesh.getEdges()
 -- keys its result so an edge can be looked up by its endpoints.
 local function edgeKey(a: number, b: number): string
@@ -68,8 +75,8 @@ local function castSkippingIgnored(cast: (RaycastParams) -> RaycastResult?): Ray
 	return nil
 end
 
-local function mouseRaycast(): RaycastResult?
-	local mouseLocation = UserInputService:GetMouseLocation()
+local function mouseRaycast(screenPos: Vector2?): RaycastResult?
+	local mouseLocation = screenPos or UserInputService:GetMouseLocation()
 	local camera = workspace.CurrentCamera
 	if not camera then
 		return nil
@@ -222,6 +229,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	-- Delete/Paint drag state
 	local mStrokeDragging = false
 	local mStrokeRecording: string? = nil
+	-- Screen position of the last deletion this stroke; gates the drill guard.
+	local mDeleteLastScreenPos: Vector2? = nil
 	local mStrokePlanePoint: Vector3? = nil
 	local mStrokePlaneNormal: Vector3? = nil
 
@@ -1313,8 +1322,17 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return nil
 	end
 
-	local function applyDeleteAtCursor()
-		local result = mouseRaycast()
+	local function applyDeleteAtCursor(screenPosOverride: Vector2?)
+		local screenPos = screenPosOverride or UserInputService:GetMouseLocation()
+		-- Drill guard: once we've deleted at a spot, don't keep deleting the parts
+		-- revealed behind it while the cursor lingers. Only delete again after the
+		-- cursor has moved far enough -- a deliberate drag. (To delete a part that was
+		-- behind another, move the cursor off it and back on.)
+		if mDeleteLastScreenPos and (screenPos - mDeleteLastScreenPos).Magnitude < kDeleteMinDragPixels then
+			return
+		end
+
+		local result = mouseRaycast(screenPos)
 		local worldPos: Vector3?
 		if result then
 			mStrokePlanePoint = result.Position
@@ -1352,6 +1370,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 							mMesh.removeTriangle(triId)
 						end
 						mSelectedVertices[vid] = nil
+						mDeleteLastScreenPos = screenPos
 						changeSignal:Fire()
 					end
 				end
@@ -1375,6 +1394,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				mMesh.removeTriangle(removeId)
 			end
 			if #toRemove > 0 then
+				mDeleteLastScreenPos = screenPos
 				changeSignal:Fire()
 			end
 		end
@@ -1614,6 +1634,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 	local function startStroke()
 		local mode = currentSettings.Mode
+		mDeleteLastScreenPos = nil
 		if mode == "Delete" then
 			pushUndoSnapshot()
 			mStrokeRecording = ChangeHistoryService:TryBeginRecording("PolyMap Delete")
@@ -1665,6 +1686,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		mStrokePlanePoint = nil
 		mStrokePlaneNormal = nil
 		mStrokeSeedTriangleId = nil
+		mDeleteLastScreenPos = nil
 		mPaintOriginalColors = {}
 		mBrushSavedPositions = {}
 		mBrushAmounts = {}
@@ -2824,6 +2846,16 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 	-- Paint the triangle under worldPos (plus PaintRadius walk) using the current
 	-- paint settings. Mirrors applyPaintAtCursor's colour/material application.
+	-- Test hook: run a Delete stroke that visits the given screen positions in order
+	-- (one per frame, like the cursor task), so the drill guard can be exercised.
+	session.DebugDeleteStroke = function(screenPositions: { Vector2 })
+		startStroke()
+		for _, pos in screenPositions do
+			applyDeleteAtCursor(pos)
+		end
+		endStroke()
+	end
+
 	session.PaintAt = function(worldPos: Vector3)
 		local hitPart: BasePart? = nil
 		for _, p in workspace:GetPartBoundsInRadius(worldPos, 1) do
