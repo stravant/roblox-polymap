@@ -216,6 +216,41 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("Place grid: the triangular preview shows triangle edges, not square cells", function()
+		withSession(function(session, mesh, settings)
+			settings.GridSpacing = 8
+			local c1 = kRegionCenter
+			local c2 = kRegionCenter + Vector3.new(24, 0, 24)
+
+			-- Any preview segment that varies in BOTH X and Z is a slanted triangle edge.
+			local function hasDiagonal(): boolean
+				local lines = session.GetGridPreviewLines()
+				assert(lines)
+				for _, seg in lines do
+					local d = seg[2] - seg[1]
+					if math.abs(d.X) > 0.1 and math.abs(d.Z) > 0.1 then
+						return true
+					end
+				end
+				return false
+			end
+
+			-- Square: every preview line is axis-aligned (the cell grid).
+			settings.GridType = "Square"
+			session.StartGridPlacement()
+			session.PlaceGridClickAt(c1)
+			session.SetGridHover(c2)
+			t.expect(hasDiagonal()).toBe(false)
+
+			-- Triangular: the slanted triangle edges appear as diagonals.
+			settings.GridType = "Triangular"
+			session.StartGridPlacement()
+			session.PlaceGridClickAt(c1)
+			session.SetGridHover(c2)
+			t.expect(hasDiagonal()).toBe(true)
+		end)
+	end)
+
 	t.test("Place grid: two corners span the exact rectangle as the grid's diagonal", function()
 		withSession(function(session, mesh, settings)
 			settings.GridType = "Square"

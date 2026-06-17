@@ -95,8 +95,10 @@ local function generateTriangularGrid(params: GridParams)
 				-- Odd row is shifted right, so connect:
 				-- Vertex order is rotated so that the split edge (CA for
 				-- equilateral) is NOT the shared diagonal (top ↔ bottomRight).
-				-- upward triangle: split along top→bottom (left edge)
-				fillTriangle(bottom, bottomRight, top, params.Thickness, params.Parent, params.Props)
+				-- upward triangle: split along top→bottom (left edge). Its winding
+				-- yields the opposite normal from every other triangle here, which
+				-- flipped its wedges to the wrong side -- invertNormal puts it back.
+				fillTriangle(bottom, bottomRight, top, params.Thickness, params.Parent, params.Props, nil, true)
 				-- downward triangle: split along top→topRight (top edge)
 				fillTriangle(topRight, bottomRight, top, params.Thickness, params.Parent, params.Props)
 			else

@@ -2538,6 +2538,12 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			generateGridBetween(p1, pos, firstSnapped)
 		end
 	end
+	-- Move the second (hover) corner without committing, so tests can inspect the
+	-- live placement preview spanning a rectangle.
+	session.SetGridHover = function(worldPos: Vector3)
+		mGridHoverPoint = worldPos
+		changeSignal:Fire()
+	end
 	-- World-space line segments ({p1, p2}) previewing the grid being placed: corner
 	-- crosses, plus the full cell grid once the first corner is down. nil when idle.
 	session.GetGridPreviewLines = function(): { { Vector3 } }?
@@ -2568,6 +2574,42 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local x0, x1 = center.X - halfW, center.X + halfW
 		local z0, z1 = center.Z - halfH, center.Z + halfH
 		local y = center.Y
+		-- Triangular grids use uniform spacing and offset rows, so preview the actual
+		-- triangle edges rather than square cells (which is what was shown before).
+		if currentSettings.GridType == "Triangular" then
+			local spacing = math.max(currentSettings.GridSpacing, 0.1)
+			local rh = spacing * math.sqrt(3) / 2
+			local tHalfW, tHalfH = cols * spacing / 2, rows * rh / 2
+			local function vpos(rr: number, cc: number): Vector3
+				local off = if rr % 2 == 1 then spacing / 2 else 0
+				return Vector3.new(center.X + cc * spacing + off - tHalfW, y, center.Z + rr * rh - tHalfH)
+			end
+			if drawCells then
+				for rr = 0, rows do -- horizontal edges of every vertex row
+					for cc = 0, cols - 1 do
+						table.insert(lines, { vpos(rr, cc), vpos(rr, cc + 1) })
+					end
+				end
+				for r = 1, rows do -- slanted sides + the split diagonal, per the generator
+					local oddRow = (r % 2 == 1)
+					for c = 1, cols do
+						local top, topRight = vpos(r - 1, c - 1), vpos(r - 1, c)
+						local bottom, bottomRight = vpos(r, c - 1), vpos(r, c)
+						table.insert(lines, { top, bottom })
+						table.insert(lines, { topRight, bottomRight })
+						table.insert(lines, if oddRow then { top, bottomRight } else { topRight, bottom })
+					end
+				end
+			else
+				local x0t, x1t = center.X - tHalfW, center.X + tHalfW
+				local z0t, z1t = center.Z - tHalfH, center.Z + tHalfH
+				table.insert(lines, { Vector3.new(x0t, y, z0t), Vector3.new(x1t, y, z0t) })
+				table.insert(lines, { Vector3.new(x0t, y, z1t), Vector3.new(x1t, y, z1t) })
+				table.insert(lines, { Vector3.new(x0t, y, z0t), Vector3.new(x0t, y, z1t) })
+				table.insert(lines, { Vector3.new(x1t, y, z0t), Vector3.new(x1t, y, z1t) })
+			end
+			return lines
+		end
 		for j = 0, rows do
 			if drawCells or j == 0 or j == rows then
 				local z = z0 + j * cellH

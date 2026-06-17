@@ -58,6 +58,38 @@ return function(t: TestTypes.TestContext)
 		folder:Destroy()
 	end)
 
+	t.test("triangular grid: all triangles face the same way", function()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		generateGrid({
+			GridType = "Triangular",
+			Width = 4,
+			Height = 4,
+			Spacing = 4,
+			Origin = CFrame.identity, -- grid plane at Y=0
+			Thickness = 1,
+			Parent = folder,
+		})
+
+		-- A wedge's body sits on the side its triangle's thickness extends; a flat grid
+		-- must have them all on the SAME side, or some triangles are flipped.
+		local above, below = 0, 0
+		for _, child in folder:GetChildren() do
+			if child:IsA("Part") then
+				if child.Position.Y > 0.01 then
+					above += 1
+				elseif child.Position.Y < -0.01 then
+					below += 1
+				end
+			end
+		end
+		t.expect(above > 0).toBeTruthy()
+		t.expect(below).toBe(0)
+
+		folder:Destroy()
+	end)
+
 	t.test("square grid applies props correctly", function()
 		local folder = Instance.new("Folder")
 		folder.Parent = workspace
