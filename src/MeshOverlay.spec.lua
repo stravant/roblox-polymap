@@ -261,6 +261,20 @@ return function(t: TestTypes.TestContext)
 			root:render(e(MeshOverlay, { Mesh = mesh, ShowDiscoveredVertices = true }))
 		end)
 		t.expect(countSpheres()).toBe(vertexCount)
+
+		-- De-emphasized: occluded by geometry (not always on top) and translucent.
+		local overlay = CoreGui:FindFirstChild("$PolyMapOverlay")
+		local checked = 0
+		if overlay then
+			for _, d in overlay:GetDescendants() do
+				if d:IsA("SphereHandleAdornment") then
+					checked += 1
+					t.expect(d.AlwaysOnTop).toBe(false)
+					t.expect(d.Transparency > 0).toBe(true)
+				end
+			end
+		end
+		t.expect(checked).toBe(vertexCount)
 	end)
 
 	-- Clean up
