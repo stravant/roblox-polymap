@@ -229,6 +229,40 @@ return function(t: TestTypes.TestContext)
 		})
 	end)
 
+	t.test("show discovered vertices: a faint marker per vertex only when enabled", function()
+		local function countSpheres(): number
+			local overlay = CoreGui:FindFirstChild("$PolyMapOverlay")
+			if not overlay then
+				return 0
+			end
+			local n = 0
+			for _, d in overlay:GetDescendants() do
+				if d:IsA("SphereHandleAdornment") then
+					n += 1
+				end
+			end
+			return n
+		end
+
+		local vertexCount = 0
+		for _ in mesh.getVertices() do
+			vertexCount += 1
+		end
+		t.expect(vertexCount > 0).toBe(true)
+
+		-- Off (and nothing selected/hovered): no vertex markers at all.
+		ReactRoblox.act(function()
+			root:render(e(MeshOverlay, { Mesh = mesh }))
+		end)
+		t.expect(countSpheres()).toBe(0)
+
+		-- On: exactly one marker per discovered vertex.
+		ReactRoblox.act(function()
+			root:render(e(MeshOverlay, { Mesh = mesh, ShowDiscoveredVertices = true }))
+		end)
+		t.expect(countSpheres()).toBe(vertexCount)
+	end)
+
 	-- Clean up
 	ReactRoblox.act(function()
 		root:unmount()

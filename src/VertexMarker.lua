@@ -11,6 +11,7 @@ local function VertexMarker(props: {
 	Color: Color3,
 	Radius: number,
 	ZIndexOffset: number?,
+	Transparency: number?,
 })
 	return e("SphereHandleAdornment", {
 		CFrame = CFrame.new(props.Position),
@@ -18,7 +19,7 @@ local function VertexMarker(props: {
 		ZIndex = 0 + (props.ZIndexOffset or 0),
 		Radius = props.Radius,
 		Color3 = props.Color,
-		Transparency = 0,
+		Transparency = props.Transparency or 0,
 		AlwaysOnTop = true,
 	})
 end

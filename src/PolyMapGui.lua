@@ -166,127 +166,69 @@ local function ModePanel(props: {
 	LayoutOrder: number?,
 })
 	local current = props.Settings.Mode
+
+	local function modeChip(text: string, modeValue: string, order: number)
+		return e(ChipForToggle, {
+			Text = text,
+			IsCurrent = current == modeValue,
+			LayoutOrder = order,
+			OnClick = function()
+				props.Settings.Mode = modeValue
+				props.UpdatedSettings()
+			end,
+		})
+	end
+
+	-- A blank 1/3-width slot so a row's remaining chips stay column-aligned. The
+	-- two trailing spots are reserved for future modes.
+	local function emptySlot(order: number)
+		return e("Frame", {
+			Size = UDim2.new(0, 0, 0, 24),
+			BackgroundTransparency = 1,
+			LayoutOrder = order,
+		}, {
+			Flex = e("UIFlexItem", { FlexMode = Enum.UIFlexMode.Grow }),
+		})
+	end
+
+	local function row(order: number, children: { [string]: any })
+		children.ListLayout = e("UIListLayout", {
+			FillDirection = Enum.FillDirection.Horizontal,
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			Padding = UDim.new(0, 4),
+		})
+		return e("Frame", {
+			Size = UDim2.fromScale(1, 0),
+			AutomaticSize = Enum.AutomaticSize.Y,
+			BackgroundTransparency = 1,
+			LayoutOrder = order,
+		}, children)
+	end
+
 	return e(SubPanel, {
 		Title = "Mode",
 		LayoutOrder = props.LayoutOrder,
 		Padding = UDim.new(0, 4),
 	}, {
-		Row1 = e("Frame", {
-			Size = UDim2.fromScale(1, 0),
-			AutomaticSize = Enum.AutomaticSize.Y,
-			BackgroundTransparency = 1,
-			LayoutOrder = 1,
-		}, {
-			ListLayout = e("UIListLayout", {
-				FillDirection = Enum.FillDirection.Horizontal,
-				SortOrder = Enum.SortOrder.LayoutOrder,
-				Padding = UDim.new(0, 4),
-			}),
-			Move = e(ChipForToggle, {
-				Text = "Move",
-				IsCurrent = current == "Move",
-				LayoutOrder = 1,
-				OnClick = function()
-					props.Settings.Mode = "Move"
-					props.UpdatedSettings()
-				end,
-			}),
-			Rotate = e(ChipForToggle, {
-				Text = "Rotate",
-				IsCurrent = current == "Rotate",
-				LayoutOrder = 2,
-				OnClick = function()
-					props.Settings.Mode = "Rotate"
-					props.UpdatedSettings()
-				end,
-			}),
-			Add = e(ChipForToggle, {
-				Text = "Add Poly",
-				IsCurrent = current == "Add",
-				LayoutOrder = 3,
-				OnClick = function()
-					props.Settings.Mode = "Add"
-					props.UpdatedSettings()
-				end,
-			}),
+		Row1 = row(1, {
+			Settings = modeChip("Settings", "Settings", 1),
+			Move = modeChip("Move", "Move", 2),
+			Rotate = modeChip("Rotate", "Rotate", 3),
 		}),
-		Row2 = e("Frame", {
-			Size = UDim2.fromScale(1, 0),
-			AutomaticSize = Enum.AutomaticSize.Y,
-			BackgroundTransparency = 1,
-			LayoutOrder = 2,
-		}, {
-			ListLayout = e("UIListLayout", {
-				FillDirection = Enum.FillDirection.Horizontal,
-				SortOrder = Enum.SortOrder.LayoutOrder,
-				Padding = UDim.new(0, 4),
-			}),
-			Delete = e(ChipForToggle, {
-				Text = "Delete",
-				IsCurrent = current == "Delete",
-				LayoutOrder = 1,
-				OnClick = function()
-					props.Settings.Mode = "Delete"
-					props.UpdatedSettings()
-				end,
-			}),
-			Paint = e(ChipForToggle, {
-				Text = "Paint",
-				IsCurrent = current == "Paint",
-				LayoutOrder = 2,
-				OnClick = function()
-					props.Settings.Mode = "Paint"
-					props.UpdatedSettings()
-				end,
-			}),
-			Generate = e(ChipForToggle, {
-				Text = "Add Grid",
-				IsCurrent = current == "Generate",
-				LayoutOrder = 3,
-				OnClick = function()
-					props.Settings.Mode = "Generate"
-					props.UpdatedSettings()
-				end,
-			}),
+		Row2 = row(2, {
+			Add = modeChip("Add Poly", "Add", 1),
+			Delete = modeChip("Delete", "Delete", 2),
+			Paint = modeChip("Paint", "Paint", 3),
 		}),
-		Row3 = e("Frame", {
-			Size = UDim2.fromScale(1, 0),
-			AutomaticSize = Enum.AutomaticSize.Y,
-			BackgroundTransparency = 1,
-			LayoutOrder = 3,
-		}, {
-			ListLayout = e("UIListLayout", {
-				FillDirection = Enum.FillDirection.Horizontal,
-				SortOrder = Enum.SortOrder.LayoutOrder,
-				Padding = UDim.new(0, 4),
-			}),
-			Import = e(ChipForToggle, {
-				Text = "Import",
-				IsCurrent = current == "Import",
-				LayoutOrder = 1,
-				OnClick = function()
-					props.Settings.Mode = "Import"
-					props.UpdatedSettings()
-				end,
-			}),
-			Relax = e(ChipForToggle, {
-				Text = "Relax",
-				IsCurrent = current == "Relax",
-				LayoutOrder = 2,
-				OnClick = function()
-					props.Settings.Mode = "Relax"
-					props.UpdatedSettings()
-				end,
-			}),
-			Flatten = e(ChipForToggle, {
-				Text = "Flatten",
-				IsCurrent = current == "Flatten",
-				LayoutOrder = 3,
-				OnClick = function()
-					props.Settings.Mode = "Flatten"
-					props.UpdatedSettings()
-				end,
-			}),
+		Row3 = row(3, {
+			Generate = modeChip("Add Grid", "Generate", 1),
+			Import = modeChip("Import", "Import", 2),
+			Relax = modeChip("Relax", "Relax", 3),
+		}),
+		Row4 = row(4, {
+			Flatten = modeChip("Flatten", "Flatten", 1),
+			Empty1 = emptySlot(2),
+			Empty2 = emptySlot(3),
 		}),
 	})
 end
@@ -1448,6 +1390,49 @@ local function CloseButton(props: {
 	})
 end
 
+-- The global Settings tab: a high-level description of what PolyMap does plus
+-- options that aren't tied to any single editing mode.
+local function SettingsPanel(props: {
+	Settings: Settings.PolyMapSettings,
+	UpdatedSettings: () -> (),
+	LayoutOrder: number?,
+})
+	local nextOrder = createNextOrder()
+	return e(SubPanel, {
+		Title = "Settings",
+		LayoutOrder = props.LayoutOrder,
+		Padding = UDim.new(0, 8),
+	}, {
+		Description = e("TextLabel", {
+			Size = UDim2.new(1, 0, 0, 0),
+			AutomaticSize = Enum.AutomaticSize.Y,
+			BackgroundTransparency = 1,
+			Text = "PolyMap treats the parts in your place as one editable triangle mesh. Pick a mode above to move, add, delete, paint, generate, import, relax, or flatten geometry.",
+			TextColor3 = Colors.WHITE,
+			TextWrapped = true,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextYAlignment = Enum.TextYAlignment.Top,
+			Font = Enum.Font.SourceSans,
+			TextSize = 16,
+			LayoutOrder = nextOrder(),
+		}),
+		ShowVertices = e(HelpGui.WithHelpIcon, {
+			LayoutOrder = nextOrder(),
+			Subject = e(Checkbox, {
+				Label = "Show discovered vertices",
+				Checked = props.Settings.ShowDiscoveredVertices,
+				Changed = function(checked: boolean)
+					props.Settings.ShowDiscoveredVertices = checked
+					props.UpdatedSettings()
+				end,
+			}),
+			Help = e(HelpGui.BasicTooltip, {
+				HelpRichText = "Draw a faint marker on every vertex PolyMap has discovered, even when it isn't selected. Helps you see the mesh's structure while you work.",
+			}),
+		}),
+	})
+end
+
 local POLYMAP_CONFIG: PluginGuiTypes.PluginGuiConfig = {
 	PluginName = "PolyMap",
 	PendingText = "Click the toolbar button to activate PolyMap.",
@@ -1466,6 +1451,7 @@ local function PolyMapGui(props: {
 	local session = props.Session
 	local mode = currentSettings.Mode
 	local nextOrder = createNextOrder()
+	local showSettings = mode == "Settings"
 	local showInfluence = mode == "Move" or mode == "Rotate"
 	local showDelete = mode == "Delete"
 	local showPaint = mode == "Paint"
@@ -1496,6 +1482,7 @@ local function PolyMapGui(props: {
 				HoverOutlineTriangleIds = session.GetHoverOutlineTriangleIds(),
 				MarqueeStart = session.GetMarquee(),
 				MarqueeEnd = select(2, session.GetMarquee()),
+				ShowDiscoveredVertices = currentSettings.ShowDiscoveredVertices,
 			}
 
 			-- Compute Add mode overlay props
@@ -1577,6 +1564,11 @@ local function PolyMapGui(props: {
 		end)()),
 		Content = e(React.Fragment, nil, {
 			ModePanel = e(ModePanel, {
+				Settings = currentSettings,
+				UpdatedSettings = props.UpdatedSettings,
+				LayoutOrder = nextOrder(),
+			}),
+			SettingsPanel = showSettings and e(SettingsPanel, {
 				Settings = currentSettings,
 				UpdatedSettings = props.UpdatedSettings,
 				LayoutOrder = nextOrder(),

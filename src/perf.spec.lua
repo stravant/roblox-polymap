@@ -27,6 +27,7 @@ local function makeSettings(width: number, height: number): Settings.PolyMapSett
 		DoneTutorial = true,
 
 		Mode = "Move",
+		ShowDiscoveredVertices = false,
 		DeleteTarget = "Face",
 		DeleteRadius = 0,
 		PaintRadius = 0,

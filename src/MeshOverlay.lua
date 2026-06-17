@@ -23,9 +23,11 @@ end
 
 local SELECTED_VERTEX_RADIUS = 2.5
 local HOVER_VERTEX_RADIUS = 2.0
+local DISCOVERED_VERTEX_RADIUS = 1.2
 
 local SELECTED_VERTEX_COLOR = Color3.fromRGB(255, 200, 50)
 local HOVER_VERTEX_COLOR = Color3.fromRGB(100, 150, 255)
+local DISCOVERED_VERTEX_COLOR = Color3.fromRGB(170, 170, 170)
 local OUTLINE_COLOR = Color3.fromRGB(255, 200, 50)
 local HOVER_OUTLINE_COLOR = Color3.fromRGB(100, 150, 255)
 local MARQUEE_BORDER_COLOR = Color3.fromRGB(100, 150, 255)
@@ -72,6 +74,7 @@ local function MeshOverlay(props: {
 	AddPreviewTriangles: { { Vector3 } }?,
 	AddPreviewPolyline: { Vector3 }?,
 	GridPreviewLines: { { Vector3 } }?,
+	ShowDiscoveredVertices: boolean?,
 })
 	local mesh = props.Mesh
 	local outlineRef = React.useRef(nil :: any)
@@ -286,6 +289,24 @@ local function MeshOverlay(props: {
 				Radius = scale * HOVER_VERTEX_RADIUS,
 				ZIndexOffset = 4,
 			})
+		end
+	end
+
+	-- Render every discovered vertex in a faint, de-emphasized state (opt-in via
+	-- the global "Show discovered vertices" setting). Skip ones already drawn as
+	-- selected or hovered so those stay prominent.
+	if props.ShowDiscoveredVertices then
+		for id, vertex in mesh.getVertices() do
+			if not selectedVertices[id] and props.HoverVertexId ~= id then
+				local scale = scaleForDepth(vertex.position)
+				children["D_" .. tostring(id)] = e(VertexMarker, {
+					Position = vertex.position,
+					Color = DISCOVERED_VERTEX_COLOR,
+					Radius = scale * DISCOVERED_VERTEX_RADIUS,
+					Transparency = 0.55,
+					ZIndexOffset = 1,
+				})
+			end
 		end
 	end
 

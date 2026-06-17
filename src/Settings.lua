@@ -7,6 +7,7 @@ local PluginGuiTypes = require("./PluginGui/Types")
 
 export type PolyMapSettings = PluginGuiTypes.PluginGuiSettings & {
 	Mode: string,
+	ShowDiscoveredVertices: boolean,
 	DeleteTarget: string,
 	DeleteRadius: number,
 	PaintRadius: number,
@@ -53,6 +54,7 @@ local function loadSettings(plugin: Plugin): PolyMapSettings
 		DoneTutorial = if raw.DoneTutorial ~= nil then raw.DoneTutorial else false,
 
 		Mode = raw.Mode or "Move",
+		ShowDiscoveredVertices = if raw.ShowDiscoveredVertices ~= nil then raw.ShowDiscoveredVertices else false,
 		DeleteTarget = raw.DeleteTarget or "Face",
 		DeleteRadius = raw.DeleteRadius or 0,
 		PaintRadius = raw.PaintRadius or 0,
@@ -95,6 +97,7 @@ local function saveSettings(plugin: Plugin, settings: PolyMapSettings)
 		DoneTutorial = settings.DoneTutorial,
 
 		Mode = settings.Mode,
+		ShowDiscoveredVertices = settings.ShowDiscoveredVertices,
 		DeleteTarget = settings.DeleteTarget,
 		DeleteRadius = settings.DeleteRadius,
 		PaintRadius = settings.PaintRadius,
