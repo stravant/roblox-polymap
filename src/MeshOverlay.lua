@@ -303,7 +303,7 @@ local function MeshOverlay(props: {
 					Position = vertex.position,
 					Color = DISCOVERED_VERTEX_COLOR,
 					Radius = scale * DISCOVERED_VERTEX_RADIUS,
-					Transparency = 0.35,
+					Transparency = 0.1,
 					AlwaysOnTop = false,
 					ZIndexOffset = 1,
 				})
