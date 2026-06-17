@@ -417,6 +417,71 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("workflow: undo in the middle of a Move drag cancels it cleanly", function()
+		withSession(function(session, mesh)
+			session.GenerateGrid()
+			local vertsAfterGen = countDict(mesh.getVertices())
+
+			local pickPos: Vector3? = nil
+			for _, v in mesh.getVertices() do
+				pickPos = v.position
+				break
+			end
+			assert(pickPos)
+
+			-- A committed move (op A) leaves a waypoint to undo.
+			session.SelectVerticesNear({ pickPos })
+			session.MoveSelectedVertices(Vector3.new(0, 6, 0))
+			settle()
+			local movedPos = pickPos + Vector3.new(0, 6, 0)
+			t.expect(mesh.findVertexNear(movedPos, 0.4)).toBeTruthy()
+
+			-- Start a NEW handle drag (op B) and drive it partway, but DON'T end it.
+			session.SelectVerticesNear({ movedPos })
+			session.StartHandleDrag()
+			session.ApplyHandleDrag(Vector3.new(0, 5, 0))
+			t.expect(session.IsHandleDragging()).toBe(true)
+
+			-- Undo while the drag is still in progress.
+			pcall(function()
+				ChangeHistoryService:Undo()
+			end)
+			settle()
+
+			-- The drag was abandoned; ending it now is a harmless no-op.
+			t.expect(session.IsHandleDragging()).toBe(false)
+			session.EndHandleDrag()
+			settle()
+
+			-- The undo reverted op A (vertex back at origin) and the interrupted drag
+			-- left no corrupt or leaked geometry (vertex count back to the grid's).
+			t.expect(mesh.findVertexNear(pickPos, 0.4)).toBeTruthy()
+			t.expect(countDict(mesh.getVertices())).toBe(vertsAfterGen)
+			t.expect(countDict(mesh.getTriangles()) > 0).toBeTruthy()
+		end)
+	end)
+
+	t.test("workflow: undo while placing a grid cancels the placement", function()
+		withSession(function(session, mesh, settings)
+			settings.GridType = "Square"
+			settings.GridSpacing = 8
+			session.GenerateGrid() -- a committed op to undo
+			settle()
+
+			-- Begin interactive grid placement and drop the first corner.
+			session.StartGridPlacement()
+			session.PlaceGridClickAt(kRegionCenter)
+			t.expect(session.IsPlacingGrid()).toBe(true)
+
+			-- An undo mid-placement abandons the placement (not just the prior op).
+			pcall(function()
+				ChangeHistoryService:Undo()
+			end)
+			settle()
+			t.expect(session.IsPlacingGrid()).toBe(false)
+		end)
+	end)
+
 	t.test("workflow: generate, add a triangle, then paint, with undo and redo interspersed", function()
 		withSession(function(session, mesh, settings)
 			-- 1) Add terrain

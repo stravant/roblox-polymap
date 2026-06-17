@@ -1610,9 +1610,16 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 	end
 
-	local function endStroke()
+	local function endStroke(cancel: boolean?)
 		if mStrokeRecording then
-			ChangeHistoryService:FinishRecording(mStrokeRecording, Enum.FinishRecordingOperation.Commit)
+			local op = if cancel
+				then Enum.FinishRecordingOperation.Cancel
+				else Enum.FinishRecordingOperation.Commit
+			-- pcall: when an undo cancels a stroke mid-stride the recording may already
+			-- have been closed by the undo itself, so finishing it again would throw.
+			pcall(function()
+				ChangeHistoryService:FinishRecording(mStrokeRecording, op)
+			end)
 			mStrokeRecording = nil
 		end
 		mStrokeDragging = false
@@ -2144,10 +2151,42 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 	end
 
+	-- Abandon any transient in-progress action when an undo/redo interrupts it, so its
+	-- stale state and open recording can't corrupt the reverted mesh (e.g. continuing a
+	-- handle drag whose saved positions no longer match the world, or an endMove that
+	-- commits a recording the undo already invalidated). A half-done drag, brush stroke,
+	-- marquee, grid placement, or Add triangle is simply discarded; the user restarts it.
+	local function cancelTransientActions()
+		-- Move/Rotate handle drag: drop its open recording and drag state.
+		if mDragRecording then
+			pcall(function()
+				ChangeHistoryService:FinishRecording(mDragRecording, Enum.FinishRecordingOperation.Cancel)
+			end)
+			mDragRecording = nil
+		end
+		mIsDraggingHandle = false
+		mDragCentroid = nil
+		mInfluencedVertices = {}
+		-- Brush stroke (Delete/Paint/Relax/Flatten).
+		if mStrokeDragging or mStrokeRecording then
+			endStroke(true)
+		end
+		-- Marquee, grid placement, half-placed Add triangle, saved drag positions.
+		mMarqueeStart = nil
+		mMarqueeEnd = nil
+		if mGridPlacing then
+			clearGridPlacement()
+		end
+		clearAddState()
+		mSavedVertexPositions = {}
+	end
+
 	local function handleUndo(waypointName: string)
 		if not string.find(waypointName, "PolyMap") then
 			return
 		end
+		-- An undo mid-action interrupts it; discard the transient state first.
+		cancelTransientActions()
 		-- Save current selection positions for redo
 		table.insert(mRedoSelections, captureSelectionPositions())
 		-- The undo snapshot holds the pre-op positions, which match the reverted
@@ -2162,8 +2201,6 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 		mHoverVertexId = nil
 		mHoverEdgeKey = nil
-		mSavedVertexPositions = {}
-		clearAddState()
 		Selection:Set({})
 		changeSignal:Fire()
 	end
@@ -2172,6 +2209,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		if not string.find(waypointName, "PolyMap") then
 			return
 		end
+		cancelTransientActions()
 		-- Save current selection positions for undo
 		table.insert(mUndoSelections, captureSelectionPositions())
 		-- The redo snapshot holds the post-op positions, which match the re-applied
@@ -2186,8 +2224,6 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 		mHoverVertexId = nil
 		mHoverEdgeKey = nil
-		mSavedVertexPositions = {}
-		clearAddState()
 		Selection:Set({})
 		changeSignal:Fire()
 	end
@@ -2634,6 +2670,22 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			return true
 		end)
 		changeSignal:Fire()
+	end
+
+	-- Drive the interactive Move handle drag in phases (start / apply / end), as the
+	-- 3D dragger does live, so tests can interrupt a drag mid-stride -- e.g. fire an
+	-- undo before EndHandleDrag -- and confirm the transient state is cleaned up.
+	session.StartHandleDrag = function()
+		startMove()
+	end
+	session.ApplyHandleDrag = function(delta: Vector3)
+		applyMove(CFrame.new(delta))
+	end
+	session.EndHandleDrag = function()
+		endMove()
+	end
+	session.IsHandleDragging = function(): boolean
+		return mIsDraggingHandle
 	end
 
 	-- Add a triangle off the boundary edge nearest nearEdgeWorldPos, with its
