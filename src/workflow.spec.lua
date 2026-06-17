@@ -2036,4 +2036,42 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("Delete: a moving drag still won't punch through to a surface behind", function()
+		withSession(function(session, mesh, settings)
+			settings.Mode = "Delete"
+			settings.DeleteTarget = "Face"
+			settings.DeleteRadius = 0
+
+			local cam = workspace.CurrentCamera
+			assert(cam)
+			local vp = cam:WorldToViewportPoint(kRegionCenter)
+			local ray = cam:ViewportPointToRay(vp.X, vp.Y)
+			local O, D = ray.Origin, ray.Direction.Unit
+			local up = if math.abs(D.Y) < 0.9 then Vector3.yAxis else Vector3.xAxis
+			local u = D:Cross(up).Unit
+
+			-- A near 'front' part and a 'back' part that is both deeper AND off to the
+			-- side, so it lands at a different screen spot (clearing the movement
+			-- guard) yet sits well behind the front surface.
+			local frontCenter = O + D * 18
+			local backCenter = O + D * 42 + u * 10
+			buildFacingTri(mesh, frontCenter, D)
+			buildFacingTri(mesh, backCenter, D)
+			local fvp = cam:WorldToViewportPoint(frontCenter)
+			local bvp = cam:WorldToViewportPoint(backCenter)
+			local frontSp = Vector2.new(fvp.X, fvp.Y)
+			local backSp = Vector2.new(bvp.X, bvp.Y)
+			-- Far enough apart on screen that the movement guard alone wouldn't stop it
+			-- (its threshold is 10px).
+			t.expect((frontSp - backSp).Magnitude > 10).toBeTruthy()
+			t.expect(countDict(mesh.getTriangles())).toBe(2)
+
+			-- Drag from the front part to the back part. The cursor moves plenty, but
+			-- the back part is far behind the surface just deleted, so the depth guard
+			-- skips it -- only the front goes.
+			session.DebugDeleteStroke({ frontSp, backSp })
+			t.expect(countDict(mesh.getTriangles())).toBe(1)
+		end)
+	end)
+
 end

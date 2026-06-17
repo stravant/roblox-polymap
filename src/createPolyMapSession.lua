@@ -30,6 +30,15 @@ local kSpherecastRadius = 2
 -- under it while still letting a drag sweep across the surface.
 local kDeleteMinDragPixels = 10
 
+-- A new hit sitting more than this far BEHIND the surface being deleted (measured
+-- along that surface's normal) is treated as a separate layer -- e.g. the far wall
+-- of a cave once the near wall is gone -- and skipped. This catches what the
+-- movement guard misses: a drag that sweeps over a hole and onto the surface
+-- behind. The tolerance scales with view distance (bigger features when zoomed out)
+-- with a floor for close-up work.
+local kDeleteDepthFloor = 4
+local kDeleteDepthFraction = 0.25
+
 -- Key for the edge between two vertex ids, matching how TriangleMesh.getEdges()
 -- keys its result so an edge can be looked up by its endpoints.
 local function edgeKey(a: number, b: number): string
@@ -231,6 +240,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local mStrokeRecording: string? = nil
 	-- Screen position of the last deletion this stroke; gates the drill guard.
 	local mDeleteLastScreenPos: Vector2? = nil
+	-- Hit point + surface normal of the last deletion; gate the depth guard.
+	local mDeleteLastHitPoint: Vector3? = nil
+	local mDeleteLastHitNormal: Vector3? = nil
 	local mStrokePlanePoint: Vector3? = nil
 	local mStrokePlaneNormal: Vector3? = nil
 
@@ -1344,6 +1356,32 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 		if not worldPos then return end
 
+		-- Depth-discontinuity guard: skip a hit sitting well behind the surface we've
+		-- been deleting, along that surface's normal -- e.g. the far wall of a cave
+		-- revealed once the near wall is gone. Following one surface only steps a
+		-- little off its plane each frame; punching to the layer behind is a big jump.
+		-- (Measuring along the surface normal, not camera depth, keeps grazing-angle
+		-- drags -- which barely change the offset -- from being blocked.)
+		if result and mDeleteLastHitPoint and mDeleteLastHitNormal then
+			local camera = workspace.CurrentCamera
+			local camPos = if camera then camera.CFrame.Position else mDeleteLastHitPoint
+			local tolerance =
+				math.max(kDeleteDepthFloor, (mDeleteLastHitPoint - camPos).Magnitude * kDeleteDepthFraction)
+			local behind = -(result.Position - mDeleteLastHitPoint):Dot(mDeleteLastHitNormal)
+			if behind > tolerance then
+				return
+			end
+		end
+
+		-- Anchor a successful deletion for the guards above.
+		local function recordDelete()
+			mDeleteLastScreenPos = screenPos
+			if result then
+				mDeleteLastHitPoint = result.Position
+				mDeleteLastHitNormal = result.Normal
+			end
+		end
+
 		-- Track seed triangle for surface walking
 		if result and result.Instance:IsA("BasePart") then
 			discoverPartViewed(result.Instance :: BasePart, result.Position)
@@ -1370,7 +1408,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 							mMesh.removeTriangle(triId)
 						end
 						mSelectedVertices[vid] = nil
-						mDeleteLastScreenPos = screenPos
+						recordDelete()
 						changeSignal:Fire()
 					end
 				end
@@ -1394,7 +1432,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				mMesh.removeTriangle(removeId)
 			end
 			if #toRemove > 0 then
-				mDeleteLastScreenPos = screenPos
+				recordDelete()
 				changeSignal:Fire()
 			end
 		end
@@ -1635,6 +1673,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local function startStroke()
 		local mode = currentSettings.Mode
 		mDeleteLastScreenPos = nil
+		mDeleteLastHitPoint = nil
+		mDeleteLastHitNormal = nil
 		if mode == "Delete" then
 			pushUndoSnapshot()
 			mStrokeRecording = ChangeHistoryService:TryBeginRecording("PolyMap Delete")
@@ -1687,6 +1727,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		mStrokePlaneNormal = nil
 		mStrokeSeedTriangleId = nil
 		mDeleteLastScreenPos = nil
+		mDeleteLastHitPoint = nil
+		mDeleteLastHitNormal = nil
 		mPaintOriginalColors = {}
 		mBrushSavedPositions = {}
 		mBrushAmounts = {}
