@@ -753,7 +753,7 @@ local function InfluencePanel(props: {
 				end,
 			}),
 			Help = e(HelpGui.BasicTooltip, {
-				HelpRichText = "How far a drag reaches past the selected vertices — nearby vertices follow along, fading out over this distance.<br /><b>0</b> — only the selected vertices move.",
+				HelpRichText = "How far a drag reaches past the selected vertices — nearby vertices follow along, fading out over this distance. At zero, only the selected vertices move.",
 			}),
 		}),
 	})
@@ -1375,7 +1375,7 @@ local function BrushPanel(props: {
 				end,
 			}),
 			Help = e(HelpGui.BasicTooltip, {
-				HelpRichText = "Brush radius for painting.<br /><b>0</b> — just the triangle under the cursor.",
+				HelpRichText = "Brush radius for painting. At zero, only the triangle under the cursor is painted.",
 			}),
 		}),
 		PaintStrength = e(HelpGui.WithHelpIcon, {
@@ -1458,7 +1458,7 @@ local function DeletePanel(props: {
 				end,
 			}),
 			Help = e(HelpGui.BasicTooltip, {
-				HelpRichText = "Brush radius for deleting faces.<br /><b>0</b> — one triangle per click. (Applies to <b>Face</b> only.)",
+				HelpRichText = "Brush radius for deleting faces. At zero, each click removes a single triangle. (Applies to <b>Face</b> only.)",
 			}),
 		}),
 	})
