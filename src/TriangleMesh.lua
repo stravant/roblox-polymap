@@ -64,6 +64,7 @@ export type TriangleMesh = {
 	moveVertex: (vertexId: number, newPosition: Vector3, thickness: number, props: fillTriangle.TriangleProps?) -> (),
 	moveVertices: (moves: { [number]: Vector3 }, thickness: number, props: fillTriangle.TriangleProps?) -> (),
 	mergeVertices: (survivorId: number, mergedId: number, position: Vector3, props: fillTriangle.TriangleProps?) -> boolean,
+	mergeWedgeTriangles: (triId1: number, triId2: number, maxFootOffset: number, props: fillTriangle.TriangleProps?) -> boolean,
 	setThicknessHint: (thickness: number) -> (),
 
 	-- Queries (topology)
@@ -844,6 +845,175 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 				rebuildTriangleGeometry(tri, props)
 			end
 		end
+
+		return true
+	end
+
+	-- Fold two coplanar wedge triangles that share an edge back into one logical
+	-- triangle. After a tear nudges one wedge of a 2-wedge triangle, discovery leaves
+	-- the two wedges as separate single-wedge triangles whose shared "foot" vertex sits
+	-- just off the straight outer edge between the two outer corners. We snap that foot
+	-- exactly onto the outer edge (so the parts tile a clean triangle), then rebuild the
+	-- pair as one triangle carrying both parts and drop the now-interior foot vertex --
+	-- which also rejoins the outer edge with any neighbour across it, clearing the
+	-- T-junction. Returns false unless the two triangles share exactly one edge, face the
+	-- same way, and a shared vertex lies within `maxFootOffset` of the straight outer
+	-- edge between the outer corners.
+	local function mergeWedgeTriangles(triId1: number, triId2: number, maxFootOffset: number, props: fillTriangle.TriangleProps?): boolean
+		if triId1 == triId2 then
+			return false
+		end
+		local t1 = mTriangles[triId1]
+		local t2 = mTriangles[triId2]
+		if not t1 or not t2 then
+			return false
+		end
+		-- Same-facing only -- a back-to-back pair (the two faces of a slab) shares an
+		-- edge too but must never be folded together.
+		if t1.normal:Dot(t2.normal) < 0.99 then
+			return false
+		end
+
+		-- They must share exactly one edge (two vertices).
+		local shared: { VertexId } = {}
+		for _, vid in t1.vertices do
+			if table.find(t2.vertices, vid) then
+				table.insert(shared, vid)
+			end
+		end
+		if #shared ~= 2 then
+			return false
+		end
+		local function outerOf(tri: Triangle): VertexId?
+			for _, vid in tri.vertices do
+				if vid ~= shared[1] and vid ~= shared[2] then
+					return vid
+				end
+			end
+			return nil
+		end
+		local r1 = outerOf(t1)
+		local r2 = outerOf(t2)
+		if not r1 or not r2 then
+			return false
+		end
+		local vr1 = mVertices[r1]
+		local vr2 = mVertices[r2]
+		local vsa = mVertices[shared[1]]
+		local vsb = mVertices[shared[2]]
+		if not (vr1 and vr2 and vsa and vsb) then
+			return false
+		end
+
+		-- The foot is the shared vertex sitting between the outer corners (the cut point
+		-- to discard); the other shared vertex is the apex that stays.
+		local seg = vr2.position - vr1.position
+		local segLenSq = seg:Dot(seg)
+		if segLenSq < 1e-6 then
+			return false
+		end
+		local function project(p: Vector3): (number, number, Vector3)
+			local tt = (p - vr1.position):Dot(seg) / segLenSq
+			local proj = vr1.position + seg * tt
+			return tt, (p - proj).Magnitude, proj
+		end
+		local ta, perpA, projA = project(vsa.position)
+		local tb, perpB, projB = project(vsb.position)
+		local aInside = ta > 0.001 and ta < 0.999
+		local bInside = tb > 0.001 and tb < 0.999
+		local footId: VertexId
+		local apexId: VertexId
+		local footProj: Vector3
+		local footPerp: number
+		if aInside and (not bInside or perpA <= perpB) then
+			footId, apexId, footProj, footPerp = shared[1], shared[2], projA, perpA
+		elseif bInside then
+			footId, apexId, footProj, footPerp = shared[2], shared[1], projB, perpB
+		else
+			return false
+		end
+		if footPerp > maxFootOffset then
+			return false
+		end
+
+		-- The triangle we'd form (r1, apex, r2) must be non-degenerate.
+		local apexV = mVertices[apexId]
+		if not apexV then
+			return false
+		end
+		local area2 = (apexV.position - vr1.position):Cross(vr2.position - vr1.position).Magnitude
+		if area2 < 1e-3 then
+			return false
+		end
+
+		-- Snap the foot exactly onto the outer edge so the parts tile a clean triangle.
+		moveVertex(footId, footProj, t1.thickness, props)
+
+		-- Detach both triangles from their vertices and edges (positions now snapped).
+		local function detach(tri: Triangle)
+			for _, vid in tri.vertices do
+				local v = mVertices[vid]
+				if v then
+					local idx = table.find(v.triangles, tri.id)
+					if idx then
+						table.remove(v.triangles, idx)
+					end
+				end
+			end
+			for _, pair in triangleEdgePairs(tri.vertices) do
+				local a = mVertices[pair[1]]
+				local b = mVertices[pair[2]]
+				if a and b then
+					local eid = mEdgeLookup[hashEdge(a.position, b.position)]
+					if eid then
+						local edge = mEdges[eid]
+						if edge then
+							local idx = table.find(edge.triangles, tri.id)
+							if idx then
+								table.remove(edge.triangles, idx)
+							end
+							cleanupEdge(eid)
+						end
+					end
+				end
+			end
+		end
+		detach(t1)
+		detach(t2)
+
+		-- Move t2's parts onto t1 and drop t2.
+		local mergedParts: { BasePart } = {}
+		for _, p in t1.parts do
+			table.insert(mergedParts, p)
+		end
+		for _, p in t2.parts do
+			unlinkTriangleFromPart(t2, p)
+			linkTriangleToPart(t1, p)
+			table.insert(mergedParts, p)
+		end
+		mTriangles[triId2] = nil
+
+		-- Rebuild t1 as the merged triangle (r1, apex, r2), inheriting t1's facing.
+		local mergedNatural = computeNormal(vr1.position, apexV.position, vr2.position)
+		if mergedNatural:Dot(t1.normal) < 0 then
+			t1.vertices = { r1, r2, apexId }
+			t1.normal = -mergedNatural
+		else
+			t1.vertices = { r1, apexId, r2 }
+			t1.normal = mergedNatural
+		end
+		t1.parts = mergedParts
+
+		for _, vid in t1.vertices do
+			table.insert(mVertices[vid].triangles, triId1)
+		end
+		for _, pair in triangleEdgePairs(t1.vertices) do
+			local eid = getOrCreateEdge(pair[1], pair[2])
+			table.insert(mEdges[eid].triangles, triId1)
+		end
+
+		-- The foot is now interior to the merged outer edge: drop it.
+		cleanupVertex(footId)
 
 		return true
 	end
@@ -2162,6 +2332,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		moveVertex = moveVertex,
 		moveVertices = moveVertices,
 		mergeVertices = mergeVertices,
+		mergeWedgeTriangles = mergeWedgeTriangles,
 		setThicknessHint = setThicknessHint,
 
 		-- Topology queries

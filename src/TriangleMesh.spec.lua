@@ -1484,4 +1484,57 @@ return function(t: TestTypes.TestContext)
 
 		folder:Destroy()
 	end)
+
+	t.test("mergeWedgeTriangles folds a bent wedge pair back into one triangle", function()
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		-- Two triangles sharing edge B-F, where the shared foot F sits 0.3 studs off the
+		-- straight line A-C between the outer corners -- a wedge nudged just enough that
+		-- discovery left them as two triangles instead of one.
+		local A = Vector3.new(0, 0, 0)
+		local B = Vector3.new(3, 0, 4)
+		local C = Vector3.new(6, 0, 0)
+		local F = Vector3.new(3, 0, 0.3)
+		local hint = Vector3.new(3, 5, 0)
+		local t1 = mesh.addTriangle(A, B, F, 0.2, folder, nil, hint)
+		local t2 = mesh.addTriangle(B, C, F, 0.2, folder, nil, hint)
+		assert(t1 and t2)
+
+		local function countDict(d: any): number
+			local n = 0
+			for _ in d do
+				n += 1
+			end
+			return n
+		end
+		local function vidNear(pos: Vector3): number?
+			for id, v in mesh.getVertices() do
+				if (v.position - pos).Magnitude < 0.05 then
+					return id
+				end
+			end
+			return nil
+		end
+
+		-- Bent pair: 4 vertices, 2 triangles, 5 edges, F shared by both.
+		t.expect(countDict(mesh.getVertices())).toBe(4)
+		t.expect(countDict(mesh.getTriangles())).toBe(2)
+		t.expect(countDict(mesh.getEdges())).toBe(5)
+		local footId = vidNear(F)
+		assert(footId)
+		t.expect(#mesh.getVertex(footId).triangles).toBe(2)
+
+		-- Fold them: snap F onto A-C and merge into one triangle (A, B, C), dropping F.
+		t.expect(mesh.mergeWedgeTriangles(t1, t2, 0.5, nil)).toBe(true)
+
+		t.expect(countDict(mesh.getVertices())).toBe(3)
+		t.expect(countDict(mesh.getTriangles())).toBe(1)
+		t.expect(countDict(mesh.getEdges())).toBe(3)
+		t.expect(vidNear(F)).toBe(nil) -- foot dropped
+		t.expect(vidNear(Vector3.new(3, 0, 0))).toBe(nil) -- not left at the snapped spot either
+
+		folder:Destroy()
+	end)
 end
