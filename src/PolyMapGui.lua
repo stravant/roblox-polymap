@@ -50,6 +50,36 @@ local kColorPalette: { { number } } = (function()
 	return palette
 end)()
 
+-- The classic Studio BrickColor picker: BrickColor.palette(0..126) laid out as a
+-- hexagonal honeycomb (row widths 7..13..7 = 127 cells), plus a bottom strip of the
+-- neutral greys. Extracted cell-for-cell from the Studio picker, then driven live off
+-- BrickColor.palette so the colours always match the engine's.
+local kBrickHexRows: { { { idx: number, color: { number } } } } = (function()
+	local widths = { 7, 8, 9, 10, 11, 12, 13, 12, 11, 10, 9, 8, 7 }
+	local rows = {}
+	local idx = 0
+	for _, w in widths do
+		local row = {}
+		for _ = 1, w do
+			local col = BrickColor.palette(idx).Color
+			table.insert(row, { idx = idx, color = { col.R, col.G, col.B } })
+			idx += 1
+		end
+		table.insert(rows, row)
+	end
+	return rows
+end)()
+
+local kBrickStrip: { { idx: number, color: { number } } } = (function()
+	local indices = { 127, 122, 123, 108, 49, 97, 3, 10, 29, 50, 75, 86 }
+	local strip = {}
+	for _, i in indices do
+		local col = BrickColor.palette(i).Color
+		table.insert(strip, { idx = i, color = { col.R, col.G, col.B } })
+	end
+	return strip
+end)()
+
 local function createNextOrder()
 	local order = 0
 	return function()
@@ -759,38 +789,207 @@ local function InfluencePanel(props: {
 	})
 end
 
-local function ColorPalettePopup(props: {
-	Current: { number },
-	OnSelect: (color: { number }) -> (),
-})
-	local paletteChildren: { [string]: React.ReactElement<any, any> } = {
+local kSelectRing = Color3.fromRGB(255, 170, 0)
+
+local function colorToHex(c: { number }): string
+	return string.format("%02X%02X%02X", math.floor(c[1] * 255 + 0.5), math.floor(c[2] * 255 + 0.5), math.floor(c[3] * 255 + 0.5))
+end
+local function hexToColor(s: string): { number }?
+	local clean = (s:gsub("[#%s]", ""))
+	if #clean ~= 6 or clean:match("[^0-9a-fA-F]") then
+		return nil
+	end
+	return {
+		(tonumber(clean:sub(1, 2), 16) or 0) / 255,
+		(tonumber(clean:sub(3, 4), 16) or 0) / 255,
+		(tonumber(clean:sub(5, 6), 16) or 0) / 255,
+	}
+end
+
+-- One colour cell. In a UIGridLayout the grid overrides the size; in a UIListLayout
+-- (the honeycomb rows) the 15px size is kept.
+local function colorCell(color: { number }, isSel: boolean, order: number, onClick: () -> ()): React.ReactElement<any, any>
+	return e("TextButton", {
+		Size = UDim2.fromOffset(15, 15),
+		BackgroundColor3 = Color3.new(color[1], color[2], color[3]),
+		Text = "",
+		AutoButtonColor = false,
+		LayoutOrder = order,
+		ZIndex = 12,
+		[React.Event.MouseButton1Click] = onClick,
+	}, {
+		Corner = e("UICorner", { CornerRadius = UDim.new(0, 3) }),
+		Ring = isSel and e("UIStroke", {
+			Color = kSelectRing,
+			Thickness = 2,
+			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+			ZIndex = 13,
+		}),
+	})
+end
+
+-- A single centered honeycomb row of cells; consecutive rows differ in count, so
+-- centering offsets them by half a cell into the classic honeycomb.
+local function honeyRow(cells: { { idx: number, color: { number } } }, order: number, current: { number }, onSelect: (color: { number }, close: boolean) -> ()): React.ReactElement<any, any>
+	local kids: { [string]: any } = {
+		Layout = e("UIListLayout", {
+			FillDirection = Enum.FillDirection.Horizontal,
+			HorizontalAlignment = Enum.HorizontalAlignment.Center,
+			VerticalAlignment = Enum.VerticalAlignment.Center,
+			Padding = UDim.new(0, 1),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	}
+	for c, cell in cells do
+		kids["C" .. c] = colorCell(cell.color, colorsMatch(current, cell.color), c, function()
+			onSelect(cell.color, true)
+		end)
+	end
+	return e("Frame", {
+		Size = UDim2.new(1, 0, 0, 15),
+		BackgroundTransparency = 1,
+		LayoutOrder = order,
+		ZIndex = 12,
+	}, kids)
+end
+
+local function BrickColorTab(current: { number }, onSelect: (color: { number }, close: boolean) -> ()): React.ReactElement<any, any>
+	local kids: { [string]: any } = {
+		Layout = e("UIListLayout", {
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			Padding = UDim.new(0, 1),
+			HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		}),
+	}
+	for r, row in kBrickHexRows do
+		kids["R" .. r] = honeyRow(row, r, current, onSelect)
+	end
+	kids["Gap"] = e("Frame", { Size = UDim2.new(1, 0, 0, 6), BackgroundTransparency = 1, LayoutOrder = 50 })
+	kids["Strip"] = honeyRow(kBrickStrip, 51, current, onSelect)
+	return e("Frame", {
+		Size = UDim2.fromScale(1, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+		ZIndex = 12,
+	}, kids)
+end
+
+local function SwatchesTab(current: { number }, onSelect: (color: { number }, close: boolean) -> ()): React.ReactElement<any, any>
+	local kids: { [string]: any } = {
 		GridLayout = e("UIGridLayout", {
 			CellSize = UDim2.fromOffset(16, 16),
 			CellPadding = UDim2.fromOffset(2, 2),
 			FillDirectionMaxCells = 10,
+			HorizontalAlignment = Enum.HorizontalAlignment.Center,
 			SortOrder = Enum.SortOrder.LayoutOrder,
 		}),
 	}
 	for i, swatch in kColorPalette do
-		local isSelected = colorsMatch(props.Current, swatch)
-		paletteChildren[`Swatch{i}`] = e("TextButton", {
-			Text = "",
-			BackgroundColor3 = Color3.new(swatch[1], swatch[2], swatch[3]),
-			LayoutOrder = i,
+		kids["S" .. i] = colorCell(swatch, colorsMatch(current, swatch), i, function()
+			onSelect(swatch, true)
+		end)
+	end
+	return e("Frame", {
+		Size = UDim2.fromScale(1, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+		ZIndex = 12,
+	}, kids)
+end
+
+local function CustomTab(color: { number }, onChange: (color: { number }) -> ()): React.ReactElement<any, any>
+	local function setChannel(i: number, v255: number)
+		local nc = { color[1], color[2], color[3] }
+		nc[i] = math.clamp(v255 / 255, 0, 1)
+		onChange(nc)
+	end
+	return e("Frame", {
+		Size = UDim2.fromScale(1, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+		ZIndex = 12,
+	}, {
+		Layout = e("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 6) }),
+		Preview = e("Frame", {
+			Size = UDim2.new(1, 0, 0, 26),
+			BackgroundColor3 = Color3.new(color[1], color[2], color[3]),
+			LayoutOrder = 1,
 			ZIndex = 12,
-			[React.Event.Activated] = function()
-				props.OnSelect({ swatch[1], swatch[2], swatch[3] })
-			end,
+		}, { Corner = e("UICorner", { CornerRadius = UDim.new(0, 4) }) }),
+		HexRow = e("Frame", {
+			Size = UDim2.new(1, 0, 0, 22),
+			BackgroundTransparency = 1,
+			LayoutOrder = 2,
+			ZIndex = 12,
 		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 3),
-			}),
-			Border = isSelected and e("UIStroke", {
-				Color = Colors.WHITE,
-				Thickness = 2,
-				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-			}),
-		})
+			Layout = e("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, VerticalAlignment = Enum.VerticalAlignment.Center, Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder }),
+			Label = e("TextLabel", { Size = UDim2.fromOffset(28, 22), BackgroundTransparency = 1, Text = "Hex", TextColor3 = Colors.WHITE, Font = Enum.Font.SourceSans, TextSize = 16, TextXAlignment = Enum.TextXAlignment.Left, LayoutOrder = 1, ZIndex = 12 }),
+			Box = e("TextBox", {
+				Size = UDim2.new(1, -32, 1, 0),
+				BackgroundColor3 = Colors.GREY,
+				BorderSizePixel = 0,
+				Text = colorToHex(color),
+				PlaceholderText = "RRGGBB",
+				Font = Enum.Font.SourceSans,
+				TextSize = 16,
+				TextColor3 = Colors.WHITE,
+				ClearTextOnFocus = false,
+				LayoutOrder = 2,
+				ZIndex = 12,
+				[React.Event.FocusLost] = function(rbx: TextBox)
+					local parsed = hexToColor(rbx.Text)
+					if parsed then
+						onChange(parsed)
+					else
+						rbx.Text = colorToHex(color)
+					end
+				end,
+			}, { Corner = e("UICorner", { CornerRadius = UDim.new(0, 4) }), Padding = e("UIPadding", { PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6) }) }),
+		}),
+		R = e(Slider, { Label = "R", Value = math.floor(color[1] * 255 + 0.5), Min = 0, Max = 255, Step = 1, LayoutOrder = 3, ValueChanged = function(v: number) setChannel(1, v) end }),
+		G = e(Slider, { Label = "G", Value = math.floor(color[2] * 255 + 0.5), Min = 0, Max = 255, Step = 1, LayoutOrder = 4, ValueChanged = function(v: number) setChannel(2, v) end }),
+		B = e(Slider, { Label = "B", Value = math.floor(color[3] * 255 + 0.5), Min = 0, Max = 255, Step = 1, LayoutOrder = 5, ValueChanged = function(v: number) setChannel(3, v) end }),
+	})
+end
+
+local function ColorPickerPopup(props: {
+	Current: { number },
+	OnSelect: (color: { number }, close: boolean) -> (),
+})
+	local tab, setTab = React.useState("BrickColor")
+	local customColor, setCustomColor = React.useState(props.Current)
+
+	local function customChange(c: { number })
+		setCustomColor(c)
+		props.OnSelect(c, false)
+	end
+
+	local body: React.ReactElement<any, any>
+	if tab == "Swatches" then
+		body = SwatchesTab(props.Current, props.OnSelect)
+	elseif tab == "Custom" then
+		body = CustomTab(customColor, customChange)
+	else
+		body = BrickColorTab(props.Current, props.OnSelect)
+	end
+
+	local function tabBtn(name: string, order: number)
+		local active = tab == name
+		return e("TextButton", {
+			Size = UDim2.new(1 / 3, -2, 1, 0),
+			BackgroundColor3 = if active then Colors.ACTION_BLUE else Colors.GREY,
+			BackgroundTransparency = if active then 0 else 0.35,
+			Text = name,
+			Font = if active then Enum.Font.SourceSansBold else Enum.Font.SourceSans,
+			TextSize = 14,
+			TextColor3 = Colors.WHITE,
+			AutoButtonColor = not active,
+			LayoutOrder = order,
+			ZIndex = 12,
+			[React.Event.MouseButton1Click] = function()
+				setTab(name)
+			end,
+		}, { Corner = e("UICorner", { CornerRadius = UDim.new(0, 4) }) })
 	end
 
 	return e("Frame", {
@@ -800,25 +999,28 @@ local function ColorPalettePopup(props: {
 		BorderSizePixel = 0,
 		ZIndex = 12,
 	}, {
-		Corner = e("UICorner", {
-			CornerRadius = UDim.new(0, 4),
+		Corner = e("UICorner", { CornerRadius = UDim.new(0, 4) }),
+		Stroke = e("UIStroke", { Color = Colors.OFFWHITE, Thickness = 1 }),
+		Padding = e("UIPadding", { PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4), PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 4) }),
+		Layout = e("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 6) }),
+		TabBar = e("Frame", {
+			Size = UDim2.new(1, 0, 0, 22),
+			BackgroundTransparency = 1,
+			LayoutOrder = 1,
+			ZIndex = 12,
+		}, {
+			Layout = e("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder }),
+			BrickColor = tabBtn("BrickColor", 1),
+			Swatches = tabBtn("Swatches", 2),
+			Custom = tabBtn("Custom", 3),
 		}),
-		Stroke = e("UIStroke", {
-			Color = Colors.OFFWHITE,
-			Thickness = 1,
-		}),
-		Padding = e("UIPadding", {
-			PaddingTop = UDim.new(0, 4),
-			PaddingBottom = UDim.new(0, 4),
-			PaddingLeft = UDim.new(0, 4),
-			PaddingRight = UDim.new(0, 4),
-		}),
-		Content = e("Frame", {
+		Body = e("Frame", {
 			Size = UDim2.fromScale(1, 0),
 			AutomaticSize = Enum.AutomaticSize.Y,
 			BackgroundTransparency = 1,
+			LayoutOrder = 2,
 			ZIndex = 12,
-		}, paletteChildren),
+		}, { Content = body }),
 	})
 end
 
@@ -855,19 +1057,19 @@ local function ColorPanel(props: {
 		props.UpdatedSettings()
 	end
 
-	local function selectColorFromPicker(color: { number })
-		props.Settings.PaintColor = color
-		updateRecentColors(props.Settings, color)
-		props.UpdatedSettings()
-	end
-
 	local function openColorPalette()
 		if colorTriggerRef.current then
-			overlayContext.SetOverlay(colorTriggerRef.current, e(ColorPalettePopup, {
+			overlayContext.SetOverlay(colorTriggerRef.current, e(ColorPickerPopup, {
 				Current = c,
-				OnSelect = function(color: { number })
-					overlayContext.SetOverlay(nil)
-					selectColorFromPicker(color)
+				OnSelect = function(color: { number }, close: boolean)
+					-- BrickColor/Swatches commit (close=true); the Custom tab live-updates
+					-- as you drag (close=false) and stays open until you click away.
+					props.Settings.PaintColor = color
+					if close then
+						updateRecentColors(props.Settings, color)
+						overlayContext.SetOverlay(nil)
+					end
+					props.UpdatedSettings()
 				end,
 			}))
 		end
