@@ -169,7 +169,15 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		local hash = hashVertex(position)
 		local existing = mSpatialHash[hash]
 		if existing then
-			return existing
+			if mVertices[existing] then
+				return existing
+			end
+			-- Stale entry: a re-pointed neighbour cell (see the dedup below) can outlive the
+			-- vertex it referenced, because cleanupVertex only clears the vertex's own cell.
+			-- A full rediscover wipes the whole hash so this never surfaces, but a local
+			-- re-discovery (undo) leaves the rest of the hash intact. Drop it and fall
+			-- through rather than handing back a removed vertex id.
+			mSpatialHash[hash] = nil
 		end
 		-- A position that should be the same vertex can land in a neighbouring
 		-- hash cell when it sits on a cell boundary (two wedges meeting at an edge
@@ -215,7 +223,12 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		local hash = hashVertex(position)
 		local existing = mSpatialHash[hash]
 		if existing then
-			return existing
+			if mVertices[existing] then
+				return existing
+			end
+			-- Drop a stale re-pointed cell rather than reporting a removed vertex (see
+			-- getOrCreateVertex for why these can linger after a local re-discovery).
+			mSpatialHash[hash] = nil
 		end
 		for dx = -1, 1 do
 			for dy = -1, 1 do

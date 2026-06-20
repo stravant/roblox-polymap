@@ -1724,4 +1724,30 @@ return function(t: TestTypes.TestContext)
 
 		t.expect((tCrowded - tBare) < 0.05).toBeTruthy()
 	end)
+
+	t.test("re-adding a vertex survives a stale re-pointed spatial-hash cell", function()
+		-- Repro for an undo (local re-discovery) crash: a corner ~0.008 from an existing
+		-- vertex dedups into it but hashes to a neighbouring cell, which gets re-pointed at
+		-- the shared vertex. Removing the vertex clears only its OWN cell, so the re-pointed
+		-- cell is left pointing at a removed vertex. A full rediscover wipes the whole hash;
+		-- a local one doesn't, so getOrCreateVertex must not hand back the stale id.
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		local t1 = mesh.addTriangle(Vector3.new(0, 0, 0), Vector3.new(4, 0, 0), Vector3.new(0, 0, 4), 0.2, folder, nil, Vector3.new(0, 1, 0))
+		-- (0.008, 0, 0) is within the 0.02 merge tolerance of the origin but floor()s into
+		-- the next 0.01 hash cell, so it re-points that cell at the origin vertex.
+		local t2 = mesh.addTriangle(Vector3.new(0.008, 0, 0), Vector3.new(0, 0, 4), Vector3.new(-4, 0, 0), 0.2, folder, nil, Vector3.new(0, 1, 0))
+		assert(t1 and t2)
+
+		mesh.removeTriangle(t1)
+		mesh.removeTriangle(t2)
+
+		-- Without the stale-entry guard this throws "attempt to index nil with 'triangles'".
+		local t3 = mesh.addTriangle(Vector3.new(0.008, 0, 0), Vector3.new(4, 0, 0), Vector3.new(0, 0, 4), 0.2, folder, nil, Vector3.new(0, 1, 0))
+		t.expect(t3).toBeTruthy()
+
+		folder:Destroy()
+	end)
 end
