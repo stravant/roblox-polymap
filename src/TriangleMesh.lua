@@ -1296,55 +1296,106 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 	-- but, with split wedges and incremental discovery, can disagree between
 	-- neighbours; this pass reconciles them. The first triangle of each component
 	-- (oriented toward the clicked side) sets that component's global direction.
-	local function orientConsistently()
+	-- restrictTriangles limits re-orientation to those triangles, anchoring on their
+	-- already-correct neighbours just outside the set (an undo's region re-discovery), so it
+	-- costs O(region) not O(mesh). nil re-orients every triangle (a full rediscover).
+	local function orientConsistently(restrictTriangles: { [TriangleId]: boolean }?)
 		local visited = {} :: {[TriangleId]: boolean}
-		for startId in mTriangles do
-			if visited[startId] then
-				continue
+		local queue = {} :: { TriangleId }
+		local qh = 1
+
+		-- Flip a queued triangle's not-yet-visited, in-scope neighbours to match it. Anchors
+		-- (already-visited triangles outside the restricted set) are read but never flipped.
+		local function process(tid: TriangleId)
+			local tri = mTriangles[tid]
+			if not tri then
+				return
 			end
-			visited[startId] = true
-			local queue = { startId }
-			local qh = 1
+			local verts = tri.vertices
+			for i = 1, 3 do
+				local j = if i == 3 then 1 else i + 1
+				local va, vb = verts[i], verts[j]
+				local pva, pvb = mVertices[va], mVertices[vb]
+				if not (pva and pvb) then
+					continue
+				end
+				local eid = mEdgeLookup[hashEdge(pva.position, pvb.position)]
+				local edge = if eid then mEdges[eid] else nil
+				if not edge then
+					continue
+				end
+				for _, ntid in edge.triangles do
+					local nt = mTriangles[ntid]
+					if ntid ~= tid and nt and not visited[ntid] and (restrictTriangles == nil or restrictTriangles[ntid]) then
+						visited[ntid] = true
+						-- Inconsistent if the neighbour also traverses va -> vb.
+						local sameDir = false
+						for k = 1, 3 do
+							local l = if k == 3 then 1 else k + 1
+							if nt.vertices[k] == va and nt.vertices[l] == vb then
+								sameDir = true
+								break
+							end
+						end
+						if sameDir then
+							nt.vertices = { nt.vertices[1], nt.vertices[3], nt.vertices[2] }
+							nt.normal = -nt.normal
+						end
+						table.insert(queue, ntid)
+					end
+				end
+			end
+		end
+
+		local function drain()
 			while qh <= #queue do
 				local tid = queue[qh]
 				qh += 1
-				local tri = mTriangles[tid]
-				if not tri then
-					continue
-				end
-				local verts = tri.vertices
-				for i = 1, 3 do
-					local j = if i == 3 then 1 else i + 1
-					local va, vb = verts[i], verts[j]
-					local pva, pvb = mVertices[va], mVertices[vb]
-					if not (pva and pvb) then
-						continue
-					end
-					local eid = mEdgeLookup[hashEdge(pva.position, pvb.position)]
-					local edge = if eid then mEdges[eid] else nil
-					if not edge then
-						continue
-					end
-					for _, ntid in edge.triangles do
-						local nt = mTriangles[ntid]
-						if ntid ~= tid and nt and not visited[ntid] then
-							visited[ntid] = true
-							-- Inconsistent if the neighbour also traverses va -> vb.
-							local sameDir = false
-							for k = 1, 3 do
-								local l = if k == 3 then 1 else k + 1
-								if nt.vertices[k] == va and nt.vertices[l] == vb then
-									sameDir = true
-									break
+				process(tid)
+			end
+		end
+
+		if restrictTriangles then
+			-- Seed from anchors: oriented neighbours just outside the restricted set, so the
+			-- restricted triangles line up with the rest of the mesh.
+			for triId in restrictTriangles do
+				local tri = mTriangles[triId]
+				if tri then
+					for i = 1, 3 do
+						local j = if i == 3 then 1 else i + 1
+						local pva = mVertices[tri.vertices[i]]
+						local pvb = mVertices[tri.vertices[j]]
+						if pva and pvb then
+							local eid = mEdgeLookup[hashEdge(pva.position, pvb.position)]
+							local edge = if eid then mEdges[eid] else nil
+							if edge then
+								for _, ntid in edge.triangles do
+									if not restrictTriangles[ntid] and not visited[ntid] and mTriangles[ntid] then
+										visited[ntid] = true -- anchor: trusted, never flipped
+										table.insert(queue, ntid)
+									end
 								end
 							end
-							if sameDir then
-								nt.vertices = { nt.vertices[1], nt.vertices[3], nt.vertices[2] }
-								nt.normal = -nt.normal
-							end
-							table.insert(queue, ntid)
 						end
 					end
+				end
+			end
+			drain()
+			-- Restricted triangles with no anchor (an isolated new component): orient each
+			-- such component from an arbitrary member, as for a fresh mesh.
+			for triId in restrictTriangles do
+				if not visited[triId] and mTriangles[triId] then
+					visited[triId] = true
+					table.insert(queue, triId)
+					drain()
+				end
+			end
+		else
+			for startId in mTriangles do
+				if not visited[startId] then
+					visited[startId] = true
+					table.insert(queue, startId)
+					drain()
 				end
 			end
 		end
@@ -1942,7 +1993,12 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 	-- interior edges shared by exactly two coplanar single-part triangles; if one
 	-- of the shared-edge endpoints sits collinear strictly between the two far
 	-- vertices (the foot on the original base), the pair is a split and is fused.
-	local function coalesceWedgePairs()
+	-- restrictTriangles limits the scan to those triangles' edges (a local coalesce, e.g.
+	-- an undo's region re-discovery); nil scans the whole mesh (a full rediscover). Edges
+	-- are processed in a deterministic geometry order so a local coalesce and a full one --
+	-- which would otherwise see edges in different hash orders -- pick the SAME merges; a
+	-- mismatch there is what let a local rebuild drift a triangle from a fresh rediscovery.
+	local function coalesceWedgePairs(restrictTriangles: { [TriangleId]: boolean }?)
 		local function collinearBetween(p: Vector3, a: Vector3, b: Vector3): boolean
 			local d = b - a
 			local dl = d.Magnitude
@@ -1957,11 +2013,62 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			return s > 0.001 and s < 0.999
 		end
 
-		local edgeIds: { EdgeId } = {}
-		for eid in mEdges do
-			table.insert(edgeIds, eid)
+		local function lexLess(a: Vector3, b: Vector3): boolean
+			if a.X ~= b.X then
+				return a.X < b.X
+			end
+			if a.Y ~= b.Y then
+				return a.Y < b.Y
+			end
+			return a.Z < b.Z
 		end
-		for _, eid in edgeIds do
+		type Cand = { eid: EdgeId, lo: Vector3, hi: Vector3 }
+		local cands: { Cand } = {}
+		local function addCand(eid: EdgeId)
+			local edge = mEdges[eid]
+			if not edge then
+				return
+			end
+			local a, b = mVertices[edge.v1], mVertices[edge.v2]
+			if not (a and b) then
+				return
+			end
+			if lexLess(b.position, a.position) then
+				table.insert(cands, { eid = eid, lo = b.position, hi = a.position })
+			else
+				table.insert(cands, { eid = eid, lo = a.position, hi = b.position })
+			end
+		end
+		if restrictTriangles then
+			local seen: { [EdgeId]: boolean } = {}
+			for triId in restrictTriangles do
+				local tri = mTriangles[triId]
+				if tri then
+					for _, pair in triangleEdgePairs(tri.vertices) do
+						local pva, pvb = mVertices[pair[1]], mVertices[pair[2]]
+						if pva and pvb then
+							local eid = mEdgeLookup[hashEdge(pva.position, pvb.position)]
+							if eid and not seen[eid] then
+								seen[eid] = true
+								addCand(eid)
+							end
+						end
+					end
+				end
+			end
+		else
+			for eid in mEdges do
+				addCand(eid)
+			end
+		end
+		table.sort(cands, function(m: Cand, n: Cand): boolean
+			if m.lo ~= n.lo then
+				return lexLess(m.lo, n.lo)
+			end
+			return lexLess(m.hi, n.hi)
+		end)
+		for _, cand in cands do
+			local eid = cand.eid
 			local edge = mEdges[eid]
 			if not edge or #edge.triangles ~= 2 then
 				continue
@@ -2401,8 +2508,12 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			end
 		end
 
-		coalesceWedgePairs()
-		orientConsistently()
+		-- Only normalise what this call discovered. For a full rediscover that's everything;
+		-- for a local region re-discovery (undo, brush) it keeps the cost O(region), and --
+		-- combined with the deterministic edge order -- makes a local rebuild coalesce
+		-- identically to a full one.
+		coalesceWedgePairs(discovered)
+		orientConsistently(discovered)
 		return result
 	end
 
