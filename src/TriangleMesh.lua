@@ -138,6 +138,19 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 	-- Lookup edges by verts
 	local mEdgeLookup = {} :: {[vector]: EdgeId}
 
+	-- Adjacency: the set of edges incident to each vertex. Maintained alongside mEdges
+	-- (every edge is created in getOrCreateEdge and removed in cleanupEdge), so moveVertex
+	-- can re-key just one vertex's edges in O(degree) instead of scanning all of them.
+	local mVertexEdges = {} :: {[VertexId]: {[EdgeId]: boolean}}
+	local function addVertexEdge(vertexId: VertexId, edgeId: EdgeId)
+		local set = mVertexEdges[vertexId]
+		if not set then
+			set = {}
+			mVertexEdges[vertexId] = set
+		end
+		set[edgeId] = true
+	end
+
 	-- Fired with a VertexId whenever that vertex is added, moved, or removed. The
 	-- overlay's discovered-vertex display listens and updates just that one marker, so
 	-- discovering or editing a few vertices never costs a rebuild of all of them.
@@ -237,6 +250,8 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		}
 		mEdges[id] = edge
 		mEdgeLookup[hash] = id
+		addVertexEdge(v1Id, id)
+		addVertexEdge(v2Id, id)
 		return id
 	end
 
@@ -302,6 +317,14 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			local hash = hashEdge(mVertices[edge.v1].position, mVertices[edge.v2].position)
 			mEdgeLookup[hash] = nil
 			mEdges[edgeId] = nil
+			local e1 = mVertexEdges[edge.v1]
+			if e1 then
+				e1[edgeId] = nil
+			end
+			local e2 = mVertexEdges[edge.v2]
+			if e2 then
+				e2[edgeId] = nil
+			end
 		end
 	end
 
@@ -312,6 +335,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			local hash = hashVertex(vertex.position)
 			mSpatialHash[hash] = nil
 			mVertices[vertexId] = nil
+			mVertexEdges[vertexId] = nil
 			mVertexChanged:Fire(vertexId)
 		end
 	end
@@ -683,32 +707,40 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			return
 		end
 
-		-- Update spatial hash
-		local oldHash = hashVertex(vertex.position)
-		mSpatialHash[oldHash] = nil
-		vertex.position = newPosition
-		local newHash = hashVertex(newPosition)
-		mSpatialHash[newHash] = vertexId
-
-		-- Rebuild edge lookup for affected edges
-		-- First collect all edge ids that touch this vertex
-		local affectedEdges = {} :: {EdgeId}
-		for edgeHash, edgeId in mEdgeLookup do
-			local edge = mEdges[edgeId]
-			if edge and (edge.v1 == vertexId or edge.v2 == vertexId) then
-				table.insert(affectedEdges, edgeId)
-				mEdgeLookup[edgeHash] = nil
+		-- This vertex's incident edges have position-keyed entries in mEdgeLookup that go
+		-- stale when it moves. Drop them while it's still at the old position (so the hashes
+		-- still match), move it, then re-insert at the new hashes. Walking just this vertex's
+		-- edges via the adjacency index keeps it O(degree) rather than a scan of every edge
+		-- in the mesh -- which made moving slow once a lot of unrelated geometry existed.
+		local incidentEdges = mVertexEdges[vertexId]
+		if incidentEdges then
+			for edgeId in incidentEdges do
+				local edge = mEdges[edgeId]
+				if edge then
+					local v1 = mVertices[edge.v1]
+					local v2 = mVertices[edge.v2]
+					if v1 and v2 then
+						mEdgeLookup[hashEdge(v1.position, v2.position)] = nil
+					end
+				end
 			end
 		end
-		-- Re-insert with updated positions
-		for _, edgeId in affectedEdges do
-			local edge = mEdges[edgeId]
-			if edge then
-				local v1 = mVertices[edge.v1]
-				local v2 = mVertices[edge.v2]
-				if v1 and v2 then
-					local newEdgeHash = hashEdge(v1.position, v2.position)
-					mEdgeLookup[newEdgeHash] = edgeId
+
+		-- Move the vertex (and its spatial-hash entry).
+		mSpatialHash[hashVertex(vertex.position)] = nil
+		vertex.position = newPosition
+		mSpatialHash[hashVertex(newPosition)] = vertexId
+
+		-- Re-insert the incident edges at their new positions.
+		if incidentEdges then
+			for edgeId in incidentEdges do
+				local edge = mEdges[edgeId]
+				if edge then
+					local v1 = mVertices[edge.v1]
+					local v2 = mVertices[edge.v2]
+					if v1 and v2 then
+						mEdgeLookup[hashEdge(v1.position, v2.position)] = edgeId
+					end
 				end
 			end
 		end
@@ -2322,6 +2354,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		table.clear(mPartToTriangles)
 		table.clear(mSpatialHash)
 		table.clear(mEdgeLookup)
+		table.clear(mVertexEdges)
 		mNextVertexId = 1
 		mNextTriangleId = 1
 		mNextEdgeId = 1

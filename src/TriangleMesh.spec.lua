@@ -1571,4 +1571,97 @@ return function(t: TestTypes.TestContext)
 		conn:Disconnect()
 		folder:Destroy()
 	end)
+
+	t.test("moveVertex re-keys the edge lookup so a moved edge can still be shared", function()
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		-- One triangle, then move its (0,0,4) corner up to (0,3,4).
+		local t1 = mesh.addTriangle(Vector3.new(0, 0, 0), Vector3.new(4, 0, 0), Vector3.new(0, 0, 4), 0.2, folder, nil, Vector3.new(0, 1, 0))
+		assert(t1)
+		local cId: number? = nil
+		for id, v in mesh.getVertices() do
+			if (v.position - Vector3.new(0, 0, 4)).Magnitude < 0.01 then
+				cId = id
+				break
+			end
+		end
+		assert(cId)
+		mesh.moveVertex(cId, Vector3.new(0, 3, 4), 0.2, nil)
+
+		-- Attach a second triangle along the MOVED edge (4,0,0)-(0,3,4). It must reuse that
+		-- edge -- which only works if moveVertex re-keyed the lookup to the new position --
+		-- rather than minting a parallel one, so the shared edge carries both triangles.
+		local t2 = mesh.addTriangle(Vector3.new(4, 0, 0), Vector3.new(0, 3, 4), Vector3.new(4, 0, 4), 0.2, folder, nil, Vector3.new(0, 1, 0))
+		assert(t2)
+
+		local sharedTris = 0
+		for _, edge in mesh.getEdges() do
+			local pa = mesh.getVertex(edge.v1)
+			local pb = mesh.getVertex(edge.v2)
+			if pa and pb then
+				local hit = ((pa.position - Vector3.new(4, 0, 0)).Magnitude < 0.01 and (pb.position - Vector3.new(0, 3, 4)).Magnitude < 0.01)
+					or ((pb.position - Vector3.new(4, 0, 0)).Magnitude < 0.01 and (pa.position - Vector3.new(0, 3, 4)).Magnitude < 0.01)
+				if hit then
+					sharedTris = #edge.triangles
+				end
+			end
+		end
+		t.expect(sharedTris).toBe(2)
+
+		folder:Destroy()
+	end)
+
+	t.test("moveVertex cost is independent of unrelated geometry", function()
+		-- Build a single connected triangle, optionally surrounded by many UNRELATED
+		-- triangles far away. The connected triangle rebuilt on each move is identical
+		-- either way, so timing the SAME number of moves on each and taking the DIFFERENCE
+		-- cancels the (identical) geometry-rebuild cost and leaves only the edge bookkeeping.
+		-- With moveVertex O(degree) the unrelated triangles add nothing; the old
+		-- O(all-edges) scan made each move scale with their count.
+		local function build(unrelated: number): (createTriangleMesh.TriangleMesh, number, Folder)
+			local folder = Instance.new("Folder")
+			folder.Parent = workspace
+			local mesh = createTriangleMesh()
+			mesh.addTriangle(Vector3.new(0, 0, 0), Vector3.new(4, 0, 0), Vector3.new(0, 0, 4), 0.2, folder, nil, Vector3.new(0, 1, 0))
+			for i = 1, unrelated do
+				local x = 1000 + i * 8
+				mesh.addTriangle(Vector3.new(x, 0, 0), Vector3.new(x + 4, 0, 0), Vector3.new(x, 0, 4), 0.2, folder, nil, Vector3.new(0, 1, 0))
+			end
+			local vid: number? = nil
+			for id, v in mesh.getVertices() do
+				if (v.position - Vector3.new(0, 0, 0)).Magnitude < 0.01 then
+					vid = id
+					break
+				end
+			end
+			assert(vid)
+			return mesh, vid, folder
+		end
+
+		local function timeMoves(mesh: createTriangleMesh.TriangleMesh, vid: number, iters: number): number
+			local base = (mesh.getVertex(vid) :: any).position
+			local t0 = os.clock()
+			for i = 1, iters do
+				mesh.moveVertex(vid, base + Vector3.new(0, (i % 4) * 0.01, 0), 0.2, nil)
+			end
+			return os.clock() - t0
+		end
+
+		local ITERS = 2000
+		local bare, bareVid, bareFolder = build(0)
+		local crowded, crowdedVid, crowdedFolder = build(1500) -- ~4500 unrelated edges
+		timeMoves(bare, bareVid, 100) -- warm
+		timeMoves(crowded, crowdedVid, 100)
+		local tBare = timeMoves(bare, bareVid, ITERS)
+		local tCrowded = timeMoves(crowded, crowdedVid, ITERS)
+		bareFolder:Destroy()
+		crowdedFolder:Destroy()
+
+		-- The geometry cost cancels, so this difference is purely the edge work. O(degree)
+		-- keeps it near zero; the old scan would have added tens of ms per thousand moves
+		-- here. Generous bound so timing noise never makes it flaky.
+		t.expect((tCrowded - tBare) < 0.05).toBeTruthy()
+	end)
 end
