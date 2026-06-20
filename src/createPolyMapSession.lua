@@ -2854,7 +2854,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					Width = importWidth,
 					Height = importHeight,
 					Spacing = importSpacing,
-					HeightScale = currentSettings.ImportHeightScale,
+					MinY = currentSettings.ImportMinY,
+					MaxY = currentSettings.ImportMaxY,
 					Origin = origin,
 					Thickness = currentSettings.Thickness,
 					-- An imported heightmap is its own fresh piece -> its own folder.

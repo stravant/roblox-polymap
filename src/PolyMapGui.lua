@@ -478,23 +478,36 @@ local function ImportPanel(props: {
 				return nil
 			end,
 		}),
-		HeightScale = e(HelpGui.WithHelpIcon, {
+		MinY = e(HelpGui.WithHelpIcon, {
 			LayoutOrder = nextOrder(),
 			Subject = e(NumberInput, {
-				Label = "Height",
-				Value = props.Settings.ImportHeightScale,
+				Label = "Min Y",
+				Value = props.Settings.ImportMinY,
 				Unit = " studs",
 				ValueEntered = function(newValue: number)
-					if newValue >= 0 then
-						props.Settings.ImportHeightScale = newValue
-						props.UpdatedSettings()
-						return newValue
-					end
-					return nil
+					props.Settings.ImportMinY = newValue
+					props.UpdatedSettings()
+					return newValue
 				end,
 			}),
 			Help = e(HelpGui.BasicTooltip, {
-				HelpRichText = "Height of the tallest point, in studs. Each image pixel's brightness sets its vertex height:<br />• <b>white</b> — full height<br />• <b>black</b> — flat (0)",
+				HelpRichText = "Height (Y) given to fully black pixels, in studs. May be negative.",
+			}),
+		}),
+		MaxY = e(HelpGui.WithHelpIcon, {
+			LayoutOrder = nextOrder(),
+			Subject = e(NumberInput, {
+				Label = "Max Y",
+				Value = props.Settings.ImportMaxY,
+				Unit = " studs",
+				ValueEntered = function(newValue: number)
+					props.Settings.ImportMaxY = newValue
+					props.UpdatedSettings()
+					return newValue
+				end,
+			}),
+			Help = e(HelpGui.BasicTooltip, {
+				HelpRichText = "Height (Y) given to fully white pixels, in studs. A pixel's brightness blends its vertex between <b>Min Y</b> and <b>Max Y</b>.",
 			}),
 		}),
 		ImportButton = (function()

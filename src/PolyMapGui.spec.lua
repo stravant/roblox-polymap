@@ -50,7 +50,8 @@ local function makeSettings(mode: string): Settings.PolyMapSettings
 		ImportWidth = 50,
 		ImportHeight = 50,
 		ImportSpacing = 4,
-		ImportHeightScale = 50,
+		ImportMinY = 0,
+		ImportMaxY = 50,
 		RecentMaterials = { "Plastic", "Grass", "Concrete", "Rock", "Sand", "Brick", "Wood" },
 		RecentColors = { { 0.5, 0.5, 0.5 } },
 	}

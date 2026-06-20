@@ -9,7 +9,8 @@ export type ImportParams = {
 	Width: number, -- number of cells wide
 	Height: number, -- number of cells tall
 	Spacing: number, -- distance between adjacent vertices
-	HeightScale: number, -- max height from luminance
+	MinY: number, -- local Y at luminance 0 (black)
+	MaxY: number, -- local Y at luminance 1 (white)
 	Origin: CFrame, -- center CFrame of the grid
 	Thickness: number,
 	Parent: Instance,
@@ -21,7 +22,8 @@ local function importHeightmap(params: ImportParams)
 	local cols = params.Width
 	local rows = params.Height
 	local spacing = params.Spacing
-	local heightScale = params.HeightScale
+	local minY = params.MinY
+	local maxY = params.MaxY
 	local origin = params.Origin
 	local thickness = params.Thickness
 	local parent = params.Parent
@@ -66,7 +68,7 @@ local function importHeightmap(params: ImportParams)
 			local u = c / cols -- UV u coordinate
 			local pr, pg, pb = samplePixel(u, v)
 			local luminance = 0.299 * pr + 0.587 * pg + 0.114 * pb
-			local localPos = Vector3.new(c * spacing - halfW, luminance * heightScale, r * spacing - halfH)
+			local localPos = Vector3.new(c * spacing - halfW, minY + luminance * (maxY - minY), r * spacing - halfH)
 			local worldPos = origin:PointToWorldSpace(localPos)
 			table.insert(row, worldPos)
 			table.insert(colorRow, { pr, pg, pb })

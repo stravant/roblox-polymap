@@ -34,7 +34,8 @@ export type PolyMapSettings = PluginGuiTypes.PluginGuiSettings & {
 	ImportWidth: number,
 	ImportHeight: number,
 	ImportSpacing: number,
-	ImportHeightScale: number,
+	ImportMinY: number,
+	ImportMaxY: number,
 	RecentMaterials: { string },
 	RecentColors: { { number } },
 }
@@ -82,7 +83,9 @@ local function loadSettings(plugin: Plugin): PolyMapSettings
 		ImportWidth = raw.ImportWidth or 50,
 		ImportHeight = raw.ImportHeight or 50,
 		ImportSpacing = raw.ImportSpacing or 4,
-		ImportHeightScale = raw.ImportHeightScale or 50,
+		ImportMinY = raw.ImportMinY or 0,
+		-- Migrate the old single height scale (black=0 .. white=scale) onto Max Y.
+		ImportMaxY = raw.ImportMaxY or raw.ImportHeightScale or 50,
 		RecentMaterials = raw.RecentMaterials or { "Grass", "Plastic", "Concrete" },
 		RecentColors = raw.RecentColors or { { 0.294, 0.592, 0.294 } },
 	}
@@ -125,7 +128,8 @@ local function saveSettings(plugin: Plugin, settings: PolyMapSettings)
 		ImportWidth = settings.ImportWidth,
 		ImportHeight = settings.ImportHeight,
 		ImportSpacing = settings.ImportSpacing,
-		ImportHeightScale = settings.ImportHeightScale,
+		ImportMinY = settings.ImportMinY,
+		ImportMaxY = settings.ImportMaxY,
 		RecentMaterials = settings.RecentMaterials,
 		RecentColors = settings.RecentColors,
 	})
