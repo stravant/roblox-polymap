@@ -126,7 +126,7 @@ local function getStatusText(mode: string, settings: Settings.PolyMapSettings, s
 	elseif mode == "Paint" then
 		return "Click on triangles to apply color and material."
 	elseif mode == "Generate" then
-		return "Configure grid settings and click Generate."
+		return "Click Generate to place a grid in front of the camera or Place... to select two points to place a grid between."
 	elseif mode == "Import" then
 		return "Enter an image asset ID, configure settings, and click Import."
 	elseif mode == "Relax" then
@@ -330,7 +330,7 @@ local function GridPanel(props: {
 			end,
 		}),
 		Height = e(NumberInput, {
-			Label = "Height",
+			Label = "Length",
 			Value = props.Settings.GridHeight,
 			LayoutOrder = nextOrder(),
 			ValueEntered = function(newValue: number)
@@ -496,7 +496,7 @@ local function ImportPanel(props: {
 		Height = e(HelpGui.WithHelpIcon, {
 			LayoutOrder = nextOrder(),
 			Subject = e(NumberInput, {
-				Label = "Height",
+				Label = "Length",
 				Value = props.Settings.ImportHeight,
 				ValueEntered = function(newValue: number)
 					if newValue >= 1 and newValue == math.floor(newValue) then
@@ -508,7 +508,7 @@ local function ImportPanel(props: {
 				end,
 			}),
 			Help = e(HelpGui.BasicTooltip, {
-				HelpRichText = "How many cells tall the imported grid is — its resolution, <i>not</i> the surface height (that's <b>Min Y</b> / <b>Max Y</b>).",
+				HelpRichText = "How many cells long the imported grid is — its resolution, <i>not</i> the surface height (that's <b>Min Y</b> / <b>Max Y</b>).",
 			}),
 		}),
 		Spacing = e(HelpGui.WithHelpIcon, {
