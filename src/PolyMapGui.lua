@@ -1901,6 +1901,23 @@ local function SettingsPanel(props: {
 				HelpRichText = "Draw a faint dot on every vertex PolyMap has found, even unselected ones — handy for seeing the mesh's structure as you work.",
 			}),
 		}),
+		VertexSize = e(HelpGui.WithHelpIcon, {
+			LayoutOrder = 2,
+			Subject = e(Slider, {
+				Label = "Vertex size",
+				Value = props.Settings.DiscoveredVertexSize,
+				Min = 0.1,
+				Max = 2,
+				Step = 0.05,
+				ValueChanged = function(newValue: number)
+					props.Settings.DiscoveredVertexSize = newValue
+					props.UpdatedSettings()
+				end,
+			}),
+			Help = e(HelpGui.BasicTooltip, {
+				HelpRichText = "Radius of the discovered-vertex dots, in studs. They are a fixed world size, so distant ones look smaller.",
+			}),
+		}),
 	})
 end
 
@@ -1959,6 +1976,7 @@ local function PolyMapGui(props: {
 				MarqueeStart = session.GetMarquee(),
 				MarqueeEnd = select(2, session.GetMarquee()),
 				ShowDiscoveredVertices = currentSettings.ShowDiscoveredVertices,
+				DiscoveredVertexSize = currentSettings.DiscoveredVertexSize,
 			}
 
 			-- Compute Add mode overlay props

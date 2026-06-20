@@ -278,7 +278,7 @@ return function(t: TestTypes.TestContext)
 		t.expect(checked).toBe(vertexCount)
 	end)
 
-	t.test("discovered markers resize on camera movement", function()
+	t.test("discovered markers are a fixed size, not depth-scaled", function()
 		-- A large mesh so the cost is representative (~1024 vertices).
 		local perfFolder = Instance.new("Folder")
 		perfFolder.Name = "$MeshOverlayPerfParts"
@@ -307,6 +307,7 @@ return function(t: TestTypes.TestContext)
 			cam.CFrame = CFrame.lookAt(center + Vector3.new(0, 80, 150), center)
 		end
 
+		local SIZE = 0.5 -- exactly representable as a float32, so SphereHandleAdornment.Radius round-trips
 		local perfScreen = Instance.new("ScreenGui")
 		perfScreen.Name = "$MeshOverlayPerf"
 		perfScreen.Parent = CoreGui
@@ -316,6 +317,7 @@ return function(t: TestTypes.TestContext)
 			perfRoot:render(e(VertexMarkers, {
 				Mesh = perfMesh,
 				ShowDiscoveredVertices = true,
+				DiscoveredVertexSize = SIZE,
 			}))
 		end)
 		for _ = 1, 2 do
@@ -341,16 +343,17 @@ return function(t: TestTypes.TestContext)
 			return n
 		end
 
-		-- One marker per discovered vertex.
+		-- One marker per discovered vertex, each at the configured fixed size.
 		t.expect(vertexCount > 1000).toBeTruthy()
 		t.expect(markerCount()).toBe(vertexCount)
+		for _, d in perfScreen:GetDescendants() do
+			if d:IsA("SphereHandleAdornment") then
+				t.expect(d.Radius).toBe(SIZE)
+			end
+		end
 
-		-- Marker size is depth-scaled to the camera: render at one distance, then move
-		-- the camera much farther and re-render -- the radii must grow. Each marker's
-		-- Radius is a binding off a "camera tick"; in the live plugin a RenderStepped
-		-- poll bumps that tick every frame the camera moves (no React re-render), but
-		-- RenderStepped doesn't fire in this headless harness, so drive the
-		-- re-evaluation with an explicit re-render here.
+		-- Discovered markers are a fixed world size, unlike the depth-scaled selection
+		-- markers: moving the camera far away and re-rendering must NOT change the radii.
 		local nearSum = radiusSum()
 		if cam then
 			cam.CFrame = CFrame.lookAt(center + Vector3.new(0, 300, 600), center)
@@ -359,31 +362,10 @@ return function(t: TestTypes.TestContext)
 			perfRoot:render(e(VertexMarkers, {
 				Mesh = perfMesh,
 				ShowDiscoveredVertices = true,
+				DiscoveredVertexSize = SIZE,
 			}))
 		end)
-		t.expect(radiusSum() > nearSum).toBe(true)
-
-		-- The per-frame resize work (depth recompute + Radius write per marker) is a
-		-- few ms even at ~1000 markers -- far below the cost of React re-rendering
-		-- every marker each frame -- so camera movement stays smooth.
-		local adorns = {}
-		for _, d in perfScreen:GetDescendants() do
-			if d:IsA("SphereHandleAdornment") then
-				table.insert(adorns, d)
-			end
-		end
-		local FRAMES = 60
-		local t0 = os.clock()
-		for _ = 1, FRAMES do
-			if cam then
-				cam.CFrame = cam.CFrame * CFrame.new(0, 0, -0.25)
-			end
-			for _, d in adorns do
-				local depth = if cam then math.abs(cam:WorldToViewportPoint(d.CFrame.Position).Z) else 150
-				d.Radius = depth / 150 * 1.2
-			end
-		end
-		local workMs = (os.clock() - t0) / FRAMES * 1000
+		t.expect(radiusSum()).toBe(nearSum)
 
 		ReactRoblox.act(function()
 			perfRoot:unmount()
@@ -398,9 +380,6 @@ return function(t: TestTypes.TestContext)
 				cam.CameraType = savedType
 			end
 		end
-
-		-- Generous bound (measured ~3ms): documents the cost and isn't flaky.
-		t.expect(workMs < 20).toBeTruthy()
 	end)
 
 	-- Clean up

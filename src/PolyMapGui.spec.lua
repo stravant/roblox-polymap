@@ -25,6 +25,7 @@ local function makeSettings(mode: string): Settings.PolyMapSettings
 
 		Mode = mode,
 		ShowDiscoveredVertices = false,
+		DiscoveredVertexSize = 0.4,
 		DeleteTarget = "Face",
 		DeleteRadius = 0,
 		PaintRadius = 0,

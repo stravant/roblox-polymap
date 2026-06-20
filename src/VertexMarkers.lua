@@ -22,7 +22,6 @@ end
 
 local SELECTED_VERTEX_RADIUS = 2.5
 local HOVER_VERTEX_RADIUS = 2.0
-local DISCOVERED_VERTEX_RADIUS = 1.2
 
 local SELECTED_VERTEX_COLOR = Color3.fromRGB(255, 200, 50)
 local HOVER_VERTEX_COLOR = Color3.fromRGB(100, 150, 255)
@@ -31,28 +30,28 @@ local DISCOVERED_VERTEX_COLOR = Color3.fromRGB(255, 255, 255)
 
 -- Renders the selected / hovered / discovered vertex markers.
 --
--- A marker's radius is depth-scaled, so it has to track camera movement or it
--- visibly snaps to a new size only when some other state happens to change. Rather
--- than re-render the whole marker set on every camera frame -- which, with the
--- discovered display on, means React reconciling one element per vertex (measured
--- ~25 ms/frame at ~1000 vertices) -- each marker's Radius is a React binding
--- derived from a single "camera tick" binding. A camera move just bumps that tick,
--- which recomputes and writes the Radius onto each adornment directly: no
--- reconciliation, and synchronous.
+-- The selected and hovered markers are depth-scaled to keep a steady on-screen size, so
+-- they track camera movement: rather than re-render on every camera frame, each such
+-- marker's Radius is a React binding derived from a single "camera tick" binding. A
+-- camera move bumps the tick, which recomputes and writes the Radius onto each adornment
+-- directly -- no reconciliation, and synchronous. Discovered-vertex markers are instead
+-- drawn at a fixed world size (the DiscoveredVertexSize setting), so they need no camera
+-- tracking at all -- which matters because there can be ~1000 of them.
 local function VertexMarkers(props: {
 	Mesh: TriangleMesh.TriangleMesh,
 	SelectedVertices: { [number]: boolean }?,
 	HoverVertexId: number?,
 	HoverVertexIsDelete: boolean?,
 	ShowDiscoveredVertices: boolean?,
+	DiscoveredVertexSize: number?,
 })
 	local mesh = props.Mesh
 	local selectedVertices = props.SelectedVertices or {}
 
-	-- Only track the camera when there's actually something on screen to resize.
+	-- Only the depth-scaled selected/hover markers need camera tracking; the discovered
+	-- markers are a fixed size, so showing them alone doesn't require it.
 	local hasContent = next(selectedVertices) ~= nil
 		or props.HoverVertexId ~= nil
-		or props.ShowDiscoveredVertices == true
 
 	local cameraTick, setCameraTick = React.useBinding(0)
 	React.useEffect(function()
@@ -129,7 +128,7 @@ local function VertexMarkers(props: {
 				children["D_" .. tostring(id)] = e(VertexMarker, {
 					Position = vertex.position,
 					Color = DISCOVERED_VERTEX_COLOR,
-					Radius = radius(vertex.position, DISCOVERED_VERTEX_RADIUS, 1),
+					Radius = props.DiscoveredVertexSize or 0.4,
 					Transparency = 0.1,
 					AlwaysOnTop = false,
 					ZIndexOffset = 1,
