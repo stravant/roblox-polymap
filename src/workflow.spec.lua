@@ -2329,4 +2329,45 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("Delete/Vertex: hovering marks a vertex and outlines its triangle fan", function()
+		withSession(function(session, mesh, settings)
+			settings.Mode = "Delete"
+			settings.DeleteTarget = "Vertex"
+
+			local cam = workspace.CurrentCamera
+			assert(cam)
+			local vp = cam:WorldToViewportPoint(kRegionCenter)
+			local ray = cam:ViewportPointToRay(vp.X, vp.Y)
+			local O, D = ray.Origin, ray.Direction.Unit
+			local center = O + D * 20
+			buildFacingTri(mesh, center, D)
+
+			-- Aim at a point clearly inside one wedge (off the split seam through the
+			-- centre) so the hover raycast lands solidly on the triangle.
+			local up = if math.abs(D.Y) < 0.9 then Vector3.yAxis else Vector3.xAxis
+			local u = D:Cross(up).Unit
+			local v = D:Cross(u).Unit
+			local hvp = cam:WorldToViewportPoint(center + v * 1.2)
+			session.DebugHoverAt(Vector2.new(hvp.X, hvp.Y))
+
+			-- A vertex must be marked for deletion, and the outlined fan must be exactly
+			-- the triangles that deleting that vertex would remove.
+			local vid = session.GetHoverVertexId()
+			t.expect(vid).toBeTruthy()
+			assert(vid, "expected a hovered vertex in Delete/Vertex mode")
+			local vertex = mesh.getVertex(vid)
+			assert(vertex)
+
+			local outline = session.GetOutlineTriangleIds()
+			t.expect(#outline).toBe(#vertex.triangles)
+			local outlineSet: { [number]: boolean } = {}
+			for _, id in outline do
+				outlineSet[id] = true
+			end
+			for _, id in vertex.triangles do
+				t.expect(outlineSet[id]).toBeTruthy()
+			end
+		end)
+	end)
+
 end

@@ -26,6 +26,7 @@ local DISCOVERED_VERTEX_RADIUS = 1.2
 
 local SELECTED_VERTEX_COLOR = Color3.fromRGB(255, 200, 50)
 local HOVER_VERTEX_COLOR = Color3.fromRGB(100, 150, 255)
+local DELETE_HOVER_VERTEX_COLOR = Color3.fromRGB(255, 80, 80)
 local DISCOVERED_VERTEX_COLOR = Color3.fromRGB(255, 255, 255)
 
 -- Renders the selected / hovered / discovered vertex markers.
@@ -42,6 +43,7 @@ local function VertexMarkers(props: {
 	Mesh: TriangleMesh.TriangleMesh,
 	SelectedVertices: { [number]: boolean }?,
 	HoverVertexId: number?,
+	HoverVertexIsDelete: boolean?,
 	ShowDiscoveredVertices: boolean?,
 })
 	local mesh = props.Mesh
@@ -105,13 +107,13 @@ local function VertexMarkers(props: {
 		end
 	end
 
-	-- Hovered marker
+	-- Hovered marker (red when it marks the vertex a Delete click would remove)
 	if props.HoverVertexId and not selectedVertices[props.HoverVertexId] then
 		local vertex = mesh.getVertex(props.HoverVertexId)
 		if vertex then
 			children["V_hover"] = e(VertexMarker, {
 				Position = vertex.position,
-				Color = HOVER_VERTEX_COLOR,
+				Color = if props.HoverVertexIsDelete then DELETE_HOVER_VERTEX_COLOR else HOVER_VERTEX_COLOR,
 				Radius = radius(vertex.position, HOVER_VERTEX_RADIUS, 1),
 				ZIndexOffset = 4,
 			})

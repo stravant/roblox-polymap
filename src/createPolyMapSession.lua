@@ -97,8 +97,8 @@ local function mouseRaycast(screenPos: Vector2?): RaycastResult?
 end
 
 -- Raycast with a spherecast fallback for modes that want loose targeting
-local function mouseRaycastLoose(): RaycastResult?
-	local mouseLocation = UserInputService:GetMouseLocation()
+local function mouseRaycastLoose(screenPos: Vector2?): RaycastResult?
+	local mouseLocation = screenPos or UserInputService:GetMouseLocation()
 	local camera = workspace.CurrentCamera
 	if not camera then
 		return nil
@@ -876,7 +876,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 	end
 
-	local function updateHover()
+	local function updateHover(screenPosOverride: Vector2?)
 		-- Leaving Add mode abandons any in-progress triangle (edge grab or fresh
 		-- points), so stale state doesn't reappear on returning to Add.
 		if currentSettings.Mode ~= "Add" and (mAddBoundaryEdge or #mAddPoints > 0) then
@@ -910,7 +910,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		-- Use loose targeting (spherecast fallback) for selection/add modes
 		local mode = currentSettings.Mode
 		local useLoose = mode == "Move" or mode == "Rotate" or mode == "Add"
-		local result = if useLoose then mouseRaycastLoose() else mouseRaycast()
+		local result = if useLoose then mouseRaycastLoose(screenPosOverride) else mouseRaycast(screenPosOverride)
 		local newHoverVertex: number? = nil
 		local newHoverEdge: string? = nil
 		local newHoverTriangles: { number } = {}
@@ -922,7 +922,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		if not worldPos and mStrokeDragging and mStrokePlanePoint and mStrokePlaneNormal then
 			local camera = workspace.CurrentCamera
 			if camera then
-				local mouseLocation = UserInputService:GetMouseLocation()
+				local mouseLocation = screenPosOverride or UserInputService:GetMouseLocation()
 				local ray = camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
 				local denom = ray.Direction:Dot(mStrokePlaneNormal)
 				if math.abs(denom) > 0.0001 then
@@ -952,7 +952,16 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			end
 			if mode == "Delete" then
 				if currentSettings.DeleteTarget == "Vertex" then
+					-- Mark the vertex under the cursor (the marker pinpoints it) and
+					-- outline the fan of triangles deleting it would remove, so the
+					-- affected area reads the same way Face mode's hovered triangle does.
 					newHoverVertex = findNearestVertex(worldPos, hitTriangleId)
+					if newHoverVertex then
+						local vertex = mMesh.getVertex(newHoverVertex)
+						if vertex then
+							newHoverTriangles = table.clone(vertex.triangles)
+						end
+					end
 				else
 					-- Face mode: hover the triangle(s) that would be affected
 					local radius = currentSettings.DeleteRadius
@@ -3019,6 +3028,12 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			applyPaintAtCursor(pos)
 		end
 		endStroke()
+	end
+
+	-- Test hook: run the real hover update as if the cursor were at screenPos, so the
+	-- hover feedback (mHoverVertexId / mHoverTriangleIds) can be asserted without a mouse.
+	session.DebugHoverAt = function(screenPos: Vector2)
+		updateHover(screenPos)
 	end
 
 	session.PaintAt = function(worldPos: Vector3)

@@ -50,6 +50,7 @@ local function MeshOverlay(props: {
 	Mesh: TriangleMesh.TriangleMesh?,
 	SelectedVertices: { [number]: boolean }?,
 	HoverVertexId: number?,
+	HoverVertexIsDelete: boolean?,
 	OutlineTriangleIds: { number }?,
 	HoverOutlineTriangleIds: { number }?,
 	MarqueeStart: Vector2?,
@@ -247,6 +248,7 @@ local function MeshOverlay(props: {
 		Mesh = mesh,
 		SelectedVertices = props.SelectedVertices,
 		HoverVertexId = props.HoverVertexId,
+		HoverVertexIsDelete = props.HoverVertexIsDelete,
 		ShowDiscoveredVertices = props.ShowDiscoveredVertices,
 	})
 

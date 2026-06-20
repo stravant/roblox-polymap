@@ -1629,10 +1629,14 @@ local function PolyMapGui(props: {
 		Overlay = session and e(MeshOverlay, (function()
 			local mesh = session.GetMesh()
 			local showSelection = mode == "Move" or mode == "Rotate"
+			-- In Delete/Vertex mode, surface the hovered vertex so the overlay can mark
+			-- which vertex a click would delete (the triangle fan is shown via the outline).
+			local isDeleteVertex = mode == "Delete" and currentSettings.DeleteTarget == "Vertex"
 			local overlayProps: { [string]: any } = {
 				Mesh = mesh,
 				SelectedVertices = if showSelection then session.GetSelectedVertices() else nil,
-				HoverVertexId = if showSelection then session.GetHoverVertexId() else nil,
+				HoverVertexId = if showSelection or isDeleteVertex then session.GetHoverVertexId() else nil,
+				HoverVertexIsDelete = isDeleteVertex,
 				OutlineTriangleIds = session.GetOutlineTriangleIds(),
 				HoverOutlineTriangleIds = session.GetHoverOutlineTriangleIds(),
 				MarqueeStart = session.GetMarquee(),
