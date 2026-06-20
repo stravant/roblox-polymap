@@ -1,7 +1,6 @@
 --!strict
 
 local ChangeHistoryService = game:GetService("ChangeHistoryService")
-local RunService = game:GetService("RunService")
 local Selection = game:GetService("Selection")
 local UserInputService = game:GetService("UserInputService")
 
@@ -2470,27 +2469,25 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end)
 	end)
 
-	-- While a Paint eyedropper (Pick) is active, show an eyedropper cursor over the
-	-- viewport. The DraggerFramework owns the plugin-mouse icon and rewrites it every
-	-- frame from a RenderStep at RenderPriority.First, so we re-assert ours from a LATER
-	-- step (Last) to win, and reset once when leaving the eyedropper so the dragger
-	-- reclaims the cursor.
-	local kEyedropperIcon = "rbxassetid://5287780555"
+	-- While a Paint eyedropper (Pick) is active, show a crosshair cursor over the
+	-- viewport. The plugin mouse only renders the built-in system cursors, not arbitrary
+	-- image assets, so we use rbxasset://SystemCursors/Cross. Tracked so the icon is only
+	-- assigned when it changes.
+	local kPickCursor = "rbxasset://SystemCursors/Cross"
 	local mPickMouse = plugin:GetMouse()
-	local mPickIconActive = false
-	RunService:BindToRenderStep("PolyMapPickCursor", Enum.RenderPriority.Last.Value, function()
-		if currentSettings.Mode == "Paint" and currentSettings.PaintEyedropper ~= "None" then
-			mPickMouse.Icon = kEyedropperIcon
-			mPickIconActive = true
-		elseif mPickIconActive then
-			mPickMouse.Icon = ""
-			mPickIconActive = false
-		end
-	end)
+	local mLastPickIcon = ""
 
 	local cursorTargetTask = task.spawn(function()
 		while true do
 			updateHover()
+
+			local wantIcon = if currentSettings.Mode == "Paint" and currentSettings.PaintEyedropper ~= "None"
+				then kPickCursor
+				else ""
+			if wantIcon ~= mLastPickIcon then
+				mLastPickIcon = wantIcon
+				mPickMouse.Icon = wantIcon
+			end
 
 			if mStrokeDragging then
 				applyStrokeAtCursor()
@@ -2645,7 +2642,6 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 		task.cancel(delayedBeginCn)
 		task.cancel(cursorTargetTask)
-		RunService:UnbindFromRenderStep("PolyMapPickCursor")
 		mPickMouse.Icon = "" -- restore the default cursor
 	end
 
