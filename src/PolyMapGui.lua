@@ -897,7 +897,7 @@ local function SwatchesTab(current: { number }, onSelect: (color: { number }, cl
 	}, kids)
 end
 
-local function CustomTab(color: { number }, onChange: (color: { number }) -> ()): React.ReactElement<any, any>
+local function CustomTab(color: { number }, onChange: (color: { number }) -> (), onConfirm: () -> ()): React.ReactElement<any, any>
 	local function setChannel(i: number, v255: number)
 		local nc = { color[1], color[2], color[3] }
 		nc[i] = math.clamp(v255 / 255, 0, 1)
@@ -949,6 +949,20 @@ local function CustomTab(color: { number }, onChange: (color: { number }) -> ())
 		R = e(Slider, { Label = "R", Value = math.floor(color[1] * 255 + 0.5), Min = 0, Max = 255, Step = 1, LayoutOrder = 3, ValueChanged = function(v: number) setChannel(1, v) end }),
 		G = e(Slider, { Label = "G", Value = math.floor(color[2] * 255 + 0.5), Min = 0, Max = 255, Step = 1, LayoutOrder = 4, ValueChanged = function(v: number) setChannel(2, v) end }),
 		B = e(Slider, { Label = "B", Value = math.floor(color[3] * 255 + 0.5), Min = 0, Max = 255, Step = 1, LayoutOrder = 5, ValueChanged = function(v: number) setChannel(3, v) end }),
+		-- The Custom tab applies live as you drag, so there's no swatch click to record
+		-- the colour. This button commits the current colour to the recents (and closes).
+		Confirm = e("TextButton", {
+			Size = UDim2.new(1, 0, 0, 26),
+			BackgroundColor3 = Colors.ACTION_BLUE,
+			Text = "Add to Recents",
+			Font = Enum.Font.SourceSansBold,
+			TextSize = 16,
+			TextColor3 = Colors.WHITE,
+			AutoButtonColor = true,
+			LayoutOrder = 6,
+			ZIndex = 12,
+			[React.Event.MouseButton1Click] = onConfirm,
+		}, { Corner = e("UICorner", { CornerRadius = UDim.new(0, 4) }) }),
 	})
 end
 
@@ -967,12 +981,15 @@ local function ColorPickerPopup(props: {
 		setCustomColor(c)
 		props.OnSelect(c, false)
 	end
+	local function confirmCustom()
+		props.OnSelect(customColor, true)
+	end
 
 	local body: React.ReactElement<any, any>
 	if tab == "Swatches" then
 		body = SwatchesTab(props.Current, props.OnSelect)
 	elseif tab == "Custom" then
-		body = CustomTab(customColor, customChange)
+		body = CustomTab(customColor, customChange, confirmCustom)
 	else
 		body = BrickColorTab(props.Current, props.OnSelect)
 	end
