@@ -97,6 +97,13 @@ return function(t: TestTypes.TestContext)
 					p:Destroy()
 				end
 			end
+			-- Parts are parented into PolyMapMesh folders now; drop the empties left
+			-- behind so they don't pile up across the suite.
+			for _, c in workspace:GetChildren() do
+				if c:IsA("Folder") and c.Name == "PolyMapMesh" and #c:GetChildren() == 0 then
+					c:Destroy()
+				end
+			end
 		end
 		sweepRegion()
 		ChangeHistoryService:ResetWaypoints()
@@ -2071,6 +2078,128 @@ return function(t: TestTypes.TestContext)
 			-- skips it -- only the front goes.
 			session.DebugDeleteStroke({ frontSp, backSp })
 			t.expect(countDict(mesh.getTriangles())).toBe(1)
+		end)
+	end)
+
+	-- The distinct containers (folders) holding the current mesh's wedge parts.
+	local function triangleFolders(mesh: any): { [Instance]: boolean }
+		local set: { [Instance]: boolean } = {}
+		for _, tri in mesh.getTriangles() do
+			for _, part in tri.parts do
+				if part.Parent then
+					set[part.Parent] = true
+				end
+			end
+		end
+		return set
+	end
+	local function folderCount(mesh: any): number
+		local n = 0
+		for _ in triangleFolders(mesh) do
+			n += 1
+		end
+		return n
+	end
+
+	t.test("Folders: a generated grid's parts go in a new workspace folder", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 3
+			settings.GridHeight = 3
+			settings.GridSpacing = 4
+			session.GenerateGrid()
+			t.expect(countDict(mesh.getTriangles()) > 0).toBeTruthy()
+			-- Every wedge is parented into a Folder directly under workspace.
+			for _, tri in mesh.getTriangles() do
+				for _, part in tri.parts do
+					local container = part.Parent
+					t.expect(container ~= nil and container:IsA("Folder")).toBeTruthy()
+					t.expect((container :: Instance).Parent == workspace).toBeTruthy()
+				end
+			end
+			t.expect(folderCount(mesh)).toBe(1)
+		end)
+	end)
+
+	t.test("Folders: separate fresh polygons each get their own folder", function()
+		withSession(function(session, mesh, settings)
+			settings.Mode = "Add"
+			-- Fresh triangle 1 (three empty-space clicks).
+			session.AddClickAt(kRegionCenter + Vector3.new(0, 0, 0), nil)
+			session.AddClickAt(kRegionCenter + Vector3.new(6, 0, 0), nil)
+			session.AddClickAt(kRegionCenter + Vector3.new(3, 0, 5), nil)
+			-- Fresh triangle 2, far enough away to be disconnected (no snapping).
+			session.AddClickAt(kRegionCenter + Vector3.new(40, 0, 0), nil)
+			session.AddClickAt(kRegionCenter + Vector3.new(46, 0, 0), nil)
+			session.AddClickAt(kRegionCenter + Vector3.new(43, 0, 5), nil)
+
+			t.expect(countDict(mesh.getTriangles())).toBe(2)
+			-- Two unconnected fresh pieces -> two distinct folders.
+			t.expect(folderCount(mesh)).toBe(2)
+		end)
+	end)
+
+	t.test("Folders: a polygon added onto existing geometry joins its folder", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 3
+			settings.GridHeight = 3
+			settings.GridSpacing = 4
+			session.GenerateGrid()
+			t.expect(folderCount(mesh)).toBe(1)
+
+			-- Grab a grid boundary edge, then close it onto a fresh apex out in empty
+			-- space. The new triangle is built from the grid's edge, so it joins the
+			-- grid's folder rather than starting a new one.
+			settings.Mode = "Add"
+			local boundary = mesh.getBoundaryEdges()
+			local edge = boundary[1]
+			local a = mesh.getVertex(edge.v1)
+			local b = mesh.getVertex(edge.v2)
+			local tri = mesh.getTriangle(edge.triangles[1])
+			assert(a and b and tri)
+			local part = tri.parts[1]
+			local edgeMid = (a.position + b.position) / 2
+			local sum, cnt = Vector3.zero, 0
+			for _, v in mesh.getVertices() do
+				sum += v.position
+				cnt += 1
+			end
+			local outward = Vector3.new(edgeMid.X - (sum / cnt).X, 0, edgeMid.Z - (sum / cnt).Z)
+			outward = if outward.Magnitude > 0.1 then outward.Unit else Vector3.new(1, 0, 0)
+			local apex = Vector3.new(edgeMid.X, edgeMid.Y, edgeMid.Z) + outward * 4
+
+			local before = countDict(mesh.getTriangles())
+			session.AddClickAt(edgeMid, part)
+			session.AddClickAt(apex, nil)
+			t.expect(countDict(mesh.getTriangles())).toBe(before + 1)
+
+			-- Still one folder: the added triangle reused the grid's.
+			t.expect(folderCount(mesh)).toBe(1)
+		end)
+	end)
+
+	t.test("Folders: a placed grid snapped onto existing geometry reuses its folder", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 3
+			settings.GridHeight = 3
+			settings.GridSpacing = 4
+			session.GenerateGrid()
+			t.expect(folderCount(mesh)).toBe(1)
+
+			local v: Vector3? = nil
+			for _, vert in mesh.getVertices() do
+				v = vert.position
+				break
+			end
+			assert(v)
+
+			-- Place a second grid whose first corner snaps onto a grid-1 vertex.
+			session.StartGridPlacement()
+			session.PlaceGridClickAt(v + Vector3.new(1, 0, 0)) -- snaps to v
+			session.PlaceGridClickAt(v + Vector3.new(13, 0, 13)) -- empty far corner
+			t.expect(countDict(mesh.getTriangles()) > 0).toBeTruthy()
+
+			-- One folder: the placed grid joined grid 1's rather than making its own.
+			t.expect(folderCount(mesh)).toBe(1)
 		end)
 	end)
 

@@ -200,10 +200,15 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	-- what it connects to; "Flat" ignores the normal and keeps them horizontal.
 	local mAddSnappedPoint: Vector3? = nil
 	local mAddSnappedNormal: Vector3? = nil
+	-- Container (folder) of the geometry a fresh polygon snapped onto, if any; new
+	-- parts join it so connected geometry stays together (else a fresh folder).
+	local mAddSnappedParent: Instance? = nil
 	local mAddPlanePoint: Vector3? = nil
 	local mAddPlaneNormal: Vector3? = nil
 	local mAddHoverTarget: { type: string, vertexId: number?, edgeKey: string?, position: Vector3? }? = nil
 	local mAddTriangleProps: fillTriangle.TriangleProps? = nil
+	-- Container (folder) of the boundary edge grabbed in Add phase 1.
+	local mAddBoundaryFolder: Instance? = nil
 
 	-- Interactive "Place grid" state (the Place... button in the Generate panel):
 	-- the user clicks two opposite corners; the grid spans the rectangle between
@@ -215,6 +220,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	-- placed a thickness lower so its discovered vertices land ON that vertex (aligning
 	-- with the existing mesh) rather than a thickness above it (sitting on top).
 	local mGridFirstSnapped = false
+	-- The vertex a placed grid's corner snapped onto, if any; its container becomes
+	-- the new grid's folder (else a fresh one is made).
+	local mGridFirstSnapVid: number? = nil
 
 	-- Marquee state
 	local mMarqueeStart: Vector2? = nil
@@ -341,6 +349,54 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		mAddPlaneNormal = nil
 		mAddHoverTarget = nil
 		mAddTriangleProps = nil
+		mAddSnappedParent = nil
+		mAddBoundaryFolder = nil
+	end
+
+	-- New mesh parts are organised into Folders under workspace: a fresh
+	-- (non-snapped) grid or polygon gets its own new folder, while geometry added
+	-- onto existing content joins that content's container so a connected piece
+	-- stays together. These resolve the container of already-built geometry.
+	local function parentForTriangle(tid: number?): Instance?
+		if not tid then
+			return nil
+		end
+		local tri = mMesh.getTriangle(tid)
+		if not tri then
+			return nil
+		end
+		for _, part in tri.parts do
+			if part.Parent then
+				return part.Parent
+			end
+		end
+		return nil
+	end
+	local function parentForVertex(vid: number?): Instance?
+		if not vid then
+			return nil
+		end
+		local vertex = mMesh.getVertex(vid)
+		if not vertex then
+			return nil
+		end
+		for _, tid in vertex.triangles do
+			local p = parentForTriangle(tid)
+			if p then
+				return p
+			end
+		end
+		return nil
+	end
+	local function newMeshFolder(): Folder
+		local folder = Instance.new("Folder")
+		folder.Name = "PolyMapMesh"
+		folder.Parent = workspace
+		return folder
+	end
+	-- Where new parts go: the snapped content's container, or a fresh folder.
+	local function resolveNewParent(snappedParent: Instance?): Instance
+		return snappedParent or newMeshFolder()
 	end
 
 	-- No initial scan — mesh starts empty, discovery happens on demand
@@ -642,13 +698,17 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		mGridFirstPoint = nil
 		mGridHoverPoint = nil
 		mGridFirstSnapped = false
+		mGridFirstSnapVid = nil
 	end
 
 	-- Generate a cols x rows cell grid (cells cellW x cellH) centred on origin, then
 	-- discover it from the camera-facing surface. Shared by GenerateGrid (settings-
 	-- sized, centred ahead) and the Place tool (spanning two clicked corners).
-	local function generateGridWithParams(origin: CFrame, cols: number, rows: number, cellW: number, cellH: number)
+	local function generateGridWithParams(origin: CFrame, cols: number, rows: number, cellW: number, cellH: number, snapVid: number?)
 		runUndoableOperation("PolyMap Generate Grid", function(): boolean
+			-- Snapped onto an existing vertex -> share its folder; otherwise a fresh
+			-- folder. Resolved inside the recording so an undo removes the folder too.
+			local parent = resolveNewParent(parentForVertex(snapVid))
 			generateGrid({
 				GridType = currentSettings.GridType,
 				Width = cols,
@@ -658,7 +718,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				CellHeight = cellH,
 				Origin = origin,
 				Thickness = currentSettings.Thickness,
-				Parent = workspace.Terrain,
+				Parent = parent,
 				Props = getTriangleProps(),
 			})
 			return true
@@ -697,7 +757,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return center, cols, rows, cellW, cellH
 	end
 
-	local function generateGridBetween(p1: Vector3, p2: Vector3, firstSnapped: boolean)
+	local function generateGridBetween(p1: Vector3, p2: Vector3, firstSnapped: boolean, snapVid: number?)
 		local center, cols, rows, cellW, cellH = gridLayoutFromCorners(p1, p2)
 		-- Discovered vertices land a thickness above the generation plane. When the
 		-- first corner snapped to an existing vertex, lower the plane by that thickness
@@ -707,7 +767,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		if firstSnapped then
 			center -= Vector3.new(0, currentSettings.Thickness, 0)
 		end
-		generateGridWithParams(CFrame.new(center), cols, rows, cellW, cellH)
+		generateGridWithParams(CFrame.new(center), cols, rows, cellW, cellH, snapVid)
 	end
 
 	-- The cursor projected onto the placement plane: a horizontal plane through the
@@ -737,7 +797,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	-- second projects onto the first corner's plane. Either corner then snaps to a
 	-- nearby existing vertex so a placed grid lines up with the mesh (same snap used by
 	-- the Add poly tool).
-	local function gridPlacementPos(): (Vector3?, boolean)
+	local function gridPlacementPos(): (Vector3?, number?)
 		local result = mouseRaycastLoose()
 		-- Discover the part under the cursor (and its neighbours) so there are real
 		-- vertices to snap to, exactly as the Add poly tool does before snapAddPoint.
@@ -760,7 +820,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			return nil, false
 		end
 		local snapped, snapVid = snapAddPoint(pos)
-		return snapped, snapVid ~= nil
+		return snapped, snapVid
 	end
 
 	local function updateGridPlaceHover()
@@ -773,20 +833,23 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 	-- First click anchors a corner; the second generates the grid and ends placement.
 	local function handleGridPlaceClick()
-		local pos, snapped = gridPlacementPos()
+		local pos, snapVid = gridPlacementPos()
 		if not pos then
 			return
 		end
 		if not mGridFirstPoint then
 			mGridFirstPoint = pos
-			mGridFirstSnapped = snapped
+			mGridFirstSnapped = snapVid ~= nil
+			mGridFirstSnapVid = snapVid
 			mGridHoverPoint = pos
 			changeSignal:Fire()
 		else
 			local p1 = mGridFirstPoint
 			local firstSnapped = mGridFirstSnapped
+			-- Either corner snapping is enough to join that geometry's folder.
+			local snap = mGridFirstSnapVid or snapVid
 			clearGridPlacement()
-			generateGridBetween(p1, pos, firstSnapped)
+			generateGridBetween(p1, pos, firstSnapped, snap)
 		end
 	end
 
@@ -1077,9 +1140,11 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local recording = ChangeHistoryService:TryBeginRecording("PolyMap Add Triangle")
 		-- A disconnected triangle has nothing to match, so hint it to face up.
 		local centroid = (p1 + p2 + p3) / 3
+		-- Snapped onto existing geometry -> its folder; a fresh triangle -> a new one.
+		local parent = resolveNewParent(mAddSnappedParent)
 		mMesh.addTriangle(
 			p1, p2, p3,
-			resolveAddThickness(mAddSnappedThickness), workspace.Terrain, getTriangleProps(), centroid + Vector3.yAxis
+			resolveAddThickness(mAddSnappedThickness), parent, getTriangleProps(), centroid + Vector3.yAxis
 		)
 		clearAddState()
 		if recording then
@@ -1095,6 +1160,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local snapped, vid = snapAddPoint(worldPos)
 		if vid then
 			mAddSnappedAny = true
+			if not mAddSnappedParent then
+				mAddSnappedParent = parentForVertex(vid)
+			end
 			if not mAddSnappedThickness then
 				mAddSnappedThickness = vertexThickness(vid)
 			end
@@ -1141,11 +1209,13 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local edgeMid = (a.position + b.position) / 2
 		local hint = edgeMid + Vector3.yAxis
 		local props = getTriangleProps()
+		local snappedParent: Instance? = nil
 		local parentTri = if edge.triangles[1] then mMesh.getTriangle(edge.triangles[1]) else nil
 		if parentTri then
 			local part = parentTri.parts[1]
 			if part then
 				props = { Color = part.Color, Material = part.Material }
+				snappedParent = part.Parent
 			end
 		end
 		-- Place the apex in the edge triangle's plane (Extend) so the surface stays
@@ -1159,7 +1229,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		pushUndoSnapshot()
 		local recording = ChangeHistoryService:TryBeginRecording("PolyMap Add Triangle")
 		local thickness = resolveAddThickness(if parentTri then parentTri.thickness else nil)
-		mMesh.addTriangle(apex, a.position, b.position, thickness, workspace.Terrain, props, hint)
+		mMesh.addTriangle(apex, a.position, b.position, thickness, resolveNewParent(snappedParent), props, hint)
 		clearAddState()
 		if recording then
 			ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
@@ -1201,6 +1271,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					mAddBoundaryEdge = { v1 = edge.v1, v2 = edge.v2 }
 					-- Store plane and properties from the parent triangle
 					local parentTriId = edge.triangles[1]
+					-- New triangles built from this edge join its folder.
+					mAddBoundaryFolder = parentForTriangle(parentTriId)
 					if parentTriId then
 						local tri = mMesh.getTriangle(parentTriId)
 						if tri then
@@ -1239,6 +1311,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			local recording = ChangeHistoryService:TryBeginRecording("PolyMap Add Triangle")
 
 			local addProps = mAddTriangleProps or getTriangleProps()
+			local parent = resolveNewParent(mAddBoundaryFolder)
 			local v1 = mMesh.getVertex(mAddBoundaryEdge.v1)
 			local v2 = mMesh.getVertex(mAddBoundaryEdge.v2)
 			if v1 and v2 then
@@ -1256,7 +1329,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					if tv then
 						mMesh.addTriangle(
 							v1.position, v2.position, tv.position,
-							resolveAddThickness(mAddSnappedThickness), workspace.Terrain, addProps, addHintPoint
+							resolveAddThickness(mAddSnappedThickness), parent, addProps, addHintPoint
 						)
 					end
 				elseif target.type == "edge" and target.edgeKey then
@@ -1274,18 +1347,18 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 							end
 							mMesh.addTriangle(
 								v1.position, v2.position, ta.position,
-								resolveAddThickness(mAddSnappedThickness), workspace.Terrain, addProps, addHintPoint
+								resolveAddThickness(mAddSnappedThickness), parent, addProps, addHintPoint
 							)
 							mMesh.addTriangle(
 								v2.position, tb.position, ta.position,
-								resolveAddThickness(mAddSnappedThickness), workspace.Terrain, addProps, addHintPoint
+								resolveAddThickness(mAddSnappedThickness), parent, addProps, addHintPoint
 							)
 						end
 					end
 				elseif target.type == "plane" and target.position then
 					mMesh.addTriangle(
 						v1.position, v2.position, target.position,
-						resolveAddThickness(mAddSnappedThickness), workspace.Terrain, addProps, addHintPoint
+						resolveAddThickness(mAddSnappedThickness), parent, addProps, addHintPoint
 					)
 				end
 			end
@@ -2593,13 +2666,15 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		if not mGridFirstPoint then
 			mGridFirstPoint = pos
 			mGridFirstSnapped = snapVid ~= nil
+			mGridFirstSnapVid = snapVid
 			mGridHoverPoint = pos
 			changeSignal:Fire()
 		else
 			local p1 = mGridFirstPoint
 			local firstSnapped = mGridFirstSnapped
+			local snap = mGridFirstSnapVid or snapVid
 			clearGridPlacement()
-			generateGridBetween(p1, pos, firstSnapped)
+			generateGridBetween(p1, pos, firstSnapped, snap)
 		end
 	end
 	-- Move the second (hover) corner without committing, so tests can inspect the
@@ -2716,7 +2791,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					HeightScale = currentSettings.ImportHeightScale,
 					Origin = origin,
 					Thickness = currentSettings.Thickness,
-					Parent = workspace.Terrain,
+					-- An imported heightmap is its own fresh piece -> its own folder.
+					Parent = newMeshFolder(),
 					OnProgress = function(fraction: number)
 						mImportProgress = fraction
 						changeSignal:Fire()
@@ -2878,7 +2954,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		runUndoableOperation("PolyMap Add Triangle", function(): boolean
 			triId = mMesh.addTriangle(
 				v1.position, v2.position, apexWorldPos,
-				currentSettings.Thickness, workspace.Terrain, getTriangleProps(), hintPoint
+				currentSettings.Thickness, resolveNewParent(parentForTriangle(parentTriId)), getTriangleProps(), hintPoint
 			)
 			return triId ~= nil
 		end)
