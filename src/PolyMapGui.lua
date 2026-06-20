@@ -281,7 +281,7 @@ local function GridPanel(props: {
 				}),
 			}),
 			Help = e(HelpGui.BasicTooltip, {
-				HelpRichText = "Square: 2 tris per cell. Triangular: equilateral triangle grid.",
+				HelpRichText = "The grid's tiling:<br />• <b>Square</b> — square cells, two triangles each<br />• <b>Triangular</b> — rows of equilateral triangles",
 			}),
 		}),
 		Width = e(NumberInput, {
@@ -326,7 +326,7 @@ local function GridPanel(props: {
 				end,
 			}),
 			Help = e(HelpGui.BasicTooltip, {
-				HelpRichText = "Distance between grid vertices in studs.",
+				HelpRichText = "Spacing between grid vertices, in studs — the size of one cell.",
 			}),
 		}),
 		Buttons = e("Frame", {
@@ -494,7 +494,7 @@ local function ImportPanel(props: {
 				end,
 			}),
 			Help = e(HelpGui.BasicTooltip, {
-				HelpRichText = "Maximum vertex height. Pixel brightness maps to height: white = full height, black = 0.",
+				HelpRichText = "Height of the tallest point, in studs. Each image pixel's brightness sets its vertex height:<br />• <b>white</b> — full height<br />• <b>black</b> — flat (0)",
 			}),
 		}),
 		ImportButton = (function()
@@ -575,7 +575,7 @@ local function ThicknessPanel(props: {
 				end,
 			}),
 			Help = e(HelpGui.BasicTooltip, {
-				HelpRichText = "Thickness of the wedge parts forming the mesh.",
+				HelpRichText = "How thick the wedge Parts that form the mesh are, in studs.",
 			}),
 		}),
 		-- Add mode only: match the thickness of geometry the new triangle snaps to.
@@ -590,7 +590,7 @@ local function ThicknessPanel(props: {
 				end,
 			}),
 			Help = e(HelpGui.BasicTooltip, {
-				HelpRichText = "When the new triangle snaps to existing geometry, give it that geometry's thickness instead of the value above.",
+				HelpRichText = "When a new triangle snaps onto existing geometry, match that geometry's thickness instead of the value above.",
 			}),
 		}),
 	})
@@ -642,7 +642,7 @@ local function FreePointsPanel(props: {
 				}),
 			}),
 			Help = e(HelpGui.BasicTooltip, {
-				HelpRichText = "Where a new triangle's corners that don't snap to geometry go.<br /><b>Flat</b>: as close to horizontal as possible.<br /><b>Extend</b>: in the plane of the snapped triangle, matching its normal.",
+				HelpRichText = "Where the corners of a new triangle that <i>don't</i> snap onto geometry are placed:<br />• <b>Flat</b> — as close to horizontal as possible<br />• <b>Extend</b> — in the plane of the snapped triangle, following its normal",
 			}),
 		}),
 	})
@@ -701,7 +701,7 @@ local function InfluencePanel(props: {
 				}),
 			}),
 			Help = e(HelpGui.BasicTooltip, {
-				HelpRichText = "How influence decreases with distance.",
+				HelpRichText = "How the drag's pull fades from the selected vertices out to the influence radius:<br />• <b>Linear</b> — even, straight-line falloff<br />• <b>Smooth</b> — soft, eases in and out<br />• <b>Sharp</b> — drops off fast, concentrating the effect near the selection",
 			}),
 		}),
 		RadiusInput = e(HelpGui.WithHelpIcon, {
@@ -718,7 +718,7 @@ local function InfluencePanel(props: {
 				end,
 			}),
 			Help = e(HelpGui.BasicTooltip, {
-				HelpRichText = "How far from the selection vertices are affected. 0 = no falloff.",
+				HelpRichText = "How far a drag reaches past the selected vertices — nearby vertices follow along, fading out over this distance.<br /><b>0</b> — only the selected vertices move.",
 			}),
 		}),
 	})
@@ -1267,7 +1267,7 @@ local function MaterialPanel(props: {
 				}),
 			}),
 			Help = e(HelpGui.BasicTooltip, {
-				HelpRichText = "Paint a <b>MaterialVariant</b> on top of the base material. Type its name (or eyedrop a part that has one); a valid name also switches the base material to match, and is added to the recents. An unknown name clears the field. Leave it empty for no variant.",
+				HelpRichText = "Paint a <b>MaterialVariant</b> on top of the base material.<br />Type its name, or eyedrop a part that already has one. A valid name also switches the base material to match it, and is saved to the recents.<br />• unknown name — clears the field<br />• empty — no variant",
 			}),
 		}),
 	})
@@ -1340,7 +1340,7 @@ local function BrushPanel(props: {
 				end,
 			}),
 			Help = e(HelpGui.BasicTooltip, {
-				HelpRichText = "Paint within this radius. 0 = single triangle.",
+				HelpRichText = "Brush radius for painting.<br /><b>0</b> — just the triangle under the cursor.",
 			}),
 		}),
 		PaintStrength = e(HelpGui.WithHelpIcon, {
@@ -1357,7 +1357,7 @@ local function BrushPanel(props: {
 				end,
 			}),
 			Help = e(HelpGui.BasicTooltip, {
-				HelpRichText = "Color blend strength. 1 = full replace, lower values blend with existing color.",
+				HelpRichText = "How strongly each stroke blends the new color over what's there:<br />• <b>1</b> — full replace<br />• lower — tint toward it<br />(Material is always applied fully.)",
 			}),
 		}),
 	})
@@ -1406,7 +1406,7 @@ local function DeletePanel(props: {
 				}),
 			}),
 			Help = e(HelpGui.BasicTooltip, {
-				HelpRichText = "Face deletes one triangle. Vertex deletes a vertex and all adjacent triangles.",
+				HelpRichText = "What a click removes:<br />• <b>Face</b> — the single triangle under the cursor<br />• <b>Vertex</b> — a vertex and every triangle touching it",
 			}),
 		}),
 		Radius = e(HelpGui.WithHelpIcon, {
@@ -1423,7 +1423,7 @@ local function DeletePanel(props: {
 				end,
 			}),
 			Help = e(HelpGui.BasicTooltip, {
-				HelpRichText = "Delete within this radius. 0 = single click.",
+				HelpRichText = "Brush radius for deleting faces.<br /><b>0</b> — one triangle per click. (Applies to <b>Face</b> only.)",
 			}),
 		}),
 	})
@@ -1454,7 +1454,7 @@ local function RelaxPanel(props: {
 				end,
 			}),
 			Help = e(HelpGui.BasicTooltip, {
-				HelpRichText = "Radius of the relax brush.",
+				HelpRichText = "<b>Relax</b> slides vertices toward the average position of their neighbors to even out triangle spacing — heights stay put, and mesh edges stay pinned.<br /><br />This sets the brush radius, in studs.",
 			}),
 		}),
 		StrengthInput = e(HelpGui.WithHelpIcon, {
@@ -1472,7 +1472,7 @@ local function RelaxPanel(props: {
 				end,
 			}),
 			Help = e(HelpGui.BasicTooltip, {
-				HelpRichText = "How strongly to flatten per stroke. 1 = fully flat in one pass.",
+				HelpRichText = "How far each vertex slides toward its neighbors' average per stroke:<br />• <b>1</b> — all the way in one pass<br />• lower — a gentler nudge each pass",
 			}),
 		}),
 	})
@@ -1503,7 +1503,7 @@ local function FlattenPanel(props: {
 				end,
 			}),
 			Help = e(HelpGui.BasicTooltip, {
-				HelpRichText = "Radius of the flatten brush.",
+				HelpRichText = "<b>Flatten</b> smooths the surface by easing each vertex's height toward the average of its neighbors — left/right position stays put.<br /><br />This sets the brush radius, in studs.",
 			}),
 		}),
 		StrengthInput = e(HelpGui.WithHelpIcon, {
@@ -1521,7 +1521,7 @@ local function FlattenPanel(props: {
 				end,
 			}),
 			Help = e(HelpGui.BasicTooltip, {
-				HelpRichText = "How strongly to smooth normals per stroke. 1 = fully smooth in one pass.",
+				HelpRichText = "How far each vertex's height moves toward its neighbors' average per stroke:<br />• <b>1</b> — fully smoothed in one pass<br />• lower — a gentler pass",
 			}),
 		}),
 	})
@@ -1569,7 +1569,14 @@ local function InstructionsPanel(props: {
 			Size = UDim2.new(1, 0, 0, 0),
 			AutomaticSize = Enum.AutomaticSize.Y,
 			BackgroundTransparency = 1,
-			Text = "PolyMap lets you edit the parts in your place by vertex as though they were part of a triangle mesh. Select \"Move\", click a vertex of one of your parts, and drag the handles to get started. Use Add Poly or Add Grid to create more geometry to edit.",
+			RichText = true,
+			Text = "PolyMap lets you edit the Parts in your place by vertex, as though they formed a triangle mesh."
+				.. "<br /><br />To get started, pick <b>Move</b> or <b>Rotate</b>, click a vertex of one of your parts, and drag the handles."
+				.. "<br /><br />The other modes let you:"
+				.. "<br />• <b>Add Poly</b> / <b>Add Grid</b> — build new geometry (or <b>Import</b> a heightmap)"
+				.. "<br />• <b>Paint</b> — brush on color and material"
+				.. "<br />• <b>Relax</b> / <b>Flatten</b> — even out spacing or smooth heights"
+				.. "<br />• <b>Delete</b> — remove triangles or vertices",
 			TextColor3 = Colors.WHITE,
 			TextWrapped = true,
 			TextXAlignment = Enum.TextXAlignment.Left,
@@ -1601,7 +1608,7 @@ local function SettingsPanel(props: {
 				end,
 			}),
 			Help = e(HelpGui.BasicTooltip, {
-				HelpRichText = "Draw a faint marker on every vertex PolyMap has discovered, even when it isn't selected. Helps you see the mesh's structure while you work.",
+				HelpRichText = "Draw a faint dot on every vertex PolyMap has found, even unselected ones — handy for seeing the mesh's structure as you work.",
 			}),
 		}),
 	})
