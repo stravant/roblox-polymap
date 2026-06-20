@@ -1168,14 +1168,30 @@ local function MaterialPanel(props: {
 					local key = recents[(r - 1) * perRow + c]
 					if key then
 						local material, variant = Settings.DecodeRecentMaterial(key)
-						rowKids["Chip" .. tostring(c)] = e(ChipForToggle, {
-							Text = if variant ~= "" then variant else material,
-							IsCurrent = material == props.Settings.PaintMaterial
-								and variant == props.Settings.PaintMaterialVariant,
+						-- Wrap the chip in a clipping frame so a long material/variant name is
+						-- cut off at the chip's edge instead of spilling across its
+						-- neighbours. The wrapper takes the chip's place as the row's flex
+						-- item (1/3 width); the chip fills the wrapper via its own flex.
+						rowKids["Chip" .. tostring(c)] = e("Frame", {
+							Size = UDim2.new(0, 0, 0, 24),
+							BackgroundTransparency = 1,
+							ClipsDescendants = true,
 							LayoutOrder = c,
-							OnClick = function()
-								selectRecent(key)
-							end,
+						}, {
+							Flex = e("UIFlexItem", { FlexMode = Enum.UIFlexMode.Grow }),
+							Layout = e("UIListLayout", {
+								FillDirection = Enum.FillDirection.Horizontal,
+								SortOrder = Enum.SortOrder.LayoutOrder,
+							}),
+							Chip = e(ChipForToggle, {
+								Text = if variant ~= "" then variant else material,
+								IsCurrent = material == props.Settings.PaintMaterial
+									and variant == props.Settings.PaintMaterialVariant,
+								LayoutOrder = 1,
+								OnClick = function()
+									selectRecent(key)
+								end,
+							}),
 						})
 					else
 						rowKids["Empty" .. tostring(c)] = e("Frame", {
