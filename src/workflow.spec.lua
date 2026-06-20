@@ -2370,4 +2370,51 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("Delete/Vertex: hover discovers the whole fan, not just the part under the cursor", function()
+		withSession(function(session, mesh, settings)
+			settings.Mode = "Delete"
+			settings.DeleteTarget = "Vertex"
+
+			local cam = workspace.CurrentCamera
+			assert(cam)
+			local vp = cam:WorldToViewportPoint(kRegionCenter)
+			local ray = cam:ViewportPointToRay(vp.X, vp.Y)
+			local O, D = ray.Origin, ray.Direction.Unit
+			local center = O + D * 20
+
+			local up = if math.abs(D.Y) < 0.9 then Vector3.yAxis else Vector3.xAxis
+			local u = D:Cross(up).Unit
+			local v = D:Cross(u).Unit
+			local s = 3.5
+
+			-- Two separate triangles (separate parts) that meet only at `center`, so the
+			-- shared vertex's fan spans BOTH parts. Each has its right angle at `center`
+			-- (one wedge apiece): one opening toward +u, the other toward -u.
+			mesh.addTriangle(center, center + u * s + v * s, center + u * s - v * s, 1, workspace.Terrain, nil, -D)
+			mesh.addTriangle(center, center - u * s + v * s, center - u * s - v * s, 1, workspace.Terrain, nil, -D)
+			t.expect(countDict(mesh.getTriangles())).toBe(2)
+
+			-- Forget everything in memory (the workspace parts remain). This reproduces a
+			-- fresh hover, where only the part directly under the cursor gets discovered.
+			mesh.clear()
+
+			-- Hover just off `center` into the +u triangle, so `center` is the nearest
+			-- vertex and the ray lands solidly on one wedge (not the shared corner seam).
+			local hvp = cam:WorldToViewportPoint(center + u * 1.5)
+			session.DebugHoverAt(Vector2.new(hvp.X, hvp.Y))
+
+			local vid = session.GetHoverVertexId()
+			t.expect(vid).toBeTruthy()
+			assert(vid, "expected a hovered vertex in Delete/Vertex mode")
+			local vertex = mesh.getVertex(vid)
+			assert(vertex)
+
+			-- The outlined fan must include BOTH triangles -- the one under the cursor
+			-- and its neighbour across the shared vertex -- matching what a click removes.
+			-- Without the hover's region discovery only the cursor's triangle is known.
+			t.expect(#vertex.triangles).toBe(2)
+			t.expect(#session.GetOutlineTriangleIds()).toBe(2)
+		end)
+	end)
+
 end

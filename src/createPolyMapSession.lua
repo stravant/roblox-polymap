@@ -955,6 +955,14 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					-- Mark the vertex under the cursor (the marker pinpoints it) and
 					-- outline the fan of triangles deleting it would remove, so the
 					-- affected area reads the same way Face mode's hovered triangle does.
+					-- Discover the neighbourhood first, exactly as the click does: a bare
+					-- hover only discovered the single part under the cursor, so the
+					-- vertex's fan was missing faces from adjacent not-yet-discovered
+					-- parts -- the outline under-reported what a click would actually
+					-- remove.
+					if hitTriangleId then
+						discoverRegionViewed({ worldPos }, 15)
+					end
 					newHoverVertex = findNearestVertex(worldPos, hitTriangleId)
 					if newHoverVertex then
 						local vertex = mMesh.getVertex(newHoverVertex)
