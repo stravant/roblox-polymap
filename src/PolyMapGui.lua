@@ -390,93 +390,113 @@ local function ImportPanel(props: {
 		LayoutOrder = props.LayoutOrder,
 		Padding = UDim.new(0, 4),
 	}, {
-		ImageIdRow = e("Frame", {
-			Size = UDim2.new(1, 0, 0, 22),
-			BackgroundTransparency = 1,
+		ImageIdRow = e(HelpGui.WithHelpIcon, {
 			LayoutOrder = nextOrder(),
-		}, {
-			ListLayout = e("UIListLayout", {
-				FillDirection = Enum.FillDirection.Horizontal,
-				SortOrder = Enum.SortOrder.LayoutOrder,
-				Padding = UDim.new(0, 4),
-				VerticalAlignment = Enum.VerticalAlignment.Center,
-			}),
-			Label = e("TextLabel", {
-				Size = UDim2.new(0, 60, 1, 0),
+			Subject = e("Frame", {
+				Size = UDim2.new(1, 0, 0, 22),
 				BackgroundTransparency = 1,
-				Font = Enum.Font.SourceSans,
-				TextSize = 18,
-				TextColor3 = Colors.WHITE,
-				Text = "Image ID",
-				TextXAlignment = Enum.TextXAlignment.Left,
-				LayoutOrder = 1,
-			}),
-			TextBox = e("TextBox", {
-				Size = UDim2.new(1, -64, 1, 0),
-				BackgroundColor3 = Colors.GREY,
-				BorderSizePixel = 0,
-				Font = Enum.Font.SourceSans,
-				TextSize = 18,
-				TextColor3 = Colors.WHITE,
-				PlaceholderText = "Asset ID...",
-				PlaceholderColor3 = Color3.fromRGB(128, 128, 128),
-				Text = props.Settings.ImportImageId,
-				TextXAlignment = Enum.TextXAlignment.Left,
-				ClearTextOnFocus = false,
-				LayoutOrder = 2,
-				[React.Event.FocusLost] = function(rbx: TextBox)
-					props.Settings.ImportImageId = rbx.Text
-					props.UpdatedSettings()
-				end,
 			}, {
-				Corner = e("UICorner", {
-					CornerRadius = UDim.new(0, 4),
+				ListLayout = e("UIListLayout", {
+					FillDirection = Enum.FillDirection.Horizontal,
+					SortOrder = Enum.SortOrder.LayoutOrder,
+					Padding = UDim.new(0, 4),
+					VerticalAlignment = Enum.VerticalAlignment.Center,
 				}),
-				Padding = e("UIPadding", {
-					PaddingLeft = UDim.new(0, 4),
-					PaddingRight = UDim.new(0, 4),
+				Label = e("TextLabel", {
+					Size = UDim2.new(0, 60, 1, 0),
+					BackgroundTransparency = 1,
+					Font = Enum.Font.SourceSans,
+					TextSize = 18,
+					TextColor3 = Colors.WHITE,
+					Text = "Image ID",
+					TextXAlignment = Enum.TextXAlignment.Left,
+					LayoutOrder = 1,
+				}),
+				TextBox = e("TextBox", {
+					Size = UDim2.new(1, -64, 1, 0),
+					BackgroundColor3 = Colors.GREY,
+					BorderSizePixel = 0,
+					Font = Enum.Font.SourceSans,
+					TextSize = 18,
+					TextColor3 = Colors.WHITE,
+					PlaceholderText = "Asset ID...",
+					PlaceholderColor3 = Color3.fromRGB(128, 128, 128),
+					Text = props.Settings.ImportImageId,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					ClearTextOnFocus = false,
+					LayoutOrder = 2,
+					[React.Event.FocusLost] = function(rbx: TextBox)
+						props.Settings.ImportImageId = rbx.Text
+						props.UpdatedSettings()
+					end,
+				}, {
+					Corner = e("UICorner", {
+						CornerRadius = UDim.new(0, 4),
+					}),
+					Padding = e("UIPadding", {
+						PaddingLeft = UDim.new(0, 4),
+						PaddingRight = UDim.new(0, 4),
+					}),
 				}),
 			}),
+			Help = e(HelpGui.BasicTooltip, {
+				HelpRichText = "Asset ID of the image to import. A pixel's brightness becomes its vertex height (between <b>Min Y</b> and <b>Max Y</b>) and its color tints the surface. Grayscale heightmaps work best.",
+			}),
 		}),
-		Width = e(NumberInput, {
-			Label = "Width",
-			Value = props.Settings.ImportWidth,
+		Width = e(HelpGui.WithHelpIcon, {
 			LayoutOrder = nextOrder(),
-			ValueEntered = function(newValue: number)
-				if newValue >= 1 and newValue == math.floor(newValue) then
-					props.Settings.ImportWidth = newValue
-					props.UpdatedSettings()
-					return newValue
-				end
-				return nil
-			end,
+			Subject = e(NumberInput, {
+				Label = "Width",
+				Value = props.Settings.ImportWidth,
+				ValueEntered = function(newValue: number)
+					if newValue >= 1 and newValue == math.floor(newValue) then
+						props.Settings.ImportWidth = newValue
+						props.UpdatedSettings()
+						return newValue
+					end
+					return nil
+				end,
+			}),
+			Help = e(HelpGui.BasicTooltip, {
+				HelpRichText = "How many cells wide the imported grid is. The image is stretched across it, so a higher value samples it more finely.",
+			}),
 		}),
-		Height = e(NumberInput, {
-			Label = "Height",
-			Value = props.Settings.ImportHeight,
+		Height = e(HelpGui.WithHelpIcon, {
 			LayoutOrder = nextOrder(),
-			ValueEntered = function(newValue: number)
-				if newValue >= 1 and newValue == math.floor(newValue) then
-					props.Settings.ImportHeight = newValue
-					props.UpdatedSettings()
-					return newValue
-				end
-				return nil
-			end,
+			Subject = e(NumberInput, {
+				Label = "Height",
+				Value = props.Settings.ImportHeight,
+				ValueEntered = function(newValue: number)
+					if newValue >= 1 and newValue == math.floor(newValue) then
+						props.Settings.ImportHeight = newValue
+						props.UpdatedSettings()
+						return newValue
+					end
+					return nil
+				end,
+			}),
+			Help = e(HelpGui.BasicTooltip, {
+				HelpRichText = "How many cells tall the imported grid is — its resolution, <i>not</i> the surface height (that's <b>Min Y</b> / <b>Max Y</b>).",
+			}),
 		}),
-		Spacing = e(NumberInput, {
-			Label = "Spacing",
-			Value = props.Settings.ImportSpacing,
-			Unit = " studs",
+		Spacing = e(HelpGui.WithHelpIcon, {
 			LayoutOrder = nextOrder(),
-			ValueEntered = function(newValue: number)
-				if newValue > 0 then
-					props.Settings.ImportSpacing = newValue
-					props.UpdatedSettings()
-					return newValue
-				end
-				return nil
-			end,
+			Subject = e(NumberInput, {
+				Label = "Spacing",
+				Value = props.Settings.ImportSpacing,
+				Unit = " studs",
+				ValueEntered = function(newValue: number)
+					if newValue > 0 then
+						props.Settings.ImportSpacing = newValue
+						props.UpdatedSettings()
+						return newValue
+					end
+					return nil
+				end,
+			}),
+			Help = e(HelpGui.BasicTooltip, {
+				HelpRichText = "Distance between neighboring vertices, in studs. With Width and Height, this sets the mesh's overall footprint.",
+			}),
 		}),
 		MinY = e(HelpGui.WithHelpIcon, {
 			LayoutOrder = nextOrder(),
