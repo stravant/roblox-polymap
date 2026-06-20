@@ -744,6 +744,132 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("workflow: Add undo/redo (incl. back-to-back) re-discovers only the added region", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 6
+			settings.GridHeight = 6
+			settings.GridSpacing = 4
+			session.GenerateGrid()
+			local seeds: { Vector3 } = {}
+			for _, v in mesh.getVertices() do
+				table.insert(seeds, v.position)
+			end
+			mesh.discoverRegion(seeds, math.huge)
+			local baseTris = countDict(mesh.getTriangles())
+			local baseVerts = countDict(mesh.getVertices())
+			t.expect(baseTris > 30).toBeTruthy()
+
+			-- Add a triangle off the current first boundary edge, pointing outward.
+			local function addOne(): Vector3
+				local sum = Vector3.zero
+				local cnt = 0
+				for _, v in mesh.getVertices() do
+					sum += v.position
+					cnt += 1
+				end
+				local centroid = sum / cnt
+				local be = mesh.getBoundaryEdges()[1]
+				local bv1 = mesh.getVertex(be.v1)
+				local bv2 = mesh.getVertex(be.v2)
+				assert(bv1 and bv2)
+				local edgeMid = (bv1.position + bv2.position) / 2
+				local outward = edgeMid - centroid
+				outward = Vector3.new(outward.X, 0, outward.Z)
+				outward = if outward.Magnitude < 0.01 then Vector3.xAxis else outward.Unit
+				local apex = edgeMid + outward * settings.GridSpacing
+				local tid = session.AddTriangleOffEdge(edgeMid, apex)
+				t.expect(tid).toBeTruthy()
+				return apex
+			end
+
+			local apex1 = addOne()
+			t.expect(mesh.findVertexNear(apex1, 0.5)).toBeTruthy()
+
+			-- Undo: triangle gone, no full rediscovery.
+			local before = session.GetRediscoverCount()
+			ChangeHistoryService:Undo()
+			settle()
+			t.expect(session.GetRediscoverCount()).toBe(before)
+			t.expect(mesh.findVertexNear(apex1, 0.5) == nil).toBeTruthy()
+			t.expect(countDict(mesh.getTriangles())).toBe(baseTris)
+			t.expect(countDict(mesh.getVertices())).toBe(baseVerts)
+
+			-- Redo: triangle back, still no full rediscovery.
+			ChangeHistoryService:Redo()
+			settle()
+			t.expect(session.GetRediscoverCount()).toBe(before)
+			t.expect(mesh.findVertexNear(apex1, 0.5)).toBeTruthy()
+
+			-- Back-to-back: add two more, then undo all three in a row. Each undo is a local
+			-- region re-discovery -- none triggers a whole-mesh rebuild.
+			addOne()
+			addOne()
+			t.expect(countDict(mesh.getTriangles())).toBe(baseTris + 3)
+			local before3 = session.GetRediscoverCount()
+			ChangeHistoryService:Undo()
+			settle()
+			ChangeHistoryService:Undo()
+			settle()
+			ChangeHistoryService:Undo()
+			settle()
+			t.expect(session.GetRediscoverCount()).toBe(before3)
+			t.expect(countDict(mesh.getTriangles())).toBe(baseTris)
+			t.expect(countDict(mesh.getVertices())).toBe(baseVerts)
+		end)
+	end)
+
+	t.test("workflow: interactive Add undo/redo re-discovers only the added region", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 3
+			settings.GridHeight = 3
+			settings.GridSpacing = 8 -- long edges, so the midpoint is clear of vertex snap
+			session.GenerateGrid()
+			settings.Mode = "Add"
+			settings.Thickness = 1
+			local baseTris = countDict(mesh.getTriangles())
+			t.expect(baseTris > 0).toBeTruthy()
+
+			-- Drive Add the way a user clicks: place an apex out in space, then click an
+			-- existing boundary edge to close a triangle onto it (the interactive handler,
+			-- not the programmatic AddTriangleOffEdge hook).
+			local boundary = mesh.getBoundaryEdges()
+			local edge = boundary[1]
+			local a = mesh.getVertex(edge.v1)
+			local b = mesh.getVertex(edge.v2)
+			local tri = mesh.getTriangle(edge.triangles[1])
+			assert(a and b and tri)
+			local part = tri.parts[1]
+			local edgeMid = (a.position + b.position) / 2
+
+			local sum, cnt = Vector3.zero, 0
+			for _, vv in mesh.getVertices() do
+				sum += vv.position
+				cnt += 1
+			end
+			local outward = (edgeMid - sum / cnt) * Vector3.new(1, 0, 1)
+			outward = if outward.Magnitude > 0.1 then outward.Unit else Vector3.new(1, 0, 0)
+			local apex = edgeMid + outward * 5
+
+			session.AddClickAt(apex, nil)
+			session.AddClickAt(edgeMid, part)
+			t.expect(countDict(mesh.getTriangles())).toBe(baseTris + 1)
+
+			-- Undo: the added triangle is forgotten and only its region re-discovered, with
+			-- no whole-mesh rebuild.
+			local before = session.GetRediscoverCount()
+			ChangeHistoryService:Undo()
+			settle()
+			t.expect(session.GetRediscoverCount()).toBe(before)
+			t.expect(countDict(mesh.getTriangles())).toBe(baseTris)
+
+			-- Redo: triangle back, still no full rediscovery.
+			ChangeHistoryService:Redo()
+			settle()
+			t.expect(session.GetRediscoverCount()).toBe(before)
+			t.expect(countDict(mesh.getTriangles())).toBe(baseTris + 1)
+		end)
+	end)
+
 	t.test("workflow: paint keeps later undo selections balanced", function()
 		withSession(function(session, mesh, settings)
 			session.GenerateGrid()

@@ -287,7 +287,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	-- A region delta restores an op locally. `noop = true` means the op changed no mesh
 	-- topology at all (e.g. Paint, which only recolours parts), so undo/redo need do nothing
 	-- -- ChangeHistory reverts the parts by itself.
-	type MoveDelta = { beforeSeeds: { Vector3 }, afterSeeds: { Vector3 }, radius: number, noop: boolean? }
+	-- allowMissing: tolerate a remove-seed that resolves to no vertex (an Add's new corner
+	-- doesn't exist in the "before" state). Move-style deltas leave it nil so a missing
+	-- vertex still triggers the safe full-rediscovery fallback.
+	type MoveDelta = { beforeSeeds: { Vector3 }, afterSeeds: { Vector3 }, radius: number, noop: boolean?, allowMissing: boolean? }
 	local mUndoDeltas: { MoveDelta | false } = {}
 	local mRedoDeltas: { MoveDelta | false } = {}
 	-- Counts full rediscoveries, so tests can confirm a move undo/redo took the local
@@ -384,6 +387,35 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return { beforeSeeds = beforeSeeds, afterSeeds = afterSeeds, radius = radius + 5 }
 	end
 
+	-- The affected region of an Add, from its new triangles' corner positions. Used for both
+	-- directions (forget whatever sits there, re-discover from the parts), with allowMissing
+	-- because on redo the brand-new corners don't exist in the pre-add mesh yet.
+	local function addDeltaFromCorners(corners: { Vector3 }): MoveDelta
+		local maxD = 0
+		for i = 1, #corners do
+			for j = i + 1, #corners do
+				maxD = math.max(maxD, (corners[i] - corners[j]).Magnitude)
+			end
+		end
+		return { beforeSeeds = corners, afterSeeds = corners, radius = maxD + 5, allowMissing = true }
+	end
+
+	local function buildAddDelta(triIds: { number }): MoveDelta
+		local corners: { Vector3 } = {}
+		for _, triId in triIds do
+			local tri = mMesh.getTriangle(triId)
+			if tri then
+				for _, vid in tri.vertices do
+					local v = mMesh.getVertex(vid)
+					if v then
+						table.insert(corners, v.position)
+					end
+				end
+			end
+		end
+		return addDeltaFromCorners(corners)
+	end
+
 	-- The full set a drag moved (selected + influenced verts) at their pre-drag positions,
 	-- used to build the move delta at the end of an interactive drag.
 	local function dragBeforePositions(): { [number]: Vector3 }
@@ -426,6 +458,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		for _, pos in removeSeeds do
 			local vid = mMesh.findVertexNear(pos, 0.1)
 			if not vid then
+				if delta.allowMissing then
+					continue
+				end
 				return false
 			end
 			local v = mMesh.getVertex(vid)
@@ -1302,13 +1337,16 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local centroid = (p1 + p2 + p3) / 3
 		-- Snapped onto existing geometry -> its folder; a fresh triangle -> a new one.
 		local parent = resolveNewParent(mAddSnappedParent)
-		mMesh.addTriangle(
+		local triId = mMesh.addTriangle(
 			p1, p2, p3,
 			resolveAddThickness(mAddSnappedThickness), parent, getTriangleProps(), centroid + Vector3.yAxis
 		)
 		clearAddState()
 		if recording then
 			ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+		end
+		if triId then
+			setTopUndoDelta(buildAddDelta({ triId }))
 		end
 		changeSignal:Fire()
 	end
@@ -1389,10 +1427,13 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		pushUndoSnapshot()
 		local recording = ChangeHistoryService:TryBeginRecording("PolyMap Add Triangle")
 		local thickness = resolveAddThickness(if parentTri then parentTri.thickness else nil)
-		mMesh.addTriangle(apex, a.position, b.position, thickness, resolveNewParent(snappedParent), props, hint)
+		local triId = mMesh.addTriangle(apex, a.position, b.position, thickness, resolveNewParent(snappedParent), props, hint)
 		clearAddState()
 		if recording then
 			ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+		end
+		if triId then
+			setTopUndoDelta(buildAddDelta({ triId }))
 		end
 		changeSignal:Fire()
 	end
@@ -1475,6 +1516,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			local parent = resolveNewParent(mAddBoundaryFolder)
 			local v1 = mMesh.getVertex(mAddBoundaryEdge.v1)
 			local v2 = mMesh.getVertex(mAddBoundaryEdge.v2)
+			local addCorners: { Vector3 } = {}
 			if v1 and v2 then
 				-- Derive hintPoint from the parent triangle's normal so new
 				-- triangles face the same direction. Using worldPos is unreliable:
@@ -1484,6 +1526,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				local addHintPoint = if mAddPlaneNormal
 					then edgeMid + mAddPlaneNormal * 0.5
 					else worldPos
+				addCorners = { v1.position, v2.position }
 
 				if target.type == "vertex" and target.vertexId then
 					local tv = mMesh.getVertex(target.vertexId)
@@ -1492,6 +1535,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 							v1.position, v2.position, tv.position,
 							resolveAddThickness(mAddSnappedThickness), parent, addProps, addHintPoint
 						)
+						table.insert(addCorners, tv.position)
 					end
 				elseif target.type == "edge" and target.edgeKey then
 					local targetEdge = mMesh.getEdges()[target.edgeKey]
@@ -1514,6 +1558,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 								v2.position, tb.position, ta.position,
 								resolveAddThickness(mAddSnappedThickness), parent, addProps, addHintPoint
 							)
+							table.insert(addCorners, ta.position)
+							table.insert(addCorners, tb.position)
 						end
 					end
 				elseif target.type == "plane" and target.position then
@@ -1521,6 +1567,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 						v1.position, v2.position, target.position,
 						resolveAddThickness(mAddSnappedThickness), parent, addProps, addHintPoint
 					)
+					table.insert(addCorners, target.position)
 				end
 			end
 
@@ -1528,6 +1575,11 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 			if recording then
 				ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+			end
+			-- Fast undo: forget + re-discover just the added region (allowMissing,
+			-- since on redo the new corners don't exist in the pre-add mesh).
+			if #addCorners > 2 then
+				setTopUndoDelta(addDeltaFromCorners(addCorners))
 			end
 			changeSignal:Fire()
 		end
@@ -3351,6 +3403,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				currentSettings.Thickness, resolveNewParent(parentForTriangle(parentTriId)), getTriangleProps(), hintPoint
 			)
 			return triId ~= nil
+		end, function()
+			return buildAddDelta({ triId :: number })
 		end)
 		changeSignal:Fire()
 		return triId
