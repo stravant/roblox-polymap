@@ -2471,9 +2471,11 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 	-- While a Paint eyedropper (Pick) is active, show a crosshair cursor over the
 	-- viewport. The plugin mouse only renders the built-in system cursors, not arbitrary
-	-- image assets, so we use rbxasset://SystemCursors/Cross. Tracked so the icon is only
-	-- assigned when it changes.
+	-- image assets, so we use rbxasset://SystemCursors/Cross. Restore the explicit arrow
+	-- cursor (not a blank icon, which misbehaves in the cursor handling stack) when the
+	-- Pick ends. Tracked so the icon is only assigned when it changes.
 	local kPickCursor = "rbxasset://SystemCursors/Cross"
+	local kArrowCursor = "rbxasset://SystemCursors/Arrow"
 	local mPickMouse = plugin:GetMouse()
 	local mLastPickIcon = ""
 
@@ -2483,7 +2485,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 			local wantIcon = if currentSettings.Mode == "Paint" and currentSettings.PaintEyedropper ~= "None"
 				then kPickCursor
-				else ""
+				else kArrowCursor
 			if wantIcon ~= mLastPickIcon then
 				mLastPickIcon = wantIcon
 				mPickMouse.Icon = wantIcon
@@ -2642,7 +2644,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 		task.cancel(delayedBeginCn)
 		task.cancel(cursorTargetTask)
-		mPickMouse.Icon = "" -- restore the default cursor
+		mPickMouse.Icon = kArrowCursor -- restore the arrow cursor (not a blank icon)
 	end
 
 	----------------------------------------------------------------------
