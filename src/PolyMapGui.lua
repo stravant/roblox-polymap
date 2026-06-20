@@ -1390,16 +1390,13 @@ local function CloseButton(props: {
 	})
 end
 
--- The global Settings tab: a high-level description of what PolyMap does plus
--- options that aren't tied to any single editing mode.
-local function SettingsPanel(props: {
-	Settings: Settings.PolyMapSettings,
-	UpdatedSettings: () -> (),
+-- The global Settings tab: a short how-to (Instructions), plus options that aren't
+-- tied to any single editing mode (Settings).
+local function InstructionsPanel(props: {
 	LayoutOrder: number?,
 })
-	local nextOrder = createNextOrder()
 	return e(SubPanel, {
-		Title = "Settings",
+		Title = "Instructions",
 		LayoutOrder = props.LayoutOrder,
 		Padding = UDim.new(0, 8),
 	}, {
@@ -1407,17 +1404,29 @@ local function SettingsPanel(props: {
 			Size = UDim2.new(1, 0, 0, 0),
 			AutomaticSize = Enum.AutomaticSize.Y,
 			BackgroundTransparency = 1,
-			Text = "PolyMap treats the parts in your place as one editable triangle mesh. Pick a mode above to move, add, delete, paint, generate, import, relax, or flatten geometry.",
+			Text = "PolyMap lets you edit the parts in your place by vertex as though they were part of a triangle mesh. Select \"Move\", click a vertex of one of your parts, and drag the handles to get started. Use Add Poly or Add Grid to create more geometry to edit.",
 			TextColor3 = Colors.WHITE,
 			TextWrapped = true,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextYAlignment = Enum.TextYAlignment.Top,
 			Font = Enum.Font.SourceSans,
 			TextSize = 16,
-			LayoutOrder = nextOrder(),
 		}),
+	})
+end
+
+local function SettingsPanel(props: {
+	Settings: Settings.PolyMapSettings,
+	UpdatedSettings: () -> (),
+	LayoutOrder: number?,
+})
+	return e(SubPanel, {
+		Title = "Settings",
+		LayoutOrder = props.LayoutOrder,
+		Padding = UDim.new(0, 8),
+	}, {
 		ShowVertices = e(HelpGui.WithHelpIcon, {
-			LayoutOrder = nextOrder(),
+			LayoutOrder = 1,
 			Subject = e(Checkbox, {
 				Label = "Show discovered vertices",
 				Checked = props.Settings.ShowDiscoveredVertices,
@@ -1566,6 +1575,9 @@ local function PolyMapGui(props: {
 			ModePanel = e(ModePanel, {
 				Settings = currentSettings,
 				UpdatedSettings = props.UpdatedSettings,
+				LayoutOrder = nextOrder(),
+			}),
+			InstructionsPanel = showSettings and e(InstructionsPanel, {
 				LayoutOrder = nextOrder(),
 			}),
 			SettingsPanel = showSettings and e(SettingsPanel, {

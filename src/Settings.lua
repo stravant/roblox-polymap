@@ -54,7 +54,7 @@ local function loadSettings(plugin: Plugin): PolyMapSettings
 		DoneTutorial = if raw.DoneTutorial ~= nil then raw.DoneTutorial else false,
 
 		Mode = raw.Mode or "Move",
-		ShowDiscoveredVertices = if raw.ShowDiscoveredVertices ~= nil then raw.ShowDiscoveredVertices else false,
+		ShowDiscoveredVertices = if raw.ShowDiscoveredVertices ~= nil then raw.ShowDiscoveredVertices else true,
 		DeleteTarget = raw.DeleteTarget or "Face",
 		DeleteRadius = raw.DeleteRadius or 0,
 		PaintRadius = raw.PaintRadius or 0,
