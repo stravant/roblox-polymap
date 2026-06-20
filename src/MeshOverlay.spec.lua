@@ -343,12 +343,13 @@ return function(t: TestTypes.TestContext)
 			return n
 		end
 
-		-- One marker per discovered vertex, each at the configured fixed size.
+		-- One marker per discovered vertex, each at the configured fixed size. The setting
+		-- is a diameter, so the sphere radius is half it.
 		t.expect(vertexCount > 1000).toBeTruthy()
 		t.expect(markerCount()).toBe(vertexCount)
 		for _, d in perfScreen:GetDescendants() do
 			if d:IsA("SphereHandleAdornment") then
-				t.expect(d.Radius).toBe(SIZE)
+				t.expect(d.Radius).toBe(SIZE / 2)
 			end
 		end
 

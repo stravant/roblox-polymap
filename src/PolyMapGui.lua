@@ -1915,7 +1915,7 @@ local function SettingsPanel(props: {
 				end,
 			}),
 			Help = e(HelpGui.BasicTooltip, {
-				HelpRichText = "Radius of the discovered-vertex dots, in studs. They are a fixed world size, so distant ones look smaller.",
+				HelpRichText = "Diameter of the discovered-vertex dots, in studs. They are a fixed world size, so distant ones look smaller.",
 			}),
 		}),
 	})
@@ -1977,6 +1977,7 @@ local function PolyMapGui(props: {
 				MarqueeEnd = select(2, session.GetMarquee()),
 				ShowDiscoveredVertices = currentSettings.ShowDiscoveredVertices,
 				DiscoveredVertexSize = currentSettings.DiscoveredVertexSize,
+				DiscoveredVersion = mesh.getVersion(),
 			}
 
 			-- Compute Add mode overlay props

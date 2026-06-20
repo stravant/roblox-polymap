@@ -28,6 +28,30 @@ local HOVER_VERTEX_COLOR = Color3.fromRGB(100, 150, 255)
 local DELETE_HOVER_VERTEX_COLOR = Color3.fromRGB(255, 80, 80)
 local DISCOVERED_VERTEX_COLOR = Color3.fromRGB(255, 255, 255)
 
+-- The discovered-vertex markers: one faint, fixed-size dot per vertex (the setting is a
+-- diameter, so the sphere radius is half it). Memoised on the mesh version, so a hover --
+-- which doesn't change the mesh -- doesn't reconcile all ~1000 of them; it re-renders only
+-- when a vertex is actually added, moved, or removed.
+local DiscoveredMarkers = React.memo(function(props: {
+	Mesh: TriangleMesh.TriangleMesh,
+	Size: number,
+	Version: number?,
+})
+	local r = props.Size / 2
+	local children: { [string]: any } = {}
+	for id, vertex in props.Mesh.getVertices() do
+		children["D_" .. tostring(id)] = e(VertexMarker, {
+			Position = vertex.position,
+			Color = DISCOVERED_VERTEX_COLOR,
+			Radius = r,
+			Transparency = 0.1,
+			AlwaysOnTop = false,
+			ZIndexOffset = 1,
+		})
+	end
+	return e(React.Fragment, nil, children)
+end)
+
 -- Renders the selected / hovered / discovered vertex markers.
 --
 -- The selected and hovered markers are depth-scaled to keep a steady on-screen size, so
@@ -44,6 +68,7 @@ local function VertexMarkers(props: {
 	HoverVertexIsDelete: boolean?,
 	ShowDiscoveredVertices: boolean?,
 	DiscoveredVertexSize: number?,
+	DiscoveredVersion: number?,
 })
 	local mesh = props.Mesh
 	local selectedVertices = props.SelectedVertices or {}
@@ -119,22 +144,16 @@ local function VertexMarkers(props: {
 		end
 	end
 
-	-- Every discovered vertex in a faint, de-emphasized state (opt-in via the
-	-- global "Show discovered vertices" setting). Skip ones already drawn as
-	-- selected or hovered so those stay prominent.
+	-- Every discovered vertex in a faint, de-emphasized state (opt-in via the global
+	-- "Show discovered vertices" setting), as a memoised child so a hover doesn't
+	-- reconcile them all. No need to skip the selected/hovered vertices: those markers
+	-- are AlwaysOnTop and cover the faint dot underneath them.
 	if props.ShowDiscoveredVertices then
-		for id, vertex in mesh.getVertices() do
-			if not selectedVertices[id] and props.HoverVertexId ~= id then
-				children["D_" .. tostring(id)] = e(VertexMarker, {
-					Position = vertex.position,
-					Color = DISCOVERED_VERTEX_COLOR,
-					Radius = props.DiscoveredVertexSize or 0.4,
-					Transparency = 0.1,
-					AlwaysOnTop = false,
-					ZIndexOffset = 1,
-				})
-			end
-		end
+		children["Discovered"] = e(DiscoveredMarkers, {
+			Mesh = mesh,
+			Size = props.DiscoveredVertexSize or 0.4,
+			Version = props.DiscoveredVersion,
+		})
 	end
 
 	return e(React.Fragment, nil, children)

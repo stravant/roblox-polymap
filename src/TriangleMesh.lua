@@ -48,6 +48,7 @@ export type Edge = {
 export type TriangleMesh = {
 	-- Data access
 	getVertices: () -> { [VertexId]: Vertex },
+	getVersion: () -> number,
 	getTriangles: () -> { [TriangleId]: Triangle },
 	getEdges: () -> { [string]: Edge },
 	getVertex: (id: VertexId) -> Vertex?,
@@ -133,6 +134,11 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 	-- Lookup edges by verts
 	local mEdgeLookup = {} :: {[vector]: EdgeId}
 
+	-- Bumped whenever the vertex set or any vertex position changes (add / move /
+	-- remove). The overlay's discovered-vertex markers memoise on this so they only
+	-- re-render when the mesh actually changes, not on every hover.
+	local mVersion = 0
+
 	local mNextVertexId = 1
 	local mNextTriangleId = 1
 	local mNextEdgeId = 1
@@ -174,6 +180,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		}
 		mVertices[id] = vertex
 		mSpatialHash[hash] = id
+		mVersion += 1
 		return id
 	end
 
@@ -301,6 +308,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			local hash = hashVertex(vertex.position)
 			mSpatialHash[hash] = nil
 			mVertices[vertexId] = nil
+			mVersion += 1
 		end
 	end
 
@@ -375,6 +383,10 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 
 	local function getVertices(): {[VertexId]: Vertex}
 		return mVertices
+	end
+
+	local function getVersion(): number
+		return mVersion
 	end
 
 	local function getTriangles(): {[TriangleId]: Triangle}
@@ -670,6 +682,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		if not vertex then
 			return
 		end
+		mVersion += 1
 
 		-- Update spatial hash
 		local oldHash = hashVertex(vertex.position)
@@ -846,6 +859,8 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			end
 		end
 
+		-- mergeVertices moves/removes vertices directly (not via moveVertex/cleanupVertex).
+		mVersion += 1
 		return true
 	end
 
@@ -2316,6 +2331,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 	return {
 		-- Data access
 		getVertices = getVertices,
+		getVersion = getVersion,
 		getTriangles = getTriangles,
 		getEdges = getEdges,
 		getVertex = getVertex,
