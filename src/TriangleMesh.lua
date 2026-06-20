@@ -66,7 +66,7 @@ export type TriangleMesh = {
 
 	-- Mutations
 	addTriangle: (v1Pos: Vector3, v2Pos: Vector3, v3Pos: Vector3, thickness: number, parent: Instance, props: fillTriangle.TriangleProps?, hintPoint: Vector3) -> number?,
-	removeTriangle: (triangleId: number) -> (),
+	removeTriangle: (triangleId: number, keepParts: boolean?) -> (),
 	moveVertex: (vertexId: number, newPosition: Vector3, thickness: number, props: fillTriangle.TriangleProps?) -> (),
 	moveVertices: (moves: { [number]: Vector3 }, thickness: number, props: fillTriangle.TriangleProps?) -> (),
 	mergeVertices: (survivorId: number, mergedId: number, position: Vector3, props: fillTriangle.TriangleProps?) -> boolean,
@@ -654,7 +654,10 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		return triId
 	end
 
-	local function removeTriangle(triangleId: number)
+	-- keepParts leaves the parts in the world (just forgets the triangle in-memory) so an
+	-- undo can locally re-discover them after ChangeHistory has reverted them, instead of
+	-- rebuilding the whole mesh. The Delete path leaves it nil/false to parent the parts out.
+	local function removeTriangle(triangleId: number, keepParts: boolean?)
 		local tri = mTriangles[triangleId]
 		if not tri then
 			return
@@ -670,7 +673,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		for _, part in tri.parts do
 			unlinkTriangleFromPart(tri, part)
 			-- Only parent-out if no other triangles reference this part
-			if not mPartToTriangles[part] then
+			if not keepParts and not mPartToTriangles[part] then
 				part.Parent = nil
 			end
 		end

@@ -466,6 +466,52 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("workflow: a move undo/redo re-discovers only its region, not the whole mesh", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 8
+			settings.GridHeight = 8
+			session.GenerateGrid()
+			-- Discover the whole grid so there is plenty of geometry the fast path must leave
+			-- untouched.
+			local seeds: { Vector3 } = {}
+			for _, v in mesh.getVertices() do
+				table.insert(seeds, v.position)
+			end
+			mesh.discoverRegion(seeds, math.huge)
+			local vertsAfter = countDict(mesh.getVertices())
+			t.expect(vertsAfter > 50).toBeTruthy()
+
+			local pickPos: Vector3? = nil
+			for _, v in mesh.getVertices() do
+				pickPos = v.position
+				break
+			end
+			assert(pickPos)
+			session.SelectVerticesNear({ pickPos })
+			session.MoveSelectedVertices(Vector3.new(0, 6, 0))
+
+			-- Undo, redo, undo the move -- each must take the local fast path (no full
+			-- rediscovery), and the geometry/counts must round-trip.
+			local before = session.GetRediscoverCount()
+			ChangeHistoryService:Undo()
+			settle()
+			ChangeHistoryService:Redo()
+			settle()
+			ChangeHistoryService:Undo()
+			settle()
+			t.expect(session.GetRediscoverCount()).toBe(before)
+			t.expect(mesh.findVertexNear(pickPos, 0.4)).toBeTruthy()
+			t.expect(mesh.findVertexNear(pickPos + Vector3.new(0, 6, 0), 0.4) == nil).toBeTruthy()
+			t.expect(countDict(mesh.getVertices())).toBe(vertsAfter)
+
+			-- Sanity that the counter does move: undoing the (non-move) GenerateGrid falls
+			-- back to a full rediscovery.
+			ChangeHistoryService:Undo()
+			settle()
+			t.expect(session.GetRediscoverCount() > before).toBeTruthy()
+		end)
+	end)
+
 	t.test("workflow: undo in the middle of a Move drag cancels it cleanly", function()
 		withSession(function(session, mesh)
 			session.GenerateGrid()

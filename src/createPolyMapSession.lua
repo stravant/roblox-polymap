@@ -273,6 +273,19 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local mUndoSelections: { { Vector3 } } = {}
 	local mRedoSelections: { { Vector3 } } = {}
 
+	-- A pair of stacks kept in EXACT lockstep with the selection stacks above. For a
+	-- move/rotate, an entry records its affected region (the moved vertices' before/after
+	-- positions and a radius covering their triangles) so undo/redo can re-discover just
+	-- that region instead of rebuilding the whole mesh; `false` means "no fast path --
+	-- full rediscovery" (every other op). Because the stacks are parallel, a `false` entry
+	-- simply falls back to the old path -- this can only ever speed things up.
+	type MoveDelta = { beforeSeeds: { Vector3 }, afterSeeds: { Vector3 }, radius: number }
+	local mUndoDeltas: { MoveDelta | false } = {}
+	local mRedoDeltas: { MoveDelta | false } = {}
+	-- Counts full rediscoveries, so tests can confirm a move undo/redo took the local
+	-- fast path (count unchanged) rather than rebuilding the whole mesh.
+	local mRediscoverCount = 0
+
 	-- Most recent non-empty rediscovery seeds. Lets redoing a creation after it
 	-- was fully undone (current mesh empty, so nothing to seed from) still
 	-- re-find the restored parts.
@@ -301,7 +314,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 	local function pushUndoSnapshot()
 		table.insert(mUndoSelections, captureSelectionPositions())
+		table.insert(mUndoDeltas, false)
 		mRedoSelections = {}
+		mRedoDeltas = {}
 	end
 
 	-- Run a one-shot mesh edit inside a ChangeHistory recording. The pre-op
@@ -310,13 +325,15 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	-- balanced with the committed waypoints so undo restores the right
 	-- selection (and no-ops/failed recordings don't desync them). Returns
 	-- whether a change was made.
-	local function runUndoableOperation(name: string, body: () -> boolean): boolean
+	local function runUndoableOperation(name: string, body: () -> boolean, captureDelta: (() -> MoveDelta)?): boolean
 		local snapshot = captureSelectionPositions()
 		local recording = ChangeHistoryService:TryBeginRecording(name)
 		local changed = body()
 		if changed then
 			table.insert(mUndoSelections, snapshot)
+			table.insert(mUndoDeltas, if captureDelta then captureDelta() else false)
 			mRedoSelections = {}
+			mRedoDeltas = {}
 			if recording then
 				ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
 			else
@@ -326,6 +343,91 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Cancel)
 		end
 		return changed
+	end
+
+	-- Record the affected region of a move/rotate: each moved vertex's before/after
+	-- position, plus a radius that comfortably covers its triangles, so an undo/redo can
+	-- forget exactly those triangles and re-discover them from the reverted parts.
+	local function buildMoveDelta(beforeByVid: { [number]: Vector3 }): MoveDelta
+		local beforeSeeds: { Vector3 } = {}
+		local afterSeeds: { Vector3 } = {}
+		local radius = 0
+		for vid, before in beforeByVid do
+			local v = mMesh.getVertex(vid)
+			if v then
+				table.insert(beforeSeeds, before)
+				table.insert(afterSeeds, v.position)
+				local moveDist = (v.position - before).Magnitude
+				local reach = 0
+				for _, tid in v.triangles do
+					local tri = mMesh.getTriangle(tid)
+					if tri then
+						for _, cvid in tri.vertices do
+							local cv = mMesh.getVertex(cvid)
+							if cv then
+								reach = math.max(reach, (cv.position - v.position).Magnitude)
+							end
+						end
+					end
+				end
+				radius = math.max(radius, moveDist + reach)
+			end
+		end
+		return { beforeSeeds = beforeSeeds, afterSeeds = afterSeeds, radius = radius + 5 }
+	end
+
+	-- The full set a drag moved (selected + influenced verts) at their pre-drag positions,
+	-- used to build the move delta at the end of an interactive drag.
+	local function dragBeforePositions(): { [number]: Vector3 }
+		local before: { [number]: Vector3 } = {}
+		for vid, pos in mSavedVertexPositions do
+			before[vid] = pos
+		end
+		for vid, info in mInfluencedVertices do
+			before[vid] = info.position
+		end
+		return before
+	end
+
+	-- Drag handles push their undo entry at drag start (a `false` placeholder); call this at
+	-- drag end to fill in the move delta they actually produced.
+	local function setTopUndoDelta(delta: MoveDelta)
+		if #mUndoDeltas > 0 then
+			mUndoDeltas[#mUndoDeltas] = delta
+		end
+	end
+
+	-- Restore a move/rotate by re-discovering only its affected region instead of the whole
+	-- mesh. `toBefore` = undo; otherwise redo. ChangeHistory has already reverted/re-applied
+	-- the parts, so we forget the triangles currently sitting on the moved vertices (keeping
+	-- their parts in the world) and re-discover them from the target positions -- reusing the
+	-- exact discovery logic, so wedge merging and back-face orientation come out right.
+	-- Returns false -- caller falls back to a full rediscoverMesh -- if the moved vertices
+	-- aren't where the delta expects them (something rebuilt the mesh since), keeping it safe.
+	local function tryBoundedRestore(delta: (MoveDelta | false)?, toBefore: boolean): boolean
+		if not delta then
+			return false
+		end
+		local removeSeeds = if toBefore then delta.afterSeeds else delta.beforeSeeds
+		local addSeeds = if toBefore then delta.beforeSeeds else delta.afterSeeds
+		local affected: { [number]: boolean } = {}
+		for _, pos in removeSeeds do
+			local vid = mMesh.findVertexNear(pos, 0.1)
+			if not vid then
+				return false
+			end
+			local v = mMesh.getVertex(vid)
+			if v then
+				for _, tid in v.triangles do
+					affected[tid] = true
+				end
+			end
+		end
+		for tid in affected do
+			mMesh.removeTriangle(tid, true)
+		end
+		mMesh.discoverRegion(addSeeds, delta.radius)
+		return true
 	end
 
 	local VERTEX_CLICK_RADIUS = 3.0 -- world-space radius to find vertex
@@ -2291,6 +2393,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		if mDragRecording then
 			ChangeHistoryService:FinishRecording(mDragRecording, Enum.FinishRecordingOperation.Commit)
 			mDragRecording = nil
+			-- Record the affected region so undo/redo can re-discover just it.
+			setTopUndoDelta(buildMoveDelta(dragBeforePositions()))
 		end
 		mIsDraggingHandle = false
 		changeSignal:Fire()
@@ -2329,6 +2433,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		if mDragRecording then
 			ChangeHistoryService:FinishRecording(mDragRecording, Enum.FinishRecordingOperation.Commit)
 			mDragRecording = nil
+			setTopUndoDelta(buildMoveDelta(dragBeforePositions()))
 		end
 		mIsDraggingHandle = false
 		mDragCentroid = nil
@@ -2508,6 +2613,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	end)
 
 	local function rediscoverMesh(extraSeeds: { Vector3 }?)
+		mRediscoverCount += 1
 		-- Collect all known vertex positions before clearing, then clear and
 		-- rediscover from scratch. After an undo/redo the parts have been
 		-- reverted (moved, or deleted-then-restored, etc.), so we must rebuild
@@ -2586,10 +2692,17 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		cancelTransientActions()
 		-- Save current selection positions for redo
 		table.insert(mRedoSelections, captureSelectionPositions())
+		-- Pop the parallel delta entry and carry it onto the redo stack.
+		local undoDelta = table.remove(mUndoDeltas)
+		table.insert(mRedoDeltas, undoDelta or false)
 		-- The undo snapshot holds the pre-op positions, which match the reverted
 		-- world -- seed rediscovery from them so a fully-moved region isn't lost.
 		local undoSelection = table.remove(mUndoSelections)
-		rediscoverMesh(undoSelection)
+		-- A recorded move/rotate re-discovers just its own region; anything else -- or a
+		-- region that has since been rebuilt -- falls back to the full rediscovery.
+		if not tryBoundedRestore(undoDelta, true) then
+			rediscoverMesh(undoSelection)
+		end
 		-- Restore selection from saved positions
 		if undoSelection then
 			restoreSelectionFromPositions(undoSelection)
@@ -2609,10 +2722,15 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		cancelTransientActions()
 		-- Save current selection positions for undo
 		table.insert(mUndoSelections, captureSelectionPositions())
+		-- Pop the parallel delta entry and carry it back onto the undo stack.
+		local redoDelta = table.remove(mRedoDeltas)
+		table.insert(mUndoDeltas, redoDelta or false)
 		-- The redo snapshot holds the post-op positions, which match the re-applied
 		-- world -- seed rediscovery from them for the same reason as undo.
 		local redoSelection = table.remove(mRedoSelections)
-		rediscoverMesh(redoSelection)
+		if not tryBoundedRestore(redoDelta, false) then
+			rediscoverMesh(redoSelection)
+		end
 		-- Restore selection from saved positions
 		if redoSelection then
 			restoreSelectionFromPositions(redoSelection)
@@ -3054,6 +3172,14 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			return
 		end
 
+		local before: { [number]: Vector3 } = {}
+		for vid in mSelectedVertices do
+			local v = mMesh.getVertex(vid)
+			if v then
+				before[vid] = v.position
+			end
+		end
+
 		runUndoableOperation("PolyMap Move", function(): boolean
 			local moves: { [number]: Vector3 } = {}
 			for vid in mSelectedVertices do
@@ -3064,8 +3190,16 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			end
 			mMesh.moveVertices(moves, currentSettings.Thickness, getTriangleProps())
 			return true
+		end, function()
+			return buildMoveDelta(before)
 		end)
 		changeSignal:Fire()
+	end
+
+	-- Test hook: how many full rediscoveries have run (a move undo/redo that takes the local
+	-- fast path leaves this unchanged).
+	session.GetRediscoverCount = function(): number
+		return mRediscoverCount
 	end
 
 	----------------------------------------------------------------------
