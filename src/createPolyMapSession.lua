@@ -279,6 +279,13 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local mStrokeDeletedCorners: { Vector3 } = {}
 	local mStrokeDeletedRadius = 0
 
+	-- Corners of every triangle a Heal stroke merges or folds, captured around each change,
+	-- plus the largest single-triangle reach. Heal both moves verts and changes topology, but
+	-- only within HealTolerance, so the same corners serve as both the forget and re-discover
+	-- seeds in either direction (the union covers the torn and the healed positions).
+	local mStrokeHealSeeds: { Vector3 } = {}
+	local mStrokeHealRadius = 0
+
 	-- Import progress: nil when idle, 0-1 when importing
 	local mImportProgress: number? = nil
 
@@ -1628,27 +1635,36 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return nil
 	end
 
-	-- Record a triangle's corners (and its own span) for the Delete undo delta, just before
-	-- it is removed. Called per removed triangle so the accumulated seeds cover exactly the
-	-- swept region while the radius stays local to a single triangle.
-	local function accumulateDeletedTriangle(triId: number)
+	-- Append a triangle's corner positions to `seeds` and return its own longest-edge span.
+	-- Shared by the topology-changing strokes (Delete, Heal) to build a region delta whose
+	-- seeds cover exactly the affected triangles and whose radius stays local to one triangle.
+	local function collectTriangleCorners(triId: number, seeds: { Vector3 }): number
 		local tri = mMesh.getTriangle(triId)
 		if not tri then
-			return
+			return 0
 		end
 		local corners: { Vector3 } = {}
 		for _, vid in tri.vertices do
 			local v = mMesh.getVertex(vid)
 			if v then
 				table.insert(corners, v.position)
-				table.insert(mStrokeDeletedCorners, v.position)
+				table.insert(seeds, v.position)
 			end
 		end
+		local span = 0
 		for i = 1, #corners do
 			for j = i + 1, #corners do
-				mStrokeDeletedRadius = math.max(mStrokeDeletedRadius, (corners[i] - corners[j]).Magnitude)
+				span = math.max(span, (corners[i] - corners[j]).Magnitude)
 			end
 		end
+		return span
+	end
+
+	-- Record a triangle's corners (and its own span) for the Delete undo delta, just before
+	-- it is removed. Called per removed triangle so the accumulated seeds cover exactly the
+	-- swept region while the radius stays local to a single triangle.
+	local function accumulateDeletedTriangle(triId: number)
+		mStrokeDeletedRadius = math.max(mStrokeDeletedRadius, collectTriangleCorners(triId, mStrokeDeletedCorners))
 	end
 
 	local function applyDeleteAtCursor(screenPosOverride: Vector2?)
@@ -2087,9 +2103,22 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				local vb = mMesh.getVertex(p.b)
 				if va and vb then
 					local mid = (va.position + vb.position) / 2
+					local aPos, bPos = va.position, vb.position
 					if mMesh.mergeVertices(p.a, p.b, mid, nil) then
 						removed[p.b] = true
 						count += 1
+						-- Region delta: the torn pair's pre-merge positions (so the pre-heal
+						-- state can be forgotten/re-discovered) plus the survivor's now-merged
+						-- triangles (their corners and span).
+						table.insert(mStrokeHealSeeds, aPos)
+						table.insert(mStrokeHealSeeds, bPos)
+						local survivor = mMesh.getVertex(p.a)
+						if survivor then
+							for _, tid in survivor.triangles do
+								mStrokeHealRadius =
+									math.max(mStrokeHealRadius, collectTriangleCorners(tid, mStrokeHealSeeds))
+							end
+						end
 					end
 				end
 			end
@@ -2118,8 +2147,17 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		for _, footVid in feet do
 			local v = mMesh.getVertex(footVid)
 			if v and #v.triangles == 2 then
-				if mMesh.mergeWedgeTriangles(v.triangles[1], v.triangles[2], tolerance, nil) then
+				local t1, t2 = v.triangles[1], v.triangles[2]
+				-- Capture both wedges' corners before the fold collapses them; commit to the
+				-- region delta only if the fold actually happens.
+				local foldSeeds: { Vector3 } = {}
+				local foldSpan = math.max(collectTriangleCorners(t1, foldSeeds), collectTriangleCorners(t2, foldSeeds))
+				if mMesh.mergeWedgeTriangles(t1, t2, tolerance, nil) then
 					count += 1
+					for _, s in foldSeeds do
+						table.insert(mStrokeHealSeeds, s)
+					end
+					mStrokeHealRadius = math.max(mStrokeHealRadius, foldSpan)
 				end
 			end
 		end
@@ -2127,15 +2165,21 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return count
 	end
 
-	local function applyHealAtCursor()
-		local worldPos = getStrokeWorldPos()
-		if not worldPos then
+	local function applyHealAtCursor(worldPosOverride: Vector3?)
+		local hit: Vector3?
+		if worldPosOverride then
+			hit = worldPosOverride
+		else
+			local worldPos = getStrokeWorldPos()
+			hit = if worldPos then worldPos.hit else nil
+		end
+		if not hit then
 			return
 		end
 		if mStrokeSeedTriangleId then
-			discoverAndWalkSurface(mStrokeSeedTriangleId, worldPos.hit, currentSettings.HealRadius)
+			discoverAndWalkSurface(mStrokeSeedTriangleId, hit, currentSettings.HealRadius)
 		end
-		if healRegion(worldPos.hit) > 0 then
+		if healRegion(hit) > 0 then
 			changeSignal:Fire()
 		end
 	end
@@ -2145,6 +2189,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		mStrokeTouchedBefore = {}
 		mStrokeDeletedCorners = {}
 		mStrokeDeletedRadius = 0
+		mStrokeHealSeeds = {}
+		mStrokeHealRadius = 0
 		mDeleteLastScreenPos = nil
 		mDeleteLastHitPoint = nil
 		mDeleteLastHitNormal = nil
@@ -2213,6 +2259,19 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 							beforeSeeds = mStrokeDeletedCorners,
 							afterSeeds = mStrokeDeletedCorners,
 							radius = mStrokeDeletedRadius + 5,
+							allowMissing = true,
+						})
+					end
+				elseif currentSettings.Mode == "Heal" then
+					-- Heal merged/folded a torn seam: forget and re-discover only that region.
+					-- The seeds carry both the torn and healed positions, so the same delta
+					-- restores either direction; allowMissing, since a seed position may have
+					-- no vertex in the opposite state.
+					if #mStrokeHealSeeds > 0 then
+						setTopUndoDelta({
+							beforeSeeds = mStrokeHealSeeds,
+							afterSeeds = mStrokeHealSeeds,
+							radius = mStrokeHealRadius + 5,
 							allowMissing = true,
 						})
 					end
@@ -3486,6 +3545,16 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		startStroke()
 		for _, pos in worldPositions do
 			applyFlattenAtCursor({ hit = pos, normal = Vector3.yAxis })
+		end
+		endStroke()
+	end
+
+	-- Test hook: run a Heal stroke over the given WORLD positions, going through the real
+	-- stroke machinery (recording + region-delta capture) so its undo can be exercised.
+	session.DebugHealStroke = function(worldPositions: { Vector3 })
+		startStroke()
+		for _, pos in worldPositions do
+			applyHealAtCursor(pos)
 		end
 		endStroke()
 	end

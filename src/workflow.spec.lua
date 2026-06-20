@@ -2809,6 +2809,46 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("workflow: Heal undo/redo re-discovers only the healed region", function()
+		withSession(function(session, mesh, settings)
+			settings.Mode = "Heal"
+			settings.HealRadius = 8
+			settings.HealTolerance = 1
+
+			-- The torn-seam setup from the merge test: two triangles 0.2 studs apart.
+			local base = kRegionCenter
+			local up = base + Vector3.new(2, 6, 0)
+			mesh.addTriangle(
+				base + Vector3.new(0, 0, 0), base + Vector3.new(4, 0, 0), base + Vector3.new(2, 0, 3),
+				1, workspace, nil, up
+			)
+			mesh.addTriangle(
+				base + Vector3.new(0, 0, -0.2), base + Vector3.new(4, 0, -0.2), base + Vector3.new(2, 0, -3),
+				1, workspace, nil, up
+			)
+			t.expect(countDict(mesh.getVertices())).toBe(6)
+			-- Commit the torn geometry as the undo baseline (the live tool always heals
+			-- already-committed geometry).
+			ChangeHistoryService:SetWaypoint("heal-test-setup")
+
+			session.DebugHealStroke({ base + Vector3.new(2, 0, -0.1) })
+			t.expect(countDict(mesh.getVertices())).toBe(4) -- both seam ends stitched
+
+			-- Undo: the tear reopens, and only the healed region is re-discovered.
+			local before = session.GetRediscoverCount()
+			ChangeHistoryService:Undo()
+			settle()
+			t.expect(session.GetRediscoverCount()).toBe(before)
+			t.expect(countDict(mesh.getVertices())).toBe(6)
+
+			-- Redo: stitched again, still no whole-mesh rebuild.
+			ChangeHistoryService:Redo()
+			settle()
+			t.expect(session.GetRediscoverCount()).toBe(before)
+			t.expect(countDict(mesh.getVertices())).toBe(4)
+		end)
+	end)
+
 	t.test("Heal: folds a bent wedge pair into one logical triangle", function()
 		withSession(function(session, mesh, settings)
 			settings.Mode = "Heal"
