@@ -54,6 +54,8 @@ local function makeSettings(): Settings.PolyMapSettings
 		RelaxStrength = 0.5,
 		FlattenRadius = 5,
 		FlattenStrength = 0.5,
+		HealRadius = 5,
+		HealTolerance = 1,
 		ImportImageId = "",
 		ImportWidth = 50,
 		ImportHeight = 50,
@@ -2443,6 +2445,55 @@ return function(t: TestTypes.TestContext)
 			settings.PaintEyedropper = "None"
 			session.DebugEscape()
 			t.expect(settings.PaintEyedropper).toBe("None")
+		end)
+	end)
+
+	t.test("Heal: brushing a torn seam merges the loose vertices", function()
+		withSession(function(session, mesh, settings)
+			settings.Mode = "Heal"
+			settings.HealRadius = 8
+			settings.HealTolerance = 1
+
+			-- Two triangles that should meet along a line but are torn 0.2 studs apart.
+			-- Built around the swept work region so they are cleaned up afterwards.
+			local base = kRegionCenter
+			local up = base + Vector3.new(2, 6, 0)
+			mesh.addTriangle(
+				base + Vector3.new(0, 0, 0), base + Vector3.new(4, 0, 0), base + Vector3.new(2, 0, 3),
+				1, workspace.Terrain, nil, up
+			)
+			mesh.addTriangle(
+				base + Vector3.new(0, 0, -0.2), base + Vector3.new(4, 0, -0.2), base + Vector3.new(2, 0, -3),
+				1, workspace.Terrain, nil, up
+			)
+
+			local function countDict(d: any): number
+				local n = 0
+				for _ in d do
+					n += 1
+				end
+				return n
+			end
+			local function boundaryCount(): number
+				local n = 0
+				for _, edge in mesh.getEdges() do
+					if #edge.triangles == 1 then
+						n += 1
+					end
+				end
+				return n
+			end
+
+			-- Torn: six separate vertices, no shared edge.
+			t.expect(countDict(mesh.getVertices())).toBe(6)
+			t.expect(boundaryCount()).toBe(6)
+
+			session.HealAt(base + Vector3.new(2, 0, -0.1))
+
+			-- Both ends of the seam stitched: 6 -> 4 vertices, and the seam edge is now
+			-- shared (interior), leaving four boundary edges.
+			t.expect(countDict(mesh.getVertices())).toBe(4)
+			t.expect(boundaryCount()).toBe(4)
 		end)
 	end)
 

@@ -1006,6 +1006,12 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					newHoverTriangles = discoverAndWalkSurface(hitTriangleId, worldPos, radius)
 				end
 			end
+			if mode == "Heal" then
+				local radius = currentSettings.HealRadius
+				if radius > 0 and hitTriangleId then
+					newHoverTriangles = discoverAndWalkSurface(hitTriangleId, worldPos, radius)
+				end
+			end
 		end
 
 		if mode == "Add" and not mAddBoundaryEdge then
@@ -1794,6 +1800,102 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		changeSignal:Fire()
 	end
 
+	-- Heal: stitch "torn" seams in the brushed region. A tear shows up as two boundary
+	-- vertices -- a free edge is left on each side of the split -- that sit very close
+	-- together but were discovered as separate vertices because their parts drifted
+	-- more than the merge tolerance apart. Merging such a pair back into one vertex also
+	-- rejoins their two boundary edges into a single shared edge, closing the gap.
+	-- Returns the number of merges performed.
+	local function healRegion(hitPos: Vector3): number
+		local radius = currentSettings.HealRadius
+		local tolerance = currentSettings.HealTolerance
+		if radius <= 0 or tolerance <= 0 then
+			return 0
+		end
+
+		-- Make sure both sides of any seam in range are actually in the mesh.
+		discoverRegionViewed({ hitPos }, radius + tolerance + 5)
+
+		-- Boundary vertices within range are the only tear candidates: an interior
+		-- vertex is already fully stitched, and limiting to boundaries avoids merging
+		-- unrelated geometry that merely passes nearby.
+		local isBoundary: { [number]: boolean } = {}
+		for _, edge in mMesh.getBoundaryEdges() do
+			isBoundary[edge.v1] = true
+			isBoundary[edge.v2] = true
+		end
+		local candidates: { number } = {}
+		for vid in isBoundary do
+			local v = mMesh.getVertex(vid)
+			if v and (v.position - hitPos).Magnitude <= radius then
+				table.insert(candidates, vid)
+			end
+		end
+
+		-- Candidate pairs: boundary vertices within `tolerance` that don't already share
+		-- a triangle (merging two corners of one face would collapse it). Closest first,
+		-- so the most confident merges win.
+		local tearPairs: { { a: number, b: number, d: number } } = {}
+		for i = 1, #candidates do
+			local va = mMesh.getVertex(candidates[i])
+			if va then
+				for j = i + 1, #candidates do
+					local vb = mMesh.getVertex(candidates[j])
+					if vb then
+						local d = (va.position - vb.position).Magnitude
+						if d > 0 and d <= tolerance then
+							local shareTri = false
+							for _, tid in va.triangles do
+								if table.find(vb.triangles, tid) then
+									shareTri = true
+									break
+								end
+							end
+							if not shareTri then
+								table.insert(tearPairs, { a = candidates[i], b = candidates[j], d = d })
+							end
+						end
+					end
+				end
+			end
+		end
+		table.sort(tearPairs, function(p, q)
+			return p.d < q.d
+		end)
+
+		-- Greedily merge closest pairs. A vertex can be absorbed once; a survivor may
+		-- keep absorbing others (a junction where 3+ torn parts meet).
+		local removed: { [number]: boolean } = {}
+		local count = 0
+		for _, p in tearPairs do
+			if not removed[p.a] and not removed[p.b] then
+				local va = mMesh.getVertex(p.a)
+				local vb = mMesh.getVertex(p.b)
+				if va and vb then
+					local mid = (va.position + vb.position) / 2
+					if mMesh.mergeVertices(p.a, p.b, mid, nil) then
+						removed[p.b] = true
+						count += 1
+					end
+				end
+			end
+		end
+		return count
+	end
+
+	local function applyHealAtCursor()
+		local worldPos = getStrokeWorldPos()
+		if not worldPos then
+			return
+		end
+		if mStrokeSeedTriangleId then
+			discoverAndWalkSurface(mStrokeSeedTriangleId, worldPos.hit, currentSettings.HealRadius)
+		end
+		if healRegion(worldPos.hit) > 0 then
+			changeSignal:Fire()
+		end
+	end
+
 	local function startStroke()
 		local mode = currentSettings.Mode
 		mDeleteLastScreenPos = nil
@@ -1817,6 +1919,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		elseif mode == "Flatten" then
 			pushUndoSnapshot()
 			mStrokeRecording = ChangeHistoryService:TryBeginRecording("PolyMap Flatten")
+		elseif mode == "Heal" then
+			pushUndoSnapshot()
+			mStrokeRecording = ChangeHistoryService:TryBeginRecording("PolyMap Heal")
 		end
 		mStrokeDragging = true
 	end
@@ -1831,6 +1936,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			applyRelaxAtCursor()
 		elseif mode == "Flatten" then
 			applyFlattenAtCursor()
+		elseif mode == "Heal" then
+			applyHealAtCursor()
 		end
 	end
 
@@ -1937,7 +2044,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			handleSelectClick(result.Position, hitPart)
 		elseif mode == "Add" then
 			handleAddClick(result.Position, hitPart, result.Normal)
-		elseif mode == "Delete" or mode == "Paint" or mode == "Relax" or mode == "Flatten" then
+		elseif mode == "Delete" or mode == "Paint" or mode == "Relax" or mode == "Flatten" or mode == "Heal" then
 			startStroke()
 			applyStrokeAtCursor()
 		end
@@ -2648,7 +2755,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 	session.GetOutlineTriangleIds = function(): { number }
 		local mode = currentSettings.Mode
-		if mode == "Delete" or mode == "Paint" or mode == "Relax" or mode == "Flatten" then
+		if mode == "Delete" or mode == "Paint" or mode == "Relax" or mode == "Flatten" or mode == "Heal" then
 			return mHoverTriangleIds
 		end
 		if mode == "Move" or mode == "Rotate" then
@@ -3060,6 +3167,14 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	-- Test hook: run the real Escape handler (cancels in-progress Add / grid / Pick).
 	session.DebugEscape = function()
 		handleEscape()
+	end
+
+	-- Test hook: run a Heal pass centered on a world position (drives the real
+	-- healRegion: discover -> find torn boundary-vertex pairs -> merge).
+	session.HealAt = function(worldPos: Vector3)
+		if healRegion(worldPos) > 0 then
+			changeSignal:Fire()
+		end
 	end
 
 	session.PaintAt = function(worldPos: Vector3)

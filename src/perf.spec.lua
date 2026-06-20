@@ -50,6 +50,8 @@ local function makeSettings(width: number, height: number): Settings.PolyMapSett
 		RelaxStrength = 0.5,
 		FlattenRadius = 5,
 		FlattenStrength = 0.5,
+		HealRadius = 5,
+		HealTolerance = 1,
 		ImportImageId = "",
 		ImportWidth = 50,
 		ImportHeight = 50,

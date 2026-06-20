@@ -103,6 +103,8 @@ local function getStatusText(mode: string, settings: Settings.PolyMapSettings, s
 		return "Click and drag to regularize mesh topology within the brush radius."
 	elseif mode == "Flatten" then
 		return "Click and drag to smooth surface normals within the brush radius."
+	elseif mode == "Heal" then
+		return "Brush over a torn seam to merge nearby vertices and close the gap."
 	end
 	return ""
 end
@@ -229,7 +231,7 @@ local function ModePanel(props: {
 		}),
 		Row4 = row(4, {
 			Flatten = modeChip("Flatten", "Flatten", 1),
-			Empty1 = emptySlot(2),
+			Heal = modeChip("Heal", "Heal", 2),
 			Empty2 = emptySlot(3),
 		}),
 	})
@@ -1560,6 +1562,56 @@ local function FlattenPanel(props: {
 	})
 end
 
+local function HealPanel(props: {
+	Settings: Settings.PolyMapSettings,
+	UpdatedSettings: () -> (),
+	LayoutOrder: number?,
+})
+	local nextOrder = createNextOrder()
+	return e(SubPanel, {
+		Title = "Heal",
+		LayoutOrder = props.LayoutOrder,
+		Padding = UDim.new(0, 4),
+	}, {
+		RadiusInput = e(HelpGui.WithHelpIcon, {
+			LayoutOrder = nextOrder(),
+			Subject = e(Slider, {
+				Label = "Radius",
+				Value = props.Settings.HealRadius,
+				Min = 1,
+				Max = 30,
+				Step = 1,
+				ValueChanged = function(newValue: number)
+					props.Settings.HealRadius = newValue
+					props.UpdatedSettings()
+				end,
+			}),
+			Help = e(HelpGui.BasicTooltip, {
+				HelpRichText = "<b>Heal</b> finds <i>tears</i> in the brushed area — adjacent parts whose shared edge no longer lines up — and merges the loose vertices back together so the surface is continuous again.<br /><br />This sets the brush radius, in studs.",
+			}),
+		}),
+		ToleranceInput = e(HelpGui.WithHelpIcon, {
+			LayoutOrder = nextOrder(),
+			Subject = e(NumberInput, {
+				Label = "Tolerance",
+				Value = props.Settings.HealTolerance,
+				Unit = " studs",
+				ValueEntered = function(newValue: number)
+					if newValue > 0 then
+						props.Settings.HealTolerance = newValue
+						props.UpdatedSettings()
+						return newValue
+					end
+					return nil
+				end,
+			}),
+			Help = e(HelpGui.BasicTooltip, {
+				HelpRichText = "The largest gap that counts as a tear — two loose vertices closer than this get merged.<br />Raise it to close bigger tears; lower it to avoid merging things that should stay apart.",
+			}),
+		}),
+	})
+end
+
 local function CloseButton(props: {
 	HandleAction: (string) -> (),
 	LayoutOrder: number?,
@@ -1609,6 +1661,7 @@ local function InstructionsPanel(props: {
 				.. "<br />• <b>Add Poly</b> / <b>Add Grid</b> — build new geometry (or <b>Import</b> a heightmap)"
 				.. "<br />• <b>Paint</b> — brush on color and material"
 				.. "<br />• <b>Relax</b> / <b>Flatten</b> — even out spacing or smooth heights"
+				.. "<br />• <b>Heal</b> — stitch torn seams where parts no longer line up"
 				.. "<br />• <b>Delete</b> — remove triangles or vertices",
 			TextColor3 = Colors.WHITE,
 			TextWrapped = true,
@@ -1674,6 +1727,7 @@ local function PolyMapGui(props: {
 	local showThickness = mode == "Add" or mode == "Generate" or mode == "Import"
 	local showRelax = mode == "Relax"
 	local showFlatten = mode == "Flatten"
+	local showHeal = mode == "Heal"
 
 	return e(PluginGui, {
 		Config = POLYMAP_CONFIG,
@@ -1848,6 +1902,11 @@ local function PolyMapGui(props: {
 				LayoutOrder = nextOrder(),
 			}),
 			FlattenPanel = showFlatten and e(FlattenPanel, {
+				Settings = currentSettings,
+				UpdatedSettings = props.UpdatedSettings,
+				LayoutOrder = nextOrder(),
+			}),
+			HealPanel = showHeal and e(HealPanel, {
 				Settings = currentSettings,
 				UpdatedSettings = props.UpdatedSettings,
 				LayoutOrder = nextOrder(),
