@@ -271,6 +271,14 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	-- delta so undo/redo re-discovers only the brushed region, not the whole mesh.
 	local mStrokeTouchedBefore: { [number]: Vector3 } = {}
 
+	-- Corners of every triangle a Delete stroke removes, captured just before removal, plus
+	-- the largest single-triangle reach seen. At stroke end these become an Add-style region
+	-- delta (delete is the inverse of add) so undo/redo touches only the deleted region. The
+	-- radius is kept local -- the biggest deleted triangle's span, not the whole stroke's --
+	-- so a long drag re-discovers a thin swept region rather than one giant sphere.
+	local mStrokeDeletedCorners: { Vector3 } = {}
+	local mStrokeDeletedRadius = 0
+
 	-- Import progress: nil when idle, 0-1 when importing
 	local mImportProgress: number? = nil
 
@@ -1620,6 +1628,29 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return nil
 	end
 
+	-- Record a triangle's corners (and its own span) for the Delete undo delta, just before
+	-- it is removed. Called per removed triangle so the accumulated seeds cover exactly the
+	-- swept region while the radius stays local to a single triangle.
+	local function accumulateDeletedTriangle(triId: number)
+		local tri = mMesh.getTriangle(triId)
+		if not tri then
+			return
+		end
+		local corners: { Vector3 } = {}
+		for _, vid in tri.vertices do
+			local v = mMesh.getVertex(vid)
+			if v then
+				table.insert(corners, v.position)
+				table.insert(mStrokeDeletedCorners, v.position)
+			end
+		end
+		for i = 1, #corners do
+			for j = i + 1, #corners do
+				mStrokeDeletedRadius = math.max(mStrokeDeletedRadius, (corners[i] - corners[j]).Magnitude)
+			end
+		end
+	end
+
 	local function applyDeleteAtCursor(screenPosOverride: Vector2?)
 		local screenPos = screenPosOverride or UserInputService:GetMouseLocation()
 		-- Drill guard: once we've deleted at a spot, don't keep deleting the parts
@@ -1691,6 +1722,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					if vertex then
 						local triIds = table.clone(vertex.triangles)
 						for _, triId in triIds do
+							accumulateDeletedTriangle(triId)
 							mMesh.removeTriangle(triId)
 						end
 						mSelectedVertices[vid] = nil
@@ -1715,6 +1747,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				end
 			end
 			for _, removeId in toRemove do
+				accumulateDeletedTriangle(removeId)
 				mMesh.removeTriangle(removeId)
 			end
 			if #toRemove > 0 then
@@ -2110,6 +2143,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local function startStroke()
 		local mode = currentSettings.Mode
 		mStrokeTouchedBefore = {}
+		mStrokeDeletedCorners = {}
+		mStrokeDeletedRadius = 0
 		mDeleteLastScreenPos = nil
 		mDeleteLastHitPoint = nil
 		mDeleteLastHitNormal = nil
@@ -2168,6 +2203,19 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				if currentSettings.Mode == "Paint" then
 					-- Paint only recolours parts; undo/redo need no mesh rediscovery.
 					setTopUndoDelta({ beforeSeeds = {}, afterSeeds = {}, radius = 0, noop = true })
+				elseif currentSettings.Mode == "Delete" then
+					-- Delete is the inverse of Add: the deleted corners are both the region to
+					-- forget (on redo, after ChangeHistory removes the parts again) and the
+					-- region to re-discover (on undo, after it restores them). allowMissing,
+					-- since the deleted verts are gone from the mesh until a re-discovery.
+					if #mStrokeDeletedCorners > 0 then
+						setTopUndoDelta({
+							beforeSeeds = mStrokeDeletedCorners,
+							afterSeeds = mStrokeDeletedCorners,
+							radius = mStrokeDeletedRadius + 5,
+							allowMissing = true,
+						})
+					end
 				elseif next(mStrokeTouchedBefore) ~= nil then
 					-- Relax/Flatten moved a region of vertices; restore just that region.
 					setTopUndoDelta(buildMoveDelta(mStrokeTouchedBefore))

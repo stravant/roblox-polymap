@@ -2308,6 +2308,57 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("workflow: Delete undo/redo re-discovers only the deleted region", function()
+		withSession(function(session, mesh, settings)
+			settings.Mode = "Delete"
+			settings.DeleteTarget = "Face"
+			settings.DeleteRadius = 0
+
+			local cam = workspace.CurrentCamera
+			assert(cam)
+			local vp = cam:WorldToViewportPoint(kRegionCenter)
+			local ray = cam:ViewportPointToRay(vp.X, vp.Y)
+			local O, D = ray.Origin, ray.Direction.Unit
+			local up = if math.abs(D.Y) < 0.9 then Vector3.yAxis else Vector3.xAxis
+			local u = D:Cross(up).Unit
+
+			-- Three parts side by side, deleted in one drag stroke (one undo entry).
+			-- Parent under workspace (not Terrain) so ChangeHistory records their removal
+			-- the way it does for real PolyMapMesh folders.
+			local v = D:Cross(u).Unit
+			local screenPositions: { Vector2 } = {}
+			for _, off in { -9, 0, 9 } do
+				local center = O + D * 24 + u * off
+				local s = 3.5
+				mesh.addTriangle(center + u * s, center - u * s + v * s, center - u * s - v * s, 1, workspace, nil, -D)
+				local cvp = cam:WorldToViewportPoint(center)
+				table.insert(screenPositions, Vector2.new(cvp.X, cvp.Y))
+			end
+			t.expect(countDict(mesh.getTriangles())).toBe(3)
+			-- Commit the freshly built geometry as the undo baseline, so undoing the delete
+			-- has a prior state to restore the parts to (the live tool's geometry always
+			-- comes from an already-committed waypoint; here we build it ad-hoc).
+			ChangeHistoryService:SetWaypoint("delete-test-setup")
+
+			session.DebugDeleteStroke(screenPositions)
+			t.expect(countDict(mesh.getTriangles())).toBe(0)
+
+			-- Undo: the parts come back and only the deleted region is re-discovered, no
+			-- whole-mesh rebuild.
+			local before = session.GetRediscoverCount()
+			ChangeHistoryService:Undo()
+			settle()
+			t.expect(session.GetRediscoverCount()).toBe(before)
+			t.expect(countDict(mesh.getTriangles())).toBe(3)
+
+			-- Redo: the parts are removed again and forgotten, still no full rebuild.
+			ChangeHistoryService:Redo()
+			settle()
+			t.expect(session.GetRediscoverCount()).toBe(before)
+			t.expect(countDict(mesh.getTriangles())).toBe(0)
+		end)
+	end)
+
 	t.test("Delete: a moving drag still won't punch through to a surface behind", function()
 		withSession(function(session, mesh, settings)
 			settings.Mode = "Delete"
