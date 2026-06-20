@@ -690,6 +690,60 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("workflow: a flatten stroke undo re-discovers only its region", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 8
+			settings.GridHeight = 8
+			session.GenerateGrid()
+			local seeds: { Vector3 } = {}
+			for _, v in mesh.getVertices() do
+				table.insert(seeds, v.position)
+			end
+			mesh.discoverRegion(seeds, math.huge)
+			local vertsAfter = countDict(mesh.getVertices())
+			t.expect(vertsAfter > 50).toBeTruthy()
+
+			-- The vertex nearest the centroid is interior (neighbours all around).
+			local sum = Vector3.zero
+			local n = 0
+			for _, v in mesh.getVertices() do
+				sum += v.position
+				n += 1
+			end
+			local centroid = sum / n
+			local bumpPos: Vector3? = nil
+			local bestD = math.huge
+			for _, v in mesh.getVertices() do
+				local d = (v.position - centroid).Magnitude
+				if d < bestD then
+					bestD = d
+					bumpPos = v.position
+				end
+			end
+			assert(bumpPos)
+
+			-- Bump it up, then flatten the region (Y-smoothing pulls it back down).
+			session.SelectVerticesNear({ bumpPos })
+			session.MoveSelectedVertices(Vector3.new(0, 5, 0))
+			local bumped = (bumpPos :: Vector3) + Vector3.new(0, 5, 0)
+			t.expect(mesh.findVertexNear(bumped, 0.4)).toBeTruthy()
+
+			settings.Mode = "Flatten"
+			settings.FlattenRadius = 16
+			settings.FlattenStrength = 1
+			session.DebugFlattenStroke({ bumped })
+			t.expect(mesh.findVertexNear(bumped, 0.4) == nil).toBeTruthy() -- flattened away from Y=5
+
+			-- Undo the flatten: the bump returns, with no full rediscovery.
+			local before = session.GetRediscoverCount()
+			ChangeHistoryService:Undo()
+			settle()
+			t.expect(session.GetRediscoverCount()).toBe(before)
+			t.expect(mesh.findVertexNear(bumped, 0.4)).toBeTruthy()
+			t.expect(countDict(mesh.getVertices())).toBe(vertsAfter)
+		end)
+	end)
+
 	t.test("workflow: paint keeps later undo selections balanced", function()
 		withSession(function(session, mesh, settings)
 			session.GenerateGrid()

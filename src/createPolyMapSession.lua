@@ -266,6 +266,11 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local mBrushSavedPositions: { [number]: Vector3 } = {}
 	local mBrushAmounts: { [number]: number } = {}
 
+	-- Every vertex a Relax/Flatten stroke moves, mapped to its position BEFORE the stroke
+	-- (captured the first time the stroke touches it). At stroke end this becomes a move
+	-- delta so undo/redo re-discovers only the brushed region, not the whole mesh.
+	local mStrokeTouchedBefore: { [number]: Vector3 } = {}
+
 	-- Import progress: nil when idle, 0-1 when importing
 	local mImportProgress: number? = nil
 
@@ -1729,6 +1734,19 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 	end
 
+	-- Record each about-to-move vertex's pre-stroke position (first touch only), so the
+	-- stroke can be undone by re-discovering just that region.
+	local function captureStrokeBefore(moves: { [number]: Vector3 })
+		for vid in moves do
+			if mStrokeTouchedBefore[vid] == nil then
+				local v = mMesh.getVertex(vid)
+				if v then
+					mStrokeTouchedBefore[vid] = v.position
+				end
+			end
+		end
+	end
+
 	local function applyRelaxAtCursor()
 		local worldPos = getStrokeWorldPos()
 		if not worldPos then return end
@@ -1836,12 +1854,13 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			moves[entry.id] = Vector3.new(newX, entry.savedPos.Y, newZ)
 		end
 
+		captureStrokeBefore(moves)
 		mMesh.moveVertices(moves, currentSettings.Thickness, getTriangleProps())
 		changeSignal:Fire()
 	end
 
-	local function applyFlattenAtCursor()
-		local worldPos = getStrokeWorldPos()
+	local function applyFlattenAtCursor(worldPosOverride: { hit: Vector3, normal: Vector3 }?)
+		local worldPos = worldPosOverride or getStrokeWorldPos()
 		if not worldPos then return end
 
 		local radius = currentSettings.FlattenRadius
@@ -1905,6 +1924,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			moves[entry.id] = Vector3.new(entry.pos.X, entry.pos.Y + deltaY, entry.pos.Z)
 		end
 
+		captureStrokeBefore(moves)
 		mMesh.moveVertices(moves, currentSettings.Thickness, getTriangleProps())
 		changeSignal:Fire()
 	end
@@ -2037,6 +2057,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 	local function startStroke()
 		local mode = currentSettings.Mode
+		mStrokeTouchedBefore = {}
 		mDeleteLastScreenPos = nil
 		mDeleteLastHitPoint = nil
 		mDeleteLastHitNormal = nil
@@ -2091,9 +2112,14 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				ChangeHistoryService:FinishRecording(mStrokeRecording, op)
 			end)
 			mStrokeRecording = nil
-			-- Paint only recolours parts, so its undo/redo need no mesh rediscovery at all.
-			if not cancel and currentSettings.Mode == "Paint" then
-				setTopUndoDelta({ beforeSeeds = {}, afterSeeds = {}, radius = 0, noop = true })
+			if not cancel then
+				if currentSettings.Mode == "Paint" then
+					-- Paint only recolours parts; undo/redo need no mesh rediscovery.
+					setTopUndoDelta({ beforeSeeds = {}, afterSeeds = {}, radius = 0, noop = true })
+				elseif next(mStrokeTouchedBefore) ~= nil then
+					-- Relax/Flatten moved a region of vertices; restore just that region.
+					setTopUndoDelta(buildMoveDelta(mStrokeTouchedBefore))
+				end
 			end
 		end
 		mStrokeDragging = false
@@ -3348,6 +3374,16 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		startStroke()
 		for _, pos in screenPositions do
 			applyPaintAtCursor(pos)
+		end
+		endStroke()
+	end
+
+	-- Test hook: run a Flatten stroke at the given WORLD positions (Y-smoothing toward the
+	-- neighbour average), so the region-local stroke undo can be exercised without a mouse.
+	session.DebugFlattenStroke = function(worldPositions: { Vector3 })
+		startStroke()
+		for _, pos in worldPositions do
+			applyFlattenAtCursor({ hit = pos, normal = Vector3.yAxis })
 		end
 		endStroke()
 	end
