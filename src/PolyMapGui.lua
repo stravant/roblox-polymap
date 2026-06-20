@@ -1657,12 +1657,7 @@ local function InstructionsPanel(props: {
 			RichText = true,
 			Text = "PolyMap lets you edit the Parts in your place by vertex, as though they formed a triangle mesh."
 				.. "<br /><br />To get started, pick <b>Move</b> or <b>Rotate</b>, click a vertex of one of your parts, and drag the handles."
-				.. "<br /><br />The other modes let you:"
-				.. "<br />• <b>Add Poly</b> / <b>Add Grid</b> — build new geometry (or <b>Import</b> a heightmap)"
-				.. "<br />• <b>Paint</b> — brush on color and material"
-				.. "<br />• <b>Relax</b> / <b>Flatten</b> — even out spacing or smooth heights"
-				.. "<br />• <b>Heal</b> — stitch torn seams where parts no longer line up"
-				.. "<br />• <b>Delete</b> — remove triangles or vertices",
+				.. "<br /><br />Next, try adding new geometry with <b>Add Poly</b> or <b>Add Grid</b>.",
 			TextColor3 = Colors.WHITE,
 			TextWrapped = true,
 			TextXAlignment = Enum.TextXAlignment.Left,
