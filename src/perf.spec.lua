@@ -42,6 +42,7 @@ local function makeSettings(width: number, height: number): Settings.PolyMapSett
 		GridSpacing = 4,
 		PaintColor = { 0.5, 0.5, 0.5 },
 		PaintMaterial = "Plastic",
+		PaintMaterialVariant = "",
 		PaintStrength = 1.0,
 		PaintTarget = "Both",
 		PaintEyedropper = "None",

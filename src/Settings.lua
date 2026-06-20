@@ -22,6 +22,7 @@ export type PolyMapSettings = PluginGuiTypes.PluginGuiSettings & {
 	GridSpacing: number,
 	PaintColor: { number },
 	PaintMaterial: string,
+	PaintMaterialVariant: string,
 	PaintStrength: number,
 	PaintTarget: string,
 	PaintEyedropper: string, -- "None" | "Color" | "Material"
@@ -69,6 +70,7 @@ local function loadSettings(plugin: Plugin): PolyMapSettings
 		GridSpacing = raw.GridSpacing or 8,
 		PaintColor = raw.PaintColor or { 0.294, 0.592, 0.294 },
 		PaintMaterial = raw.PaintMaterial or "Grass",
+		PaintMaterialVariant = raw.PaintMaterialVariant or "",
 		PaintStrength = raw.PaintStrength or 1.0,
 		PaintTarget = raw.PaintTarget or "Both",
 		PaintEyedropper = "None",
@@ -112,6 +114,7 @@ local function saveSettings(plugin: Plugin, settings: PolyMapSettings)
 		GridSpacing = settings.GridSpacing,
 		PaintColor = settings.PaintColor,
 		PaintMaterial = settings.PaintMaterial,
+		PaintMaterialVariant = settings.PaintMaterialVariant,
 		PaintStrength = settings.PaintStrength,
 		PaintTarget = settings.PaintTarget,
 		RelaxRadius = settings.RelaxRadius,
@@ -128,7 +131,24 @@ local function saveSettings(plugin: Plugin, settings: PolyMapSettings)
 	})
 end
 
+-- Recent materials are stored as opaque keys so a (base material, variant) pair can
+-- be a single history entry. A plain material name (no variant) is stored as-is, so
+-- older saved histories of bare names still decode correctly.
+local kRecentSeparator = "\31"
+local function encodeRecentMaterial(material: string, variant: string): string
+	return if variant ~= "" then material .. kRecentSeparator .. variant else material
+end
+local function decodeRecentMaterial(key: string): (string, string)
+	local i = string.find(key, kRecentSeparator, 1, true)
+	if i then
+		return string.sub(key, 1, i - 1), string.sub(key, i + 1)
+	end
+	return key, ""
+end
+
 return {
 	Load = loadSettings,
 	Save = saveSettings,
+	EncodeRecentMaterial = encodeRecentMaterial,
+	DecodeRecentMaterial = decodeRecentMaterial,
 }

@@ -335,6 +335,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return {
 			Color = Color3.new(c[1], c[2], c[3]),
 			Material = (Enum.Material :: any)[currentSettings.PaintMaterial] or Enum.Material.Plastic,
+			MaterialVariant = currentSettings.PaintMaterialVariant,
 		}
 	end
 
@@ -1580,6 +1581,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				end
 				if doMaterial and mat then
 					part.Material = mat
+					part.MaterialVariant = currentSettings.PaintMaterialVariant
 				end
 			end
 			changeSignal:Fire()
@@ -1888,10 +1890,13 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				end
 			elseif currentSettings.PaintEyedropper == "Material" then
 				local matName = hitPart.Material.Name
+				local variant = hitPart.MaterialVariant
 				currentSettings.PaintMaterial = matName
-				-- Add to recents if not already present
-				if not table.find(currentSettings.RecentMaterials, matName) then
-					table.insert(currentSettings.RecentMaterials, 1, matName)
+				currentSettings.PaintMaterialVariant = variant
+				-- Add to recents (keyed by material + variant) if not already present.
+				local recentKey = Settings.EncodeRecentMaterial(matName, variant)
+				if not table.find(currentSettings.RecentMaterials, recentKey) then
+					table.insert(currentSettings.RecentMaterials, 1, recentKey)
 					while #currentSettings.RecentMaterials > 4 do
 						table.remove(currentSettings.RecentMaterials)
 					end
@@ -3056,6 +3061,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			end
 			if doMaterial and mat then
 				part.Material = mat
+				part.MaterialVariant = currentSettings.PaintMaterialVariant
 			end
 		end
 

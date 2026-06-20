@@ -46,6 +46,7 @@ local function makeSettings(): Settings.PolyMapSettings
 		GridSpacing = 4,
 		PaintColor = { 0.5, 0.5, 0.5 },
 		PaintMaterial = "Plastic",
+		PaintMaterialVariant = "",
 		PaintStrength = 1.0,
 		PaintTarget = "Both",
 		PaintEyedropper = "None",
@@ -2236,6 +2237,53 @@ return function(t: TestTypes.TestContext)
 				end
 			end
 		end)
+	end)
+
+	t.test("Paint: applies the material variant to painted parts", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 3
+			settings.GridHeight = 3
+			settings.GridSpacing = 4
+			session.GenerateGrid()
+			t.expect(countDict(mesh.getTriangles()) > 0).toBeTruthy()
+
+			settings.Mode = "Paint"
+			settings.PaintTarget = "Material"
+			settings.PaintMaterial = "Grass"
+			settings.PaintMaterialVariant = "PolyMapPaintVariant"
+			settings.PaintRadius = 0
+
+			local target: Vector3? = nil
+			for _, tri in mesh.getTriangles() do
+				target = tri.parts[1].Position
+				break
+			end
+			assert(target)
+			session.PaintAt(target)
+
+			-- The painted part carries both the base material and the variant.
+			local found = false
+			for _, p in workspace:GetPartBoundsInRadius(target, 0.5) do
+				if p:IsA("BasePart") and p.MaterialVariant == "PolyMapPaintVariant" then
+					found = true
+					t.expect(p.Material == Enum.Material.Grass).toBeTruthy()
+				end
+			end
+			t.expect(found).toBe(true)
+		end)
+	end)
+
+	t.test("Settings: recent-material keys round-trip base material and variant", function()
+		-- No variant -> the plain material name, so older saved histories still decode.
+		t.expect(Settings.EncodeRecentMaterial("Grass", "")).toBe("Grass")
+		local m1, v1 = Settings.DecodeRecentMaterial("Grass")
+		t.expect(m1).toBe("Grass")
+		t.expect(v1).toBe("")
+		-- With a variant -> encodes both and decodes back.
+		local key = Settings.EncodeRecentMaterial("Grass", "Mossy")
+		local m2, v2 = Settings.DecodeRecentMaterial(key)
+		t.expect(m2).toBe("Grass")
+		t.expect(v2).toBe("Mossy")
 	end)
 
 end

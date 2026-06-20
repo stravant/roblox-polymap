@@ -1,5 +1,7 @@
 --!strict
 
+local MaterialService = game:GetService("MaterialService")
+
 local Plugin = script.Parent.Parent
 local Packages = Plugin.Packages
 local React = require(Packages.React)
@@ -968,25 +970,60 @@ local function MaterialPanel(props: {
 	local overlayContext = OverlayGui.use()
 	local materialTriggerRef = React.useRef(nil)
 
-	local function setMaterial(name: string)
-		props.Settings.PaintMaterial = name
-		props.UpdatedSettings()
-	end
-
-	local function selectMaterialFromPicker(name: string)
-		props.Settings.PaintMaterial = name
-		-- Update recent materials: move selected to front, cap at 6
+	-- Move a recent key (an encoded material+variant) to the front of the history.
+	local function addRecent(key: string)
 		local recent = table.clone(props.Settings.RecentMaterials)
 		for i = #recent, 1, -1 do
-			if recent[i] == name then
+			if recent[i] == key then
 				table.remove(recent, i)
 			end
 		end
-		table.insert(recent, 1, name)
+		table.insert(recent, 1, key)
 		while #recent > 4 do
 			table.remove(recent)
 		end
 		props.Settings.RecentMaterials = recent
+	end
+
+	-- Pick a base material from the popup: clears any variant.
+	local function selectMaterialFromPicker(name: string)
+		props.Settings.PaintMaterial = name
+		props.Settings.PaintMaterialVariant = ""
+		addRecent(Settings.EncodeRecentMaterial(name, ""))
+		props.UpdatedSettings()
+	end
+
+	-- Re-apply a recent (material + variant) history entry.
+	local function selectRecent(key: string)
+		local material, variant = Settings.DecodeRecentMaterial(key)
+		props.Settings.PaintMaterial = material
+		props.Settings.PaintMaterialVariant = variant
+		addRecent(key)
+		props.UpdatedSettings()
+	end
+
+	-- Apply a typed variant name. If a MaterialVariant by that name exists, switch the
+	-- base material to its BaseMaterial so the variant actually shows; if no such
+	-- variant exists, clear the field back to empty.
+	local function applyVariant(typed: string)
+		if typed == "" then
+			props.Settings.PaintMaterialVariant = ""
+			props.UpdatedSettings()
+			return
+		end
+		local found: MaterialVariant? = nil
+		for _, child in MaterialService:GetChildren() do
+			if child:IsA("MaterialVariant") and child.Name == typed then
+				found = child :: MaterialVariant
+				break
+			end
+		end
+		if found then
+			props.Settings.PaintMaterialVariant = typed
+			props.Settings.PaintMaterial = found.BaseMaterial.Name
+		else
+			props.Settings.PaintMaterialVariant = ""
+		end
 		props.UpdatedSettings()
 	end
 
@@ -1099,12 +1136,81 @@ local function MaterialPanel(props: {
 				}),
 			}),
 		}),
-		RecentChips = e(MaterialDropdown.RecentChips, {
-			Current = props.Settings.PaintMaterial,
-			RecentMaterials = props.Settings.RecentMaterials,
-			OnSelect = setMaterial,
+		VariantRow = e("Frame", {
+			Size = UDim2.new(1, 0, 0, 24),
+			BackgroundTransparency = 1,
 			LayoutOrder = nextOrder(),
+		}, {
+			ListLayout = e("UIListLayout", {
+				FillDirection = Enum.FillDirection.Horizontal,
+				VerticalAlignment = Enum.VerticalAlignment.Center,
+				SortOrder = Enum.SortOrder.LayoutOrder,
+				Padding = UDim.new(0, 4),
+			}),
+			Label = e("TextLabel", {
+				Text = "Variant",
+				TextColor3 = Colors.WHITE,
+				BackgroundTransparency = 1,
+				Size = UDim2.new(0, 0, 0, 24),
+				AutomaticSize = Enum.AutomaticSize.X,
+				Font = Enum.Font.SourceSans,
+				TextSize = 18,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				LayoutOrder = 1,
+			}),
+			-- Type a MaterialVariant name (or eyedrop one). A valid name switches the
+			-- base material to match; an unknown name clears the field.
+			Box = e("TextBox", {
+				Text = props.Settings.PaintMaterialVariant,
+				PlaceholderText = "(none)",
+				PlaceholderColor3 = Color3.fromRGB(170, 170, 170),
+				TextColor3 = Colors.WHITE,
+				BackgroundColor3 = Colors.GREY,
+				Size = UDim2.new(0, 0, 0, 24),
+				Font = Enum.Font.SourceSans,
+				TextSize = 18,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				ClearTextOnFocus = false,
+				LayoutOrder = 2,
+				[React.Event.FocusLost] = function(rbx: TextBox)
+					applyVariant(rbx.Text)
+				end,
+			}, {
+				Corner = e("UICorner", { CornerRadius = UDim.new(0, 4) }),
+				Padding = e("UIPadding", {
+					PaddingLeft = UDim.new(0, 6),
+					PaddingRight = UDim.new(0, 6),
+				}),
+				Flex = e("UIFlexItem", { FlexMode = Enum.UIFlexMode.Grow }),
+			}),
 		}),
+		RecentChips = e("Frame", {
+			Size = UDim2.fromScale(1, 0),
+			AutomaticSize = Enum.AutomaticSize.Y,
+			BackgroundTransparency = 1,
+			LayoutOrder = nextOrder(),
+		}, (function()
+			local kids: { [string]: any } = {
+				ListLayout = e("UIListLayout", {
+					FillDirection = Enum.FillDirection.Horizontal,
+					SortOrder = Enum.SortOrder.LayoutOrder,
+					Padding = UDim.new(0, 4),
+				}),
+			}
+			for i, key in props.Settings.RecentMaterials do
+				local material, variant = Settings.DecodeRecentMaterial(key)
+				kids["Chip" .. tostring(i)] = e(ChipForToggle, {
+					Text = if variant ~= "" then variant else material,
+					IsCurrent = material == props.Settings.PaintMaterial
+						and variant == props.Settings.PaintMaterialVariant,
+					LayoutOrder = i,
+					OnClick = function()
+						selectRecent(key)
+					end,
+				})
+			end
+			return kids
+		end)()),
 	})
 end
 
