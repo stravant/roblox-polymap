@@ -2761,6 +2761,21 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 	end
 
+	-- Mouse released: finish any marquee or brush stroke. A visible marquee box (end set) must
+	-- be cleared with a re-render, or it lingers on screen until the next mouse motion happens
+	-- to fire changeSignal.
+	local function handlePointerUp()
+		local hadMarqueeBox = mMarqueeEnd ~= nil
+		mMarqueeStart = nil
+		mMarqueeEnd = nil
+		if mStrokeDragging then
+			endStroke()
+		end
+		if hadMarqueeBox then
+			changeSignal:Fire()
+		end
+	end
+
 	local inputBeganCn: RBXScriptConnection? = nil
 	local inputEndedCn: RBXScriptConnection? = nil
 	local delayedBeginCn = task.delay(0, function()
@@ -2783,11 +2798,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 		inputEndedCn = UserInputService.InputEnded:Connect(function(input: InputObject, _gameProcessed: boolean)
 			if input.UserInputType == Enum.UserInputType.MouseButton1 then
-				mMarqueeStart = nil
-				mMarqueeEnd = nil
-				if mStrokeDragging then
-					endStroke()
-				end
+				handlePointerUp()
 			end
 		end)
 	end)
@@ -3182,6 +3193,15 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	end
 	session.GetMarquee = function(): (Vector2?, Vector2?)
 		return mMarqueeStart, mMarqueeEnd
+	end
+	-- Test hooks: stand in for a marquee drag (the box is normally driven by UserInputService
+	-- + the cursor task, which a test can't synthesise) and the mouse release that ends it.
+	session.DebugSetMarquee = function(startPos: Vector2, endPos: Vector2)
+		mMarqueeStart = startPos
+		mMarqueeEnd = endPos
+	end
+	session.DebugReleasePointer = function()
+		handlePointerUp()
 	end
 
 	-- Actions

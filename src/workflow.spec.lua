@@ -610,6 +610,30 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("workflow: releasing the mouse after a marquee clears the box and re-renders", function()
+		withSession(function(session, mesh, settings)
+			settings.Mode = "Move"
+			-- A marquee box is showing (start + end set), as during a live drag.
+			session.DebugSetMarquee(Vector2.new(20, 20), Vector2.new(120, 90))
+			local s, e = session.GetMarquee()
+			t.expect(s ~= nil and e ~= nil).toBeTruthy()
+
+			-- Mouse-up must both clear the box and fire a change so the UI re-renders without
+			-- it -- otherwise the box lingers until the next mouse motion happens to re-render.
+			local renders = 0
+			local conn = session.ChangeSignal:Connect(function()
+				renders += 1
+			end)
+			session.DebugReleasePointer()
+			conn:Disconnect()
+
+			local s2, e2 = session.GetMarquee()
+			t.expect(s2 == nil).toBeTruthy()
+			t.expect(e2 == nil).toBeTruthy()
+			t.expect(renders >= 1).toBeTruthy()
+		end)
+	end)
+
 	t.test("workflow: undo while placing a grid cancels the placement", function()
 		withSession(function(session, mesh, settings)
 			settings.GridType = "Square"
