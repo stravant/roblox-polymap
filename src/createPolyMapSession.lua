@@ -2469,9 +2469,23 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end)
 	end)
 
+	-- While a Paint eyedropper (Pick) is active, show an eyedropper cursor over the
+	-- viewport. Tracked so the icon is only assigned when it actually changes.
+	local kEyedropperIcon = "rbxassetid://5287780555"
+	local mPickMouse = plugin:GetMouse()
+	local mLastPickIcon = ""
+
 	local cursorTargetTask = task.spawn(function()
 		while true do
 			updateHover()
+
+			local wantIcon = if currentSettings.Mode == "Paint" and currentSettings.PaintEyedropper ~= "None"
+				then kEyedropperIcon
+				else ""
+			if wantIcon ~= mLastPickIcon then
+				mLastPickIcon = wantIcon
+				mPickMouse.Icon = wantIcon
+			end
 
 			if mStrokeDragging then
 				applyStrokeAtCursor()
@@ -2626,6 +2640,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 		task.cancel(delayedBeginCn)
 		task.cancel(cursorTargetTask)
+		mPickMouse.Icon = "" -- restore the default cursor
 	end
 
 	----------------------------------------------------------------------
