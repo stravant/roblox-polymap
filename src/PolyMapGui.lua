@@ -979,7 +979,7 @@ local function MaterialPanel(props: {
 			end
 		end
 		table.insert(recent, 1, key)
-		while #recent > 4 do
+		while #recent > 6 do -- two rows of three
 			table.remove(recent)
 		end
 		props.Settings.RecentMaterials = recent
@@ -1144,26 +1144,57 @@ local function MaterialPanel(props: {
 			BackgroundTransparency = 1,
 			LayoutOrder = nextOrder(),
 		}, (function()
-			local kids: { [string]: any } = {
+			-- Lay the recents out three per row (two rows of three) so material names
+			-- aren't cramped. The last row is padded with blank slots so its chips keep
+			-- the one-third width of a full row.
+			local perRow = 3
+			local recents = props.Settings.RecentMaterials
+			local rowCount = math.max(1, math.ceil(#recents / perRow))
+			local rows: { [string]: any } = {
 				ListLayout = e("UIListLayout", {
-					FillDirection = Enum.FillDirection.Horizontal,
 					SortOrder = Enum.SortOrder.LayoutOrder,
 					Padding = UDim.new(0, 4),
 				}),
 			}
-			for i, key in props.Settings.RecentMaterials do
-				local material, variant = Settings.DecodeRecentMaterial(key)
-				kids["Chip" .. tostring(i)] = e(ChipForToggle, {
-					Text = if variant ~= "" then variant else material,
-					IsCurrent = material == props.Settings.PaintMaterial
-						and variant == props.Settings.PaintMaterialVariant,
-					LayoutOrder = i,
-					OnClick = function()
-						selectRecent(key)
-					end,
-				})
+			for r = 1, rowCount do
+				local rowKids: { [string]: any } = {
+					ListLayout = e("UIListLayout", {
+						FillDirection = Enum.FillDirection.Horizontal,
+						SortOrder = Enum.SortOrder.LayoutOrder,
+						Padding = UDim.new(0, 4),
+					}),
+				}
+				for c = 1, perRow do
+					local key = recents[(r - 1) * perRow + c]
+					if key then
+						local material, variant = Settings.DecodeRecentMaterial(key)
+						rowKids["Chip" .. tostring(c)] = e(ChipForToggle, {
+							Text = if variant ~= "" then variant else material,
+							IsCurrent = material == props.Settings.PaintMaterial
+								and variant == props.Settings.PaintMaterialVariant,
+							LayoutOrder = c,
+							OnClick = function()
+								selectRecent(key)
+							end,
+						})
+					else
+						rowKids["Empty" .. tostring(c)] = e("Frame", {
+							Size = UDim2.new(0, 0, 0, 24),
+							BackgroundTransparency = 1,
+							LayoutOrder = c,
+						}, {
+							Flex = e("UIFlexItem", { FlexMode = Enum.UIFlexMode.Grow }),
+						})
+					end
+				end
+				rows["Row" .. tostring(r)] = e("Frame", {
+					Size = UDim2.fromScale(1, 0),
+					AutomaticSize = Enum.AutomaticSize.Y,
+					BackgroundTransparency = 1,
+					LayoutOrder = r,
+				}, rowKids)
 			end
-			return kids
+			return rows
 		end)()),
 		-- The Variant field sits below the recents.
 		VariantRow = e(HelpGui.WithHelpIcon, {

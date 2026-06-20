@@ -1897,7 +1897,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				local recentKey = Settings.EncodeRecentMaterial(matName, variant)
 				if not table.find(currentSettings.RecentMaterials, recentKey) then
 					table.insert(currentSettings.RecentMaterials, 1, recentKey)
-					while #currentSettings.RecentMaterials > 4 do
+					while #currentSettings.RecentMaterials > 6 do
 						table.remove(currentSettings.RecentMaterials)
 					end
 				end
