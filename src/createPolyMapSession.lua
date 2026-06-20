@@ -1880,6 +1880,36 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				end
 			end
 		end
+
+		-- Pass 2: fold "bent" wedge pairs back into single logical triangles. When a tear
+		-- nudged one wedge of a 2-wedge triangle, discovery leaves the two wedges as
+		-- separate single-wedge triangles whose shared foot vertex sits just off the
+		-- straight outer edge. Candidate feet are boundary vertices shared by exactly two
+		-- triangles within range; mergeWedgeTriangles checks coplanarity and that the
+		-- foot is within `tolerance` of the outer edge, snaps it on, and drops it (which
+		-- also rejoins that edge with any neighbour across it). Recompute boundaries here
+		-- since pass 1 has changed them.
+		local feet: { number } = {}
+		local isBound: { [number]: boolean } = {}
+		for _, edge in mMesh.getBoundaryEdges() do
+			isBound[edge.v1] = true
+			isBound[edge.v2] = true
+		end
+		for vid in isBound do
+			local v = mMesh.getVertex(vid)
+			if v and #v.triangles == 2 and (v.position - hitPos).Magnitude <= radius then
+				table.insert(feet, vid)
+			end
+		end
+		for _, footVid in feet do
+			local v = mMesh.getVertex(footVid)
+			if v and #v.triangles == 2 then
+				if mMesh.mergeWedgeTriangles(v.triangles[1], v.triangles[2], tolerance, nil) then
+					count += 1
+				end
+			end
+		end
+
 		return count
 	end
 

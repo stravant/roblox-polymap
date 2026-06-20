@@ -2497,4 +2497,50 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("Heal: folds a bent wedge pair into one logical triangle", function()
+		withSession(function(session, mesh, settings)
+			settings.Mode = "Heal"
+			settings.HealRadius = 8
+			settings.HealTolerance = 1
+
+			-- Two triangles sharing edge B-F, with the foot F nudged 0.3 studs off the
+			-- straight A-C edge (one wedge of a logical triangle was moved).
+			local base = kRegionCenter
+			local A = base + Vector3.new(0, 0, 0)
+			local B = base + Vector3.new(3, 0, 4)
+			local C = base + Vector3.new(6, 0, 0)
+			local F = base + Vector3.new(3, 0, 0.3)
+			local hint = base + Vector3.new(3, 5, 0)
+			mesh.addTriangle(A, B, F, 1, workspace.Terrain, nil, hint)
+			mesh.addTriangle(B, C, F, 1, workspace.Terrain, nil, hint)
+
+			local function countDict(d: any): number
+				local n = 0
+				for _ in d do
+					n += 1
+				end
+				return n
+			end
+			local function hasVertexNear(pos: Vector3): boolean
+				for _, v in mesh.getVertices() do
+					if (v.position - pos).Magnitude < 0.05 then
+						return true
+					end
+				end
+				return false
+			end
+
+			t.expect(countDict(mesh.getVertices())).toBe(4)
+			t.expect(countDict(mesh.getTriangles())).toBe(2)
+			t.expect(hasVertexNear(F)).toBe(true)
+
+			session.HealAt(base + Vector3.new(3, 0, 1))
+
+			-- The bent pair folded into one triangle, dropping the foot vertex.
+			t.expect(countDict(mesh.getVertices())).toBe(3)
+			t.expect(countDict(mesh.getTriangles())).toBe(1)
+			t.expect(hasVertexNear(F)).toBe(false)
+		end)
+	end)
+
 end

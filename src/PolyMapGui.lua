@@ -1587,7 +1587,7 @@ local function HealPanel(props: {
 				end,
 			}),
 			Help = e(HelpGui.BasicTooltip, {
-				HelpRichText = "<b>Heal</b> finds <i>tears</i> in the brushed area — adjacent parts whose shared edge no longer lines up — and merges the loose vertices back together so the surface is continuous again.<br /><br />This sets the brush radius, in studs.",
+				HelpRichText = "<b>Heal</b> repairs <i>tears</i> in the brushed area — where adjacent parts no longer line up. It merges loose vertices back together and folds split wedges back into whole triangles, restoring a continuous surface.<br /><br />This sets the brush radius, in studs.",
 			}),
 		}),
 		ToleranceInput = e(HelpGui.WithHelpIcon, {
