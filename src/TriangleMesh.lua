@@ -60,6 +60,7 @@ export type TriangleMesh = {
 
 	-- Queries
 	getBoundaryEdges: () -> { Edge },
+	getSetBoundaryEdges: (triangleIds: { TriangleId }) -> { Edge },
 	getVertexNeighbors: (vertexId: VertexId) -> { VertexId },
 	findVertexNear: (position: Vector3, radius: number) -> VertexId?,
 
@@ -447,6 +448,48 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		for _, edge in mEdges do
 			if #edge.triangles == 1 then
 				table.insert(result, edge)
+			end
+		end
+		return result
+	end
+
+	-- Boundary edges of a SUBSET of triangles: an edge with at least one, but not all, of
+	-- its incident triangles in the set (or a mesh-boundary edge that is in the set). Walks
+	-- only the set's own edges via the position lookup, so it is O(set) -- the overlay
+	-- calls this every frame while a selection is being dragged, so it must not scan every
+	-- edge in the mesh.
+	local function getSetBoundaryEdges(triangleIds: { TriangleId }): { Edge }
+		local triSet: { [TriangleId]: boolean } = {}
+		for _, triId in triangleIds do
+			triSet[triId] = true
+		end
+		local result: { Edge } = {}
+		local seen: { [EdgeId]: boolean } = {}
+		for _, triId in triangleIds do
+			local tri = mTriangles[triId]
+			if tri then
+				for _, pair in triangleEdgePairs(tri.vertices) do
+					local pa = mVertices[pair[1]]
+					local pb = mVertices[pair[2]]
+					if pa and pb then
+						local edgeId = mEdgeLookup[hashEdge(pa.position, pb.position)]
+						if edgeId and not seen[edgeId] then
+							seen[edgeId] = true
+							local edge = mEdges[edgeId]
+							if edge then
+								local insideCount = 0
+								for _, tid in edge.triangles do
+									if triSet[tid] then
+										insideCount += 1
+									end
+								end
+								if (insideCount > 0 and insideCount < #edge.triangles) or (#edge.triangles == 1 and insideCount == 1) then
+									table.insert(result, edge)
+								end
+							end
+						end
+					end
+				end
 			end
 		end
 		return result
@@ -2375,6 +2418,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 
 		-- Queries
 		getBoundaryEdges = getBoundaryEdges,
+		getSetBoundaryEdges = getSetBoundaryEdges,
 		getVertexNeighbors = getVertexNeighbors,
 		findVertexNear = findVertexNear,
 

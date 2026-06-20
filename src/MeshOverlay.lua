@@ -20,28 +20,14 @@ local ADD_PREVIEW_COLOR = Color3.fromRGB(50, 200, 50)
 local GRID_PREVIEW_COLOR = Color3.fromRGB(80, 200, 255)
 
 local function drawBoundaryEdges(wire: WireframeHandleAdornment, mesh: TriangleMesh.TriangleMesh, triangleIds: { number })
-	-- Build set of triangle IDs for fast lookup
-	local triSet: { [number]: boolean } = {}
-	for _, triId in triangleIds do
-		triSet[triId] = true
-	end
-
-	-- An edge is on the boundary if exactly one of its triangles is in the set
-	local edges = mesh.getEdges()
-	for _, edge in edges do
-		local insideCount = 0
-		for _, triId in edge.triangles do
-			if triSet[triId] then
-				insideCount += 1
-			end
-		end
-		-- Boundary: one side in set, or edge only has one triangle total and it's in set
-		if insideCount > 0 and insideCount < #edge.triangles or (#edge.triangles == 1 and insideCount == 1) then
-			local v1 = mesh.getVertex(edge.v1)
-			local v2 = mesh.getVertex(edge.v2)
-			if v1 and v2 then
-				wire:AddLine(v1.position, v2.position)
-			end
+	-- getSetBoundaryEdges walks only the set's own edges (O(set)); the old approach scanned
+	-- every edge in the mesh, which made dragging a selection slow once a lot of unrelated
+	-- geometry had been discovered.
+	for _, edge in mesh.getSetBoundaryEdges(triangleIds) do
+		local v1 = mesh.getVertex(edge.v1)
+		local v2 = mesh.getVertex(edge.v2)
+		if v1 and v2 then
+			wire:AddLine(v1.position, v2.position)
 		end
 	end
 end

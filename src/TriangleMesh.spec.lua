@@ -1664,4 +1664,64 @@ return function(t: TestTypes.TestContext)
 		-- here. Generous bound so timing noise never makes it flaky.
 		t.expect((tCrowded - tBare) < 0.05).toBeTruthy()
 	end)
+
+	t.test("getSetBoundaryEdges returns the boundary of a triangle subset", function()
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+		-- Two triangles sharing an edge make a square; the shared edge is interior.
+		local t1 = mesh.addTriangle(Vector3.new(0, 0, 0), Vector3.new(4, 0, 0), Vector3.new(0, 0, 4), 0.2, folder, nil, Vector3.new(0, 1, 0))
+		local t2 = mesh.addTriangle(Vector3.new(4, 0, 0), Vector3.new(4, 0, 4), Vector3.new(0, 0, 4), 0.2, folder, nil, Vector3.new(0, 1, 0))
+		assert(t1 and t2)
+
+		-- Boundary of BOTH = the 4 outer edges of the square (shared edge excluded).
+		t.expect(#mesh.getSetBoundaryEdges({ t1, t2 })).toBe(4)
+		-- Boundary of just ONE = all 3 of its edges (the shared one counts, since the other
+		-- triangle is outside the set).
+		t.expect(#mesh.getSetBoundaryEdges({ t1 })).toBe(3)
+		-- Empty set has no boundary.
+		t.expect(#mesh.getSetBoundaryEdges({})).toBe(0)
+
+		folder:Destroy()
+	end)
+
+	t.test("getSetBoundaryEdges cost is independent of unrelated geometry", function()
+		-- The overlay recomputes a selection's outline every drag frame. Build the same tiny
+		-- two-triangle selection, optionally surrounded by unrelated triangles, and time the
+		-- boundary query on each; the difference must stay near zero. The old version scanned
+		-- every edge in the mesh, so it scaled with the unrelated geometry.
+		local function build(unrelated: number): (createTriangleMesh.TriangleMesh, { number }, Folder)
+			local folder = Instance.new("Folder")
+			folder.Parent = workspace
+			local mesh = createTriangleMesh()
+			local a = mesh.addTriangle(Vector3.new(0, 0, 0), Vector3.new(4, 0, 0), Vector3.new(0, 0, 4), 0.2, folder, nil, Vector3.new(0, 1, 0))
+			local b = mesh.addTriangle(Vector3.new(4, 0, 0), Vector3.new(4, 0, 4), Vector3.new(0, 0, 4), 0.2, folder, nil, Vector3.new(0, 1, 0))
+			assert(a and b)
+			for i = 1, unrelated do
+				local x = 1000 + i * 8
+				mesh.addTriangle(Vector3.new(x, 0, 0), Vector3.new(x + 4, 0, 0), Vector3.new(x, 0, 4), 0.2, folder, nil, Vector3.new(0, 1, 0))
+			end
+			return mesh, { a, b }, folder
+		end
+
+		local function timeBoundary(mesh: createTriangleMesh.TriangleMesh, ids: { number }, iters: number): number
+			local t0 = os.clock()
+			for _ = 1, iters do
+				mesh.getSetBoundaryEdges(ids)
+			end
+			return os.clock() - t0
+		end
+
+		local ITERS = 3000
+		local bare, bareIds, bareFolder = build(0)
+		local crowded, crowdedIds, crowdedFolder = build(1500)
+		timeBoundary(bare, bareIds, 100) -- warm
+		timeBoundary(crowded, crowdedIds, 100)
+		local tBare = timeBoundary(bare, bareIds, ITERS)
+		local tCrowded = timeBoundary(crowded, crowdedIds, ITERS)
+		bareFolder:Destroy()
+		crowdedFolder:Destroy()
+
+		t.expect((tCrowded - tBare) < 0.05).toBeTruthy()
+	end)
 end
