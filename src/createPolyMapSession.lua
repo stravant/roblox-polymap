@@ -2282,6 +2282,25 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 	end)
 
+	-- Escape cancels the current in-progress interaction: an unfinished Add (edge grab
+	-- or placed points), an interactive grid placement, or an active Paint eyedropper.
+	local function handleEscape()
+		if currentSettings.Mode == "Add" and (mAddBoundaryEdge or #mAddPoints > 0) then
+			clearAddState()
+			changeSignal:Fire()
+		end
+		if mGridPlacing then
+			clearGridPlacement()
+			changeSignal:Fire()
+		end
+		-- Cancel an active Paint eyedropper (Pick Colour / Pick Material), returning to
+		-- normal painting without sampling anything.
+		if currentSettings.Mode == "Paint" and currentSettings.PaintEyedropper ~= "None" then
+			currentSettings.PaintEyedropper = "None"
+			changeSignal:Fire()
+		end
+	end
+
 	local inputBeganCn: RBXScriptConnection? = nil
 	local inputEndedCn: RBXScriptConnection? = nil
 	local delayedBeginCn = task.delay(0, function()
@@ -2296,16 +2315,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				end
 				handleClick()
 			end
-			-- Escape cancels an in-progress Add (now that empty clicks place points).
+			-- Escape cancels the current in-progress interaction (Add, grid place, Pick).
 			if input.KeyCode == Enum.KeyCode.Escape and not gameProcessed then
-				if currentSettings.Mode == "Add" and (mAddBoundaryEdge or #mAddPoints > 0) then
-					clearAddState()
-					changeSignal:Fire()
-				end
-				if mGridPlacing then
-					clearGridPlacement()
-					changeSignal:Fire()
-				end
+				handleEscape()
 			end
 		end)
 
@@ -3042,6 +3054,11 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	-- hover feedback (mHoverVertexId / mHoverTriangleIds) can be asserted without a mouse.
 	session.DebugHoverAt = function(screenPos: Vector2)
 		updateHover(screenPos)
+	end
+
+	-- Test hook: run the real Escape handler (cancels in-progress Add / grid / Pick).
+	session.DebugEscape = function()
+		handleEscape()
 	end
 
 	session.PaintAt = function(worldPos: Vector3)

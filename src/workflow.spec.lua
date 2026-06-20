@@ -2417,4 +2417,32 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("Paint: Escape cancels an active Pick (eyedropper) mode", function()
+		withSession(function(session, _mesh, settings)
+			settings.Mode = "Paint"
+
+			-- Pick Colour active -> Escape returns to normal painting, and notifies the
+			-- UI (so the Pick button un-highlights).
+			settings.PaintEyedropper = "Color"
+			local fired = false
+			local cn = session.ChangeSignal:Connect(function()
+				fired = true
+			end)
+			session.DebugEscape()
+			cn:Disconnect()
+			t.expect(settings.PaintEyedropper).toBe("None")
+			t.expect(fired).toBe(true)
+
+			-- Pick Material likewise.
+			settings.PaintEyedropper = "Material"
+			session.DebugEscape()
+			t.expect(settings.PaintEyedropper).toBe("None")
+
+			-- With nothing being picked, Escape leaves the eyedropper setting untouched.
+			settings.PaintEyedropper = "None"
+			session.DebugEscape()
+			t.expect(settings.PaintEyedropper).toBe("None")
+		end)
+	end)
+
 end
