@@ -1635,29 +1635,35 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return nil
 	end
 
-	-- Append a triangle's corner positions to `seeds` and return its own longest-edge span.
-	-- Shared by the topology-changing strokes (Delete, Heal) to build a region delta whose
-	-- seeds cover exactly the affected triangles and whose radius stays local to one triangle.
+	-- Append a triangle's corner positions to `seeds` and return its "fan reach": the farthest
+	-- any triangle touching one of its corners extends from that corner. Shared by the
+	-- topology-changing strokes (Delete, Heal). The reach -- not just the triangle's own span
+	-- -- is what the radius needs: a bounded restore forgets each seed corner's whole triangle
+	-- fan, so the re-discovery must reach every triangle in that fan or it would be dropped.
 	local function collectTriangleCorners(triId: number, seeds: { Vector3 }): number
 		local tri = mMesh.getTriangle(triId)
 		if not tri then
 			return 0
 		end
-		local corners: { Vector3 } = {}
+		local reach = 0
 		for _, vid in tri.vertices do
 			local v = mMesh.getVertex(vid)
 			if v then
-				table.insert(corners, v.position)
 				table.insert(seeds, v.position)
+				for _, fanId in v.triangles do
+					local fan = mMesh.getTriangle(fanId)
+					if fan then
+						for _, cvid in fan.vertices do
+							local cv = mMesh.getVertex(cvid)
+							if cv then
+								reach = math.max(reach, (cv.position - v.position).Magnitude)
+							end
+						end
+					end
+				end
 			end
 		end
-		local span = 0
-		for i = 1, #corners do
-			for j = i + 1, #corners do
-				span = math.max(span, (corners[i] - corners[j]).Magnitude)
-			end
-		end
-		return span
+		return reach
 	end
 
 	-- Record a triangle's corners (and its own span) for the Delete undo delta, just before
@@ -3527,6 +3533,37 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			applyDeleteAtCursor(pos)
 		end
 		endStroke()
+	end
+
+	-- Test hook: delete specific triangles by id through the real delete machinery (snapshot,
+	-- recording, region-delta capture), so a world-space fuzz can exercise delete + its undo
+	-- without synthesising mouse rays. Mirrors the stroke's accumulate-then-set-delta flow.
+	session.DebugDeleteTriangles = function(triIds: { number })
+		pushUndoSnapshot()
+		local recording = ChangeHistoryService:TryBeginRecording("PolyMap Delete")
+		mStrokeDeletedCorners = {}
+		mStrokeDeletedRadius = 0
+		local removed = 0
+		for _, tid in triIds do
+			if mMesh.getTriangle(tid) then
+				accumulateDeletedTriangle(tid)
+				mMesh.removeTriangle(tid)
+				removed += 1
+			end
+		end
+		if recording then
+			ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+		end
+		if removed > 0 and #mStrokeDeletedCorners > 0 then
+			setTopUndoDelta({
+				beforeSeeds = mStrokeDeletedCorners,
+				afterSeeds = mStrokeDeletedCorners,
+				radius = mStrokeDeletedRadius + 5,
+				allowMissing = true,
+			})
+		end
+		changeSignal:Fire()
+		return removed
 	end
 
 	-- Test hook: run a Paint stroke that visits the given screen positions in order,

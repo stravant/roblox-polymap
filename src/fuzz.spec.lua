@@ -384,6 +384,32 @@ return function(t: TestTypes.TestContext)
 		return "add"
 	end
 
+	local function opDelete(session: any, mesh: any, settings: any, rng: Random): string
+		local triIds: { number } = {}
+		for tid in mesh.getTriangles() do
+			table.insert(triIds, tid)
+		end
+		if #triIds == 0 then
+			return "delete(empty)"
+		end
+		-- Delete a small clump of distinct triangles to exercise the region delta and its
+		-- forget/re-discover undo across many random sequences.
+		local want = math.min(#triIds, rng:NextInteger(1, 3))
+		local picked: { [number]: boolean } = {}
+		local pick: { number } = {}
+		local guard = 0
+		while #pick < want and guard < 30 do
+			guard += 1
+			local tid = triIds[rng:NextInteger(1, #triIds)]
+			if not picked[tid] then
+				picked[tid] = true
+				table.insert(pick, tid)
+			end
+		end
+		local removed = session.DebugDeleteTriangles(pick)
+		return string.format("delete(%d)", removed)
+	end
+
 	local function opUndo(session: any, mesh: any, settings: any, rng: Random): string
 		-- Undo/Redo throw "Attempt to play beyond change history" at the ends of the
 		-- stack; that is a no-op, not a bug under test, so swallow it.
@@ -409,7 +435,8 @@ return function(t: TestTypes.TestContext)
 		opMovePlain,
 		opHover, opHover,
 		opPaint,
-		opAdd,
+		opAdd, opAdd,
+		opDelete,
 		opUndo, opUndo,
 		opRedo,
 	}
