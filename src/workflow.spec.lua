@@ -556,6 +556,60 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("workflow: undoing mid-drag doesn't recurse the selection sync", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 4
+			settings.GridHeight = 4
+			session.GenerateGrid()
+
+			local pickPos: Vector3? = nil
+			for _, v in mesh.getVertices() do
+				pickPos = v.position
+				break
+			end
+			assert(pickPos)
+
+			-- A committed move leaves a waypoint to undo, then start a handle drag and drive
+			-- it partway without ending it.
+			session.SelectVerticesNear({ pickPos })
+			session.MoveSelectedVertices(Vector3.new(0, 6, 0))
+			settle()
+			local movedPos = pickPos + Vector3.new(0, 6, 0)
+			session.SelectVerticesNear({ movedPos })
+			session.StartHandleDrag()
+			session.ApplyHandleDrag(Vector3.new(0, 5, 0))
+			t.expect(session.IsHandleDragging()).toBe(true)
+
+			-- Stand in for the live dragger, which while its drag is still physically active
+			-- answers each SelectionChanged by firing the change signal again. Installed now,
+			-- mid-drag, so it only starts feeding back once the undo clears the dragging flag
+			-- -- exactly the live crash. The < 100 cap keeps a regressed build from looping
+			-- forever in the test rather than failing.
+			local selectionChanged = session.GetSelectionChangedSignal()
+			local syncs = 0
+			local conn = selectionChanged:Connect(function()
+				syncs += 1
+				if syncs < 100 then
+					session.ChangeSignal:Fire()
+				end
+			end)
+			settle()
+			syncs = 0
+
+			-- Undo while the drag is still in progress. Without the re-entrancy guard the
+			-- feedback recurses through task.defer until Studio aborts it; with it, the sync
+			-- collapses to one.
+			pcall(function()
+				ChangeHistoryService:Undo()
+			end)
+			settle()
+			conn:Disconnect()
+
+			t.expect(syncs >= 1).toBeTruthy() -- the sync ran
+			t.expect(syncs < 5).toBeTruthy() -- but didn't snowball
+		end)
+	end)
+
 	t.test("workflow: undo while placing a grid cancels the placement", function()
 		withSession(function(session, mesh, settings)
 			settings.GridType = "Square"

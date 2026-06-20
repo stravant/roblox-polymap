@@ -2705,15 +2705,31 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 	local draggerHandle = Roact.mount(rootElement)
 
-	-- Trigger dragger updates when session state changes (but not during
-	-- drags, where the dragger framework already manages its own updates
-	-- and re-entrancy would cause an infinite loop)
+	-- Trigger dragger updates when session state changes (but not during drags, where the
+	-- dragger framework already manages its own updates and re-entrancy would cause an
+	-- infinite loop).
+	--
+	-- The scheduled flag is a second line of defence against that loop. Undoing in the middle
+	-- of a handle drag clears mIsDraggingHandle (cancelTransientActions interrupts the drag)
+	-- while the physical drag is still live, so the dragger answers the deferred
+	-- SelectionChanged with another changeSignal. The flag -- cleared only AFTER the Fire
+	-- returns -- swallows that re-entrant changeSignal instead of scheduling another defer, so
+	-- the feedback collapses to a single sync rather than recursing until Studio's task.defer
+	-- re-entrancy limit aborts it.
+	local mSelectionSyncScheduled = false
 	changeSignal:Connect(function()
-		if not mIsDraggingHandle then
-			task.defer(function()
+		if mIsDraggingHandle or mSelectionSyncScheduled then
+			return
+		end
+		mSelectionSyncScheduled = true
+		task.defer(function()
+			-- pcall so an erroring listener can't wedge the flag true (which would freeze all
+			-- later selection syncs).
+			pcall(function()
 				fixedSelection.SelectionChanged:Fire()
 			end)
-		end
+			mSelectionSyncScheduled = false
+		end)
 	end)
 
 	----------------------------------------------------------------------
@@ -3466,6 +3482,11 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	end
 	session.IsHandleDragging = function(): boolean
 		return mIsDraggingHandle
+	end
+	-- Test hook: the signal the dragger listens to for selection changes. Lets a test stand
+	-- in for the dragger and verify the changeSignal -> SelectionChanged sync can't recurse.
+	session.GetSelectionChangedSignal = function()
+		return fixedSelection.SelectionChanged
 	end
 
 	-- Add a triangle off the boundary edge nearest nearEdgeWorldPos, with its
