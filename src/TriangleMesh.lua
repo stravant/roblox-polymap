@@ -2,6 +2,10 @@
 
 local fillTriangle = require("./fillTriangle")
 
+local Plugin = script.Parent.Parent
+local Packages = Plugin.Packages
+local Signal = require(Packages.Signal)
+
 export type VertexId = number
 export type TriangleId = number
 export type EdgeId = number
@@ -48,7 +52,7 @@ export type Edge = {
 export type TriangleMesh = {
 	-- Data access
 	getVertices: () -> { [VertexId]: Vertex },
-	getVersion: () -> number,
+	VertexChanged: typeof(Signal.new()),
 	getTriangles: () -> { [TriangleId]: Triangle },
 	getEdges: () -> { [string]: Edge },
 	getVertex: (id: VertexId) -> Vertex?,
@@ -134,10 +138,10 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 	-- Lookup edges by verts
 	local mEdgeLookup = {} :: {[vector]: EdgeId}
 
-	-- Bumped whenever the vertex set or any vertex position changes (add / move /
-	-- remove). The overlay's discovered-vertex markers memoise on this so they only
-	-- re-render when the mesh actually changes, not on every hover.
-	local mVersion = 0
+	-- Fired with a VertexId whenever that vertex is added, moved, or removed. The
+	-- overlay's discovered-vertex display listens and updates just that one marker, so
+	-- discovering or editing a few vertices never costs a rebuild of all of them.
+	local mVertexChanged = Signal.new()
 
 	local mNextVertexId = 1
 	local mNextTriangleId = 1
@@ -180,7 +184,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		}
 		mVertices[id] = vertex
 		mSpatialHash[hash] = id
-		mVersion += 1
+		mVertexChanged:Fire(id)
 		return id
 	end
 
@@ -308,7 +312,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			local hash = hashVertex(vertex.position)
 			mSpatialHash[hash] = nil
 			mVertices[vertexId] = nil
-			mVersion += 1
+			mVertexChanged:Fire(vertexId)
 		end
 	end
 
@@ -383,10 +387,6 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 
 	local function getVertices(): {[VertexId]: Vertex}
 		return mVertices
-	end
-
-	local function getVersion(): number
-		return mVersion
 	end
 
 	local function getTriangles(): {[TriangleId]: Triangle}
@@ -682,7 +682,6 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		if not vertex then
 			return
 		end
-		mVersion += 1
 
 		-- Update spatial hash
 		local oldHash = hashVertex(vertex.position)
@@ -730,6 +729,8 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 				rebuildTriangleGeometry(tri, props)
 			end
 		end
+
+		mVertexChanged:Fire(vertexId)
 	end
 
 	local function moveVertices(moves: {[number]: Vector3}, thickness: number, props: fillTriangle.TriangleProps?)
@@ -859,8 +860,10 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			end
 		end
 
-		-- mergeVertices moves/removes vertices directly (not via moveVertex/cleanupVertex).
-		mVersion += 1
+		-- mergeVertices moves the survivor and removes the merged vertex directly (not
+		-- via moveVertex / cleanupVertex), so notify for both.
+		mVertexChanged:Fire(mergedId)
+		mVertexChanged:Fire(survivorId)
 		return true
 	end
 
@@ -2331,7 +2334,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 	return {
 		-- Data access
 		getVertices = getVertices,
-		getVersion = getVersion,
+		VertexChanged = mVertexChanged,
 		getTriangles = getTriangles,
 		getEdges = getEdges,
 		getVertex = getVertex,

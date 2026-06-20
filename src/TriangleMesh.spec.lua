@@ -1538,17 +1538,21 @@ return function(t: TestTypes.TestContext)
 		folder:Destroy()
 	end)
 
-	t.test("getVersion bumps when vertices are added, moved, or removed", function()
+	t.test("VertexChanged fires per vertex when vertices are added, moved, or removed", function()
 		local mesh = createTriangleMesh()
 		local folder = Instance.new("Folder")
 		folder.Parent = workspace
 
-		local v0 = mesh.getVersion()
+		local fired: { number } = {}
+		local conn = mesh.VertexChanged:Connect(function(id: number)
+			table.insert(fired, id)
+		end)
+
 		local tri = mesh.addTriangle(Vector3.new(0, 0, 0), Vector3.new(4, 0, 0), Vector3.new(2, 0, 3), 0.2, folder, nil, Vector3.new(2, 5, 0))
 		assert(tri)
-		t.expect(mesh.getVersion() > v0).toBeTruthy() -- new vertices created
+		t.expect(#fired >= 3).toBeTruthy() -- one fire per new vertex
 
-		local v1 = mesh.getVersion()
+		table.clear(fired)
 		local vid: number? = nil
 		for id in mesh.getVertices() do
 			vid = id
@@ -1558,12 +1562,13 @@ return function(t: TestTypes.TestContext)
 		local v = mesh.getVertex(vid)
 		assert(v)
 		mesh.moveVertex(vid, v.position + Vector3.new(0, 1, 0), 0.2, nil)
-		t.expect(mesh.getVersion() > v1).toBeTruthy() -- a vertex moved
+		t.expect(table.find(fired, vid) ~= nil).toBeTruthy() -- the moved vertex fired
 
-		local v2 = mesh.getVersion()
+		table.clear(fired)
 		mesh.removeTriangle(tri)
-		t.expect(mesh.getVersion() > v2).toBeTruthy() -- vertices removed
+		t.expect(#fired >= 3).toBeTruthy() -- one fire per removed vertex
 
+		conn:Disconnect()
 		folder:Destroy()
 	end)
 end

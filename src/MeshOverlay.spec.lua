@@ -383,6 +383,78 @@ return function(t: TestTypes.TestContext)
 		end
 	end)
 
+	t.test("discovered markers update incrementally as the mesh changes", function()
+		local mesh = createTriangleMesh()
+		local incrFolder = Instance.new("Folder")
+		incrFolder.Name = "$MeshOverlayIncrParts"
+		incrFolder.Parent = workspace
+
+		-- One triangle (3 vertices) to start.
+		local tri1 = mesh.addTriangle(Vector3.new(0, 0, 0), Vector3.new(4, 0, 0), Vector3.new(2, 0, 3), THICKNESS, incrFolder, nil, Vector3.new(2, 5, 0))
+		assert(tri1)
+
+		local incrScreen = Instance.new("ScreenGui")
+		incrScreen.Name = "$MeshOverlayIncr"
+		incrScreen.Parent = CoreGui
+		local incrRoot = ReactRoblox.createRoot(incrScreen)
+		ReactRoblox.act(function()
+			incrRoot:render(e(VertexMarkers, {
+				Mesh = mesh,
+				ShowDiscoveredVertices = true,
+				DiscoveredVertexSize = 0.5,
+			}))
+		end)
+
+		local function adorns(): { SphereHandleAdornment }
+			local out = {}
+			for _, d in incrScreen:GetDescendants() do
+				if d:IsA("SphereHandleAdornment") then
+					table.insert(out, d)
+				end
+			end
+			return out
+		end
+
+		-- One marker per discovered vertex to start.
+		t.expect(#adorns()).toBe(3)
+
+		-- Add a triangle sharing an edge -> exactly one new vertex. The pool grows by one
+		-- with NO re-render: the mesh's VertexChanged signal drives the update synchronously.
+		local tri2 = mesh.addTriangle(Vector3.new(4, 0, 0), Vector3.new(2, 0, 3), Vector3.new(6, 0, 3), THICKNESS, incrFolder, nil, Vector3.new(4, 5, 0))
+		assert(tri2)
+		t.expect(#adorns()).toBe(4)
+
+		-- Moving a vertex moves its marker (still no re-render).
+		local movedTo = Vector3.new(0, 9, 0)
+		local v00: number? = nil
+		for id, v in mesh.getVertices() do
+			if (v.position - Vector3.new(0, 0, 0)).Magnitude < 0.01 then
+				v00 = id
+				break
+			end
+		end
+		assert(v00)
+		mesh.moveVertex(v00, movedTo, THICKNESS, nil)
+		local atMoved = 0
+		for _, a in adorns() do
+			if (a.CFrame.Position - movedTo).Magnitude < 0.01 then
+				atMoved += 1
+			end
+		end
+		t.expect(atMoved).toBe(1)
+
+		-- Removing the first triangle orphans only its (0,0,0) corner; its marker goes away,
+		-- the two shared with the second triangle stay.
+		mesh.removeTriangle(tri1)
+		t.expect(#adorns()).toBe(3)
+
+		ReactRoblox.act(function()
+			incrRoot:unmount()
+		end)
+		incrScreen:Destroy()
+		incrFolder:Destroy()
+	end)
+
 	-- Clean up
 	ReactRoblox.act(function()
 		root:unmount()

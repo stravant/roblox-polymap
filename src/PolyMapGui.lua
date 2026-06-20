@@ -1977,7 +1977,6 @@ local function PolyMapGui(props: {
 				MarqueeEnd = select(2, session.GetMarquee()),
 				ShowDiscoveredVertices = currentSettings.ShowDiscoveredVertices,
 				DiscoveredVertexSize = currentSettings.DiscoveredVertexSize,
-				DiscoveredVersion = mesh.getVersion(),
 			}
 
 			-- Compute Add mode overlay props

@@ -28,29 +28,88 @@ local HOVER_VERTEX_COLOR = Color3.fromRGB(100, 150, 255)
 local DELETE_HOVER_VERTEX_COLOR = Color3.fromRGB(255, 80, 80)
 local DISCOVERED_VERTEX_COLOR = Color3.fromRGB(255, 255, 255)
 
--- The discovered-vertex markers: one faint, fixed-size dot per vertex (the setting is a
--- diameter, so the sphere radius is half it). Memoised on the mesh version, so a hover --
--- which doesn't change the mesh -- doesn't reconcile all ~1000 of them; it re-renders only
--- when a vertex is actually added, moved, or removed.
-local DiscoveredMarkers = React.memo(function(props: {
+-- The discovered-vertex display: one faint, fixed-size dot per vertex (the setting is a
+-- diameter, so the sphere radius is half it). Instead of rendering these through React --
+-- where any mesh change reconciles all ~1000 of them -- we keep an adornment per vertex
+-- and update it incrementally from the mesh's VertexChanged signal: discovering, moving,
+-- or deleting a handful of vertices only touches those few markers, never the whole set,
+-- and a hover (which doesn't change the mesh) does no marker work at all.
+local function DiscoveredMarkers(props: {
 	Mesh: TriangleMesh.TriangleMesh,
-	Size: number,
-	Version: number?,
+	Size: number, -- diameter
 })
-	local r = props.Size / 2
-	local children: { [string]: any } = {}
-	for id, vertex in props.Mesh.getVertices() do
-		children["D_" .. tostring(id)] = e(VertexMarker, {
-			Position = vertex.position,
-			Color = DISCOVERED_VERTEX_COLOR,
-			Radius = r,
-			Transparency = 0.1,
-			AlwaysOnTop = false,
-			ZIndexOffset = 1,
-		})
-	end
-	return e(React.Fragment, nil, children)
-end)
+	local containerRef = React.useRef(nil :: Folder?)
+	-- Live adornment pool keyed by VertexId, held in a ref so the size effect can reach
+	-- it without tearing down the mesh subscription.
+	local adornsRef = React.useRef(nil :: { [number]: SphereHandleAdornment }?)
+	-- Latest size, read by the long-lived reconcile closure when it creates a marker.
+	local sizeRef = React.useRef(props.Size)
+	sizeRef.current = props.Size
+
+	-- Build the pool once and keep it in sync with the mesh. Re-runs only if the mesh
+	-- instance itself changes (a new session), never on an ordinary re-render.
+	React.useEffect(function()
+		local container = containerRef.current
+		if not container then
+			return
+		end
+		local mesh = props.Mesh
+		local adorns: { [number]: SphereHandleAdornment } = {}
+		adornsRef.current = adorns
+
+		local function reconcile(id: number)
+			local vertex = mesh.getVertex(id)
+			if vertex then
+				local adorn = adorns[id]
+				if not adorn then
+					adorn = Instance.new("SphereHandleAdornment")
+					adorn.Adornee = workspace.Terrain
+					adorn.Color3 = DISCOVERED_VERTEX_COLOR
+					adorn.Transparency = 0.1
+					adorn.AlwaysOnTop = false
+					adorn.ZIndex = 1
+					adorn.Radius = sizeRef.current / 2
+					adorn.Parent = container
+					adorns[id] = adorn
+				end
+				adorn.CFrame = CFrame.new(vertex.position)
+			else
+				local adorn = adorns[id]
+				if adorn then
+					adorn:Destroy()
+					adorns[id] = nil
+				end
+			end
+		end
+
+		for id in mesh.getVertices() do
+			reconcile(id)
+		end
+		local conn = mesh.VertexChanged:Connect(reconcile)
+
+		return function()
+			conn:Disconnect()
+			for _, adorn in adorns do
+				adorn:Destroy()
+			end
+			adornsRef.current = nil
+		end
+	end, { props.Mesh } :: { any })
+
+	-- A size change just rewrites the existing markers' radii -- no rebuild.
+	React.useEffect(function()
+		local adorns = adornsRef.current
+		if adorns then
+			local r = props.Size / 2
+			for _, adorn in adorns do
+				adorn.Radius = r
+			end
+		end
+	end, { props.Size } :: { any })
+
+	-- The pool is parented to this Folder imperatively; React only owns the Folder.
+	return e("Folder", { ref = containerRef })
+end
 
 -- Renders the selected / hovered / discovered vertex markers.
 --
@@ -68,7 +127,6 @@ local function VertexMarkers(props: {
 	HoverVertexIsDelete: boolean?,
 	ShowDiscoveredVertices: boolean?,
 	DiscoveredVertexSize: number?,
-	DiscoveredVersion: number?,
 })
 	local mesh = props.Mesh
 	local selectedVertices = props.SelectedVertices or {}
@@ -145,14 +203,13 @@ local function VertexMarkers(props: {
 	end
 
 	-- Every discovered vertex in a faint, de-emphasized state (opt-in via the global
-	-- "Show discovered vertices" setting), as a memoised child so a hover doesn't
-	-- reconcile them all. No need to skip the selected/hovered vertices: those markers
+	-- "Show discovered vertices" setting), via an incrementally-updated child so a hover
+	-- does no work for it. No need to skip the selected/hovered vertices: those markers
 	-- are AlwaysOnTop and cover the faint dot underneath them.
 	if props.ShowDiscoveredVertices then
 		children["Discovered"] = e(DiscoveredMarkers, {
 			Mesh = mesh,
 			Size = props.DiscoveredVertexSize or 0.4,
-			Version = props.DiscoveredVersion,
 		})
 	end
 

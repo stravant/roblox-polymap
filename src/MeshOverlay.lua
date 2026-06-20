@@ -61,7 +61,6 @@ local function MeshOverlay(props: {
 	GridPreviewLines: { { Vector3 } }?,
 	ShowDiscoveredVertices: boolean?,
 	DiscoveredVertexSize: number?,
-	DiscoveredVersion: number?,
 })
 	local mesh = props.Mesh
 	local outlineRef = React.useRef(nil :: any)
@@ -253,7 +252,6 @@ local function MeshOverlay(props: {
 		HoverVertexIsDelete = props.HoverVertexIsDelete,
 		ShowDiscoveredVertices = props.ShowDiscoveredVertices,
 		DiscoveredVertexSize = props.DiscoveredVertexSize,
-		DiscoveredVersion = props.DiscoveredVersion,
 	})
 
 	-- Marquee selection rectangle
