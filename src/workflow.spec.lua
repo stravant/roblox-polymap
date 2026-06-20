@@ -656,6 +656,40 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("workflow: paint undo/redo never rediscovers the mesh", function()
+		withSession(function(session, mesh, settings)
+			session.GenerateGrid()
+			local paintPos: Vector3? = nil
+			local paintPart: BasePart? = nil
+			for _, tri in mesh.getTriangles() do
+				local p1 = mesh.getVertex(tri.vertices[1])
+				local p2 = mesh.getVertex(tri.vertices[2])
+				local p3 = mesh.getVertex(tri.vertices[3])
+				if p1 and p2 and p3 then
+					paintPos = (p1.position + p2.position + p3.position) / 3
+					paintPart = tri.parts[1]
+					break
+				end
+			end
+			assert(paintPos and paintPart)
+			local origColor = (paintPart :: BasePart).Color
+			settings.PaintColor = { 1, 0, 0 }
+			settings.PaintTarget = "Color"
+			session.PaintAt(paintPos)
+
+			-- Paint changes no topology, so its undo and redo must do zero rediscovery.
+			local before = session.GetRediscoverCount()
+			ChangeHistoryService:Undo()
+			settle()
+			t.expect(session.GetRediscoverCount()).toBe(before)
+			t.expect(colorsClose((paintPart :: BasePart).Color, origColor)).toBeTruthy()
+			ChangeHistoryService:Redo()
+			settle()
+			t.expect(session.GetRediscoverCount()).toBe(before)
+			t.expect(colorsClose((paintPart :: BasePart).Color, Color3.new(1, 0, 0))).toBeTruthy()
+		end)
+	end)
+
 	t.test("workflow: paint keeps later undo selections balanced", function()
 		withSession(function(session, mesh, settings)
 			session.GenerateGrid()

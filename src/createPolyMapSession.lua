@@ -279,7 +279,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	-- that region instead of rebuilding the whole mesh; `false` means "no fast path --
 	-- full rediscovery" (every other op). Because the stacks are parallel, a `false` entry
 	-- simply falls back to the old path -- this can only ever speed things up.
-	type MoveDelta = { beforeSeeds: { Vector3 }, afterSeeds: { Vector3 }, radius: number }
+	-- A region delta restores an op locally. `noop = true` means the op changed no mesh
+	-- topology at all (e.g. Paint, which only recolours parts), so undo/redo need do nothing
+	-- -- ChangeHistory reverts the parts by itself.
+	type MoveDelta = { beforeSeeds: { Vector3 }, afterSeeds: { Vector3 }, radius: number, noop: boolean? }
 	local mUndoDeltas: { MoveDelta | false } = {}
 	local mRedoDeltas: { MoveDelta | false } = {}
 	-- Counts full rediscoveries, so tests can confirm a move undo/redo took the local
@@ -407,6 +410,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local function tryBoundedRestore(delta: (MoveDelta | false)?, toBefore: boolean): boolean
 		if not delta then
 			return false
+		end
+		if delta.noop then
+			-- The op changed no mesh topology (Paint); ChangeHistory reverts the parts.
+			return true
 		end
 		local removeSeeds = if toBefore then delta.afterSeeds else delta.beforeSeeds
 		local addSeeds = if toBefore then delta.beforeSeeds else delta.afterSeeds
@@ -2084,6 +2091,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				ChangeHistoryService:FinishRecording(mStrokeRecording, op)
 			end)
 			mStrokeRecording = nil
+			-- Paint only recolours parts, so its undo/redo need no mesh rediscovery at all.
+			if not cancel and currentSettings.Mode == "Paint" then
+				setTopUndoDelta({ beforeSeeds = {}, afterSeeds = {}, radius = 0, noop = true })
+			end
 		end
 		mStrokeDragging = false
 		mStrokePlanePoint = nil
@@ -3428,6 +3439,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		else
 			ChangeHistoryService:SetWaypoint("PolyMap Paint")
 		end
+		-- Paint only recolours parts; undo/redo need no mesh rediscovery.
+		setTopUndoDelta({ beforeSeeds = {}, afterSeeds = {}, radius = 0, noop = true })
 		changeSignal:Fire()
 	end
 
