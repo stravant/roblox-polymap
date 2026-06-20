@@ -1535,8 +1535,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 	end
 
-	local function applyPaintAtCursor()
-		local result = mouseRaycast()
+	local function applyPaintAtCursor(screenPosOverride: Vector2?)
+		local result = mouseRaycast(screenPosOverride)
 		if result and result.Instance:IsA("BasePart") then
 			-- Track seed triangle for surface walking
 			discoverPartViewed(result.Instance :: BasePart, result.Position)
@@ -1549,8 +1549,17 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			local color = Color3.new(c[1], c[2], c[3])
 			local mat = (Enum.Material :: any)[currentSettings.PaintMaterial]
 
-			-- Collect all parts to paint
-			local partsToPaint: { BasePart } = { result.Instance :: BasePart }
+			-- Collect all parts to paint: the whole hit triangle (1-2 wedges), not just
+			-- the single wedge the cursor's ray happened to land on.
+			local partsToPaint: { BasePart } = {}
+			local hitTri = if hitTriId then mMesh.getTriangle(hitTriId) else nil
+			if hitTri then
+				for _, part in hitTri.parts do
+					table.insert(partsToPaint, part)
+				end
+			else
+				table.insert(partsToPaint, result.Instance :: BasePart)
+			end
 			local radius = currentSettings.PaintRadius
 			if radius > 0 and mStrokeSeedTriangleId then
 				for _, nearTriId in discoverAndWalkSurface(mStrokeSeedTriangleId, result.Position, radius) do
@@ -2998,6 +3007,16 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		startStroke()
 		for _, pos in screenPositions do
 			applyDeleteAtCursor(pos)
+		end
+		endStroke()
+	end
+
+	-- Test hook: run a Paint stroke that visits the given screen positions in order,
+	-- exercising the real applyPaintAtCursor (raycast -> hit triangle -> its wedges).
+	session.DebugPaintStroke = function(screenPositions: { Vector2 })
+		startStroke()
+		for _, pos in screenPositions do
+			applyPaintAtCursor(pos)
 		end
 		endStroke()
 	end

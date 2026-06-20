@@ -2286,4 +2286,47 @@ return function(t: TestTypes.TestContext)
 		t.expect(v2).toBe("Mossy")
 	end)
 
+	t.test("Paint: a stroke paints the whole hit triangle, both its wedges", function()
+		withSession(function(session, mesh, settings)
+			settings.Mode = "Paint"
+			settings.PaintTarget = "Color"
+			settings.PaintColor = { 1, 0, 0 } -- red
+			settings.PaintRadius = 0
+
+			local cam = workspace.CurrentCamera
+			assert(cam)
+			local vp = cam:WorldToViewportPoint(kRegionCenter)
+			local ray = cam:ViewportPointToRay(vp.X, vp.Y)
+			local O, D = ray.Origin, ray.Direction.Unit
+			local center = O + D * 20
+			buildFacingTri(mesh, center, D)
+
+			-- Aim the click at a point clearly inside ONE wedge -- off the split seam
+			-- (which runs through the centre), so the ray lands solidly on a single
+			-- wedge rather than grazing the boundary between the two.
+			local up = if math.abs(D.Y) < 0.9 then Vector3.yAxis else Vector3.xAxis
+			local u = D:Cross(up).Unit
+			local v = D:Cross(u).Unit
+			local ivp = cam:WorldToViewportPoint(center + v * 1.2)
+			local paintSp = Vector2.new(ivp.X, ivp.Y)
+
+			-- The test triangle must be backed by TWO wedges for this to mean anything.
+			local twoWedge: any = nil
+			for _, tri in mesh.getTriangles() do
+				if #tri.parts == 2 then
+					twoWedge = tri
+				end
+			end
+			assert(twoWedge)
+
+			-- A single paint click -- whose ray hits ONE wedge -- must colour BOTH.
+			session.DebugPaintStroke({ paintSp })
+
+			local red = Color3.new(1, 0, 0)
+			for _, part in twoWedge.parts do
+				t.expect(colorsClose(part.Color, red)).toBeTruthy()
+			end
+		end)
+	end)
+
 end
