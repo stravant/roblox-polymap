@@ -1386,19 +1386,20 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			local v3Id = getOrCreateVertex(c3)
 			local v4Id = getOrCreateVertex(c4)
 
-			local faceNormal = computeNormal(c1, c2, c3)
-			local faceCentroid = (c1 + c2 + c3 + c4) / 4
-			-- Orient the adopted face outward toward the viewer (same hint as the face
-			-- choice), so the wedge normals face the camera rather than into the slab.
-			local faceToHint = faceHint - faceCentroid
-			if faceNormal:Dot(faceToHint) < 0 then
-				faceNormal = -faceNormal
-			end
+			-- Orient each adopted-face triangle's normal along the face's OUTWARD
+			-- direction: the thin axis, on the side the face was chosen for. Orienting
+			-- toward the hint point instead is ill-conditioned when the hint lies in the
+			-- face plane -- e.g. a rebuild (no viewpoint) seeded from a face corner --
+			-- where (hint - faceCentroid) is nearly perpendicular to the normal, so the
+			-- sign is decided by floating-point noise and the wedge side after an upgrade
+			-- flips at random. The outward direction is well-defined either way.
+			local localAxis = ({ localHint.X, localHint.Y, localHint.Z })[minIdx]
+			local faceOutward = axes[minIdx] * (if localAxis >= 0 then 1 else -1)
 
 			-- Triangle 1
 			local tri1Verts = {v1Id, v2Id, v3Id}
 			local tri1Natural = computeNormal(c1, c2, c3)
-			if tri1Natural:Dot(faceToHint) < 0 then
+			if tri1Natural:Dot(faceOutward) < 0 then
 				tri1Verts = {v1Id, v3Id, v2Id}
 				tri1Natural = -tri1Natural
 			end
@@ -1426,7 +1427,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			-- Triangle 2
 			local tri2Verts = {v1Id, v3Id, v4Id}
 			local tri2Natural = computeNormal(c1, c3, c4)
-			if tri2Natural:Dot(faceToHint) < 0 then
+			if tri2Natural:Dot(faceOutward) < 0 then
 				tri2Verts = {v1Id, v4Id, v3Id}
 				tri2Natural = -tri2Natural
 			end

@@ -827,6 +827,36 @@ return function(t: TestTypes.TestContext)
 		folder:Destroy()
 	end)
 
+	t.test("discoverRegion orients a thin Block's face outward even seeded from a face corner (no viewpoint)", function()
+		-- Repro for the undo bug: after an undo, rediscoverMesh rebuilds with NO
+		-- viewpoint, seeded from the restored vertex positions -- which for a thin
+		-- slab's top face are its top-face CORNERS. A corner lies in the face plane, so
+		-- orienting the normal by (corner - faceCentroid) is degenerate; it used to leave
+		-- the normal pointing into the slab, which then upgraded the Block to wedges on
+		-- the wrong side. The adopted face must read outward (+Y here) regardless.
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+		local block = Instance.new("Part")
+		block.Shape = Enum.PartType.Block
+		block.Size = Vector3.new(8, 0.2, 8) -- thin along Y; top face at Y=10.1
+		block.CFrame = CFrame.new(1395, 10, 0)
+		block.Anchored = true
+		block.Parent = folder
+
+		local mesh = createTriangleMesh()
+		-- Seed exactly on a TOP-FACE CORNER, no viewpoint (the rebuild path).
+		mesh.discoverRegion({ Vector3.new(1399, 10.1, 4) }, 6)
+
+		local found = 0
+		for _, tri in mesh.getTriangles() do
+			found += 1
+			t.expect(tri.normal.Y > 0.5).toBeTruthy() -- outward (up), not into the slab
+		end
+		t.expect(found).toBe(2)
+
+		folder:Destroy()
+	end)
+
 	t.test("discovery ignores parts literally named Baseplate", function()
 		for _, p in workspace:GetPartBoundsInRadius(Vector3.new(1500, 10, 0), 80) do
 			if p:IsA("BasePart") then p:Destroy() end
