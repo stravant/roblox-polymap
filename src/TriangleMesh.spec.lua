@@ -1399,4 +1399,89 @@ return function(t: TestTypes.TestContext)
 
 		folder:Destroy()
 	end)
+
+	t.test("mergeVertices stitches a torn seam into one shared edge", function()
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		-- Two triangles that should meet along z = 0 but are "torn": the second one's
+		-- near corners sit 0.2 studs away (well past the 0.02 merge tolerance), so the
+		-- mesh holds six separate vertices and no shared edge.
+		mesh.addTriangle(
+			Vector3.new(0, 0, 0), Vector3.new(4, 0, 0), Vector3.new(2, 0, 3),
+			0.2, folder, nil, Vector3.new(0, 1, 0)
+		)
+		mesh.addTriangle(
+			Vector3.new(0, 0, -0.2), Vector3.new(4, 0, -0.2), Vector3.new(2, 0, -3),
+			0.2, folder, nil, Vector3.new(0, 1, 0)
+		)
+
+		local function countDict(d: any): number
+			local n = 0
+			for _ in d do
+				n += 1
+			end
+			return n
+		end
+		local function boundaryCount(): number
+			local n = 0
+			for _, edge in mesh.getEdges() do
+				if #edge.triangles == 1 then
+					n += 1
+				end
+			end
+			return n
+		end
+		local function vidNear(pos: Vector3): number
+			local best: number? = nil
+			local bestD = 0.05
+			for id, v in mesh.getVertices() do
+				local d = (v.position - pos).Magnitude
+				if d < bestD then
+					bestD = d
+					best = id
+				end
+			end
+			assert(best, "no vertex near " .. tostring(pos))
+			return best
+		end
+
+		-- Torn: 6 vertices, 2 triangles, every edge a boundary (nothing shared).
+		t.expect(countDict(mesh.getVertices())).toBe(6)
+		t.expect(countDict(mesh.getTriangles())).toBe(2)
+		t.expect(countDict(mesh.getEdges())).toBe(6)
+		t.expect(boundaryCount()).toBe(6)
+
+		local a1 = vidNear(Vector3.new(0, 0, 0))
+		local a2 = vidNear(Vector3.new(0, 0, -0.2))
+		local b1 = vidNear(Vector3.new(4, 0, 0))
+		local b2 = vidNear(Vector3.new(4, 0, -0.2))
+		local c1 = vidNear(Vector3.new(2, 0, 3))
+
+		-- Refuses to collapse two corners of the same triangle (would be degenerate).
+		t.expect(mesh.mergeVertices(a1, c1, Vector3.new(0, 0, 0), nil)).toBe(false)
+		t.expect(countDict(mesh.getVertices())).toBe(6) -- unchanged
+
+		-- Heal both ends of the seam.
+		t.expect(mesh.mergeVertices(a1, a2, Vector3.new(0, 0, -0.1), nil)).toBe(true)
+		t.expect(mesh.mergeVertices(b1, b2, Vector3.new(4, 0, -0.1), nil)).toBe(true)
+
+		-- Stitched: 4 vertices, still 2 triangles, 5 edges with exactly one shared
+		-- (interior) edge -- so only 4 boundary edges remain.
+		t.expect(countDict(mesh.getVertices())).toBe(4)
+		t.expect(countDict(mesh.getTriangles())).toBe(2)
+		t.expect(countDict(mesh.getEdges())).toBe(5)
+		t.expect(boundaryCount()).toBe(4)
+
+		local shared = 0
+		for _, edge in mesh.getEdges() do
+			if #edge.triangles == 2 then
+				shared += 1
+			end
+		end
+		t.expect(shared).toBe(1)
+
+		folder:Destroy()
+	end)
 end

@@ -63,6 +63,7 @@ export type TriangleMesh = {
 	removeTriangle: (triangleId: number) -> (),
 	moveVertex: (vertexId: number, newPosition: Vector3, thickness: number, props: fillTriangle.TriangleProps?) -> (),
 	moveVertices: (moves: { [number]: Vector3 }, thickness: number, props: fillTriangle.TriangleProps?) -> (),
+	mergeVertices: (survivorId: number, mergedId: number, position: Vector3, props: fillTriangle.TriangleProps?) -> boolean,
 	setThicknessHint: (thickness: number) -> (),
 
 	-- Queries (topology)
@@ -635,6 +636,34 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		mTriangles[triangleId] = nil
 	end
 
+	-- Reshape a triangle's parts in place to match its vertices' current positions,
+	-- preserving its winding and its own recorded thickness. Shared by moveVertex and
+	-- mergeVertices so the two stay consistent.
+	local function rebuildTriangleGeometry(tri: Triangle, props: fillTriangle.TriangleProps?)
+		local v1 = mVertices[tri.vertices[1]]
+		local v2 = mVertices[tri.vertices[2]]
+		local v3 = mVertices[tri.vertices[3]]
+		if not (v1 and v2 and v3) then
+			return
+		end
+		-- Recompute normal
+		tri.normal = computeNormal(v1.position, v2.position, v3.position)
+
+		-- Determine if we need invertNormal for fillTriangle
+		local naturalNormal = computeNormal(v1.position, v2.position, v3.position)
+		local shouldInvert = naturalNormal:Dot(tri.normal) < 0
+
+		-- Rebuild parts in-place at THIS triangle's own thickness (recorded at
+		-- discovery / creation) rather than snapping to the global value, so editing a
+		-- vertex regenerates parts as thick as they already were.
+		local parent = tri.parts[1].Parent
+		local newParts = fillTriangle(
+			v1.position, v2.position, v3.position,
+			tri.thickness, parent :: Instance, props, tri.parts, shouldInvert
+		)
+		tri.parts = relinkTriangleParts(tri, newParts)
+	end
+
 	local function moveVertex(vertexId: number, newPosition: Vector3, thickness: number, props: fillTriangle.TriangleProps?)
 		local vertex = mVertices[vertexId]
 		if not vertex then
@@ -684,27 +713,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		for _, triId in vertex.triangles do
 			local tri = mTriangles[triId]
 			if tri then
-				local v1 = mVertices[tri.vertices[1]]
-				local v2 = mVertices[tri.vertices[2]]
-				local v3 = mVertices[tri.vertices[3]]
-				if v1 and v2 and v3 then
-					-- Recompute normal
-					tri.normal = computeNormal(v1.position, v2.position, v3.position)
-
-					-- Determine if we need invertNormal for fillTriangle
-					local naturalNormal = computeNormal(v1.position, v2.position, v3.position)
-					local shouldInvert = naturalNormal:Dot(tri.normal) < 0
-
-					-- Rebuild parts in-place at THIS triangle's own thickness (recorded
-					-- at discovery / creation) rather than snapping to the global value,
-					-- so moving a vertex regenerates parts as thick as they already were.
-					local parent = tri.parts[1].Parent
-					local newParts = fillTriangle(
-						v1.position, v2.position, v3.position,
-						tri.thickness, parent :: Instance, props, tri.parts, shouldInvert
-					)
-					tri.parts = relinkTriangleParts(tri, newParts)
-				end
+				rebuildTriangleGeometry(tri, props)
 			end
 		end
 	end
@@ -713,6 +722,130 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		for vertexId, newPosition in moves do
 			moveVertex(vertexId, newPosition, thickness, props)
 		end
+	end
+
+	-- Merge `mergedId` into `survivorId`, placing the unified vertex at `position`.
+	-- Every triangle that referenced mergedId is re-pointed onto survivorId, the edges
+	-- of the affected triangles are torn down and rebuilt at the new positions (so two
+	-- coincident "torn" edges combine into one shared edge, closing the seam), and the
+	-- parts are reshaped to the new corner. Returns false (a no-op) if either vertex is
+	-- missing, they are the same vertex, or they share a triangle -- merging corners of
+	-- one triangle would collapse it to a degenerate sliver.
+	local function mergeVertices(survivorId: number, mergedId: number, position: Vector3, props: fillTriangle.TriangleProps?): boolean
+		if survivorId == mergedId then
+			return false
+		end
+		local survivor = mVertices[survivorId]
+		local merged = mVertices[mergedId]
+		if not survivor or not merged then
+			return false
+		end
+		for _, triId in merged.triangles do
+			local tri = mTriangles[triId]
+			if tri and table.find(tri.vertices, survivorId) then
+				return false
+			end
+		end
+
+		-- Every triangle touching either vertex -- these are the only ones whose edges
+		-- or geometry change.
+		local affected: { TriangleId } = {}
+		local seen: { [TriangleId]: boolean } = {}
+		for _, triId in survivor.triangles do
+			if not seen[triId] then
+				seen[triId] = true
+				table.insert(affected, triId)
+			end
+		end
+		for _, triId in merged.triangles do
+			if not seen[triId] then
+				seen[triId] = true
+				table.insert(affected, triId)
+			end
+		end
+
+		-- Block-backed triangles must become wedges before we reshape corners.
+		for _, triId in affected do
+			local tri = mTriangles[triId]
+			if tri and tri.partsRequireUpgrade then
+				upgradeBlockTriangles(tri, tri.thickness)
+			end
+		end
+
+		-- 1) Detach the affected triangles from their current edges (keyed by current
+		--    positions), cleaning up any that empty out.
+		for _, triId in affected do
+			local tri = mTriangles[triId]
+			if tri then
+				for _, pair in triangleEdgePairs(tri.vertices) do
+					local pa = mVertices[pair[1]]
+					local pb = mVertices[pair[2]]
+					if pa and pb then
+						local edgeId = mEdgeLookup[hashEdge(pa.position, pb.position)]
+						if edgeId then
+							local edge = mEdges[edgeId]
+							if edge then
+								local idx = table.find(edge.triangles, triId)
+								if idx then
+									table.remove(edge.triangles, idx)
+								end
+								cleanupEdge(edgeId)
+							end
+						end
+					end
+				end
+			end
+		end
+
+		-- 2) Re-point merged -> survivor in every triangle, and adopt those triangles.
+		for _, triId in merged.triangles do
+			local tri = mTriangles[triId]
+			if tri then
+				for i, vid in tri.vertices do
+					if vid == mergedId then
+						tri.vertices[i] = survivorId
+					end
+				end
+				table.insert(survivor.triangles, triId)
+			end
+		end
+		merged.triangles = {}
+
+		-- 3) Delete the merged vertex and move the survivor to the merge position.
+		local mergedHash = hashVertex(merged.position)
+		if mSpatialHash[mergedHash] == mergedId then
+			mSpatialHash[mergedHash] = nil
+		end
+		mVertices[mergedId] = nil
+
+		local survivorOldHash = hashVertex(survivor.position)
+		if mSpatialHash[survivorOldHash] == survivorId then
+			mSpatialHash[survivorOldHash] = nil
+		end
+		survivor.position = position
+		mSpatialHash[hashVertex(position)] = survivorId
+
+		-- 4) Rebuild edges at the new positions. getOrCreateEdge keys by position, so
+		--    two formerly-separate torn edges now resolve to one shared edge.
+		for _, triId in affected do
+			local tri = mTriangles[triId]
+			if tri then
+				for _, pair in triangleEdgePairs(tri.vertices) do
+					local edgeId = getOrCreateEdge(pair[1], pair[2])
+					table.insert(mEdges[edgeId].triangles, triId)
+				end
+			end
+		end
+
+		-- 5) Reshape the parts of every affected triangle to the moved corner.
+		for _, triId in affected do
+			local tri = mTriangles[triId]
+			if tri then
+				rebuildTriangleGeometry(tri, props)
+			end
+		end
+
+		return true
 	end
 
 	local function setThicknessHint(thickness: number)
@@ -2028,6 +2161,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		removeTriangle = removeTriangle,
 		moveVertex = moveVertex,
 		moveVertices = moveVertices,
+		mergeVertices = mergeVertices,
 		setThicknessHint = setThicknessHint,
 
 		-- Topology queries
