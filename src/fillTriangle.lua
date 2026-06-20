@@ -3,6 +3,7 @@
 export type TriangleProps = {
 	Color: Color3?,
 	Material: Enum.Material?,
+	MaterialVariant: string?,
 	Transparency: number?,
 }
 
@@ -121,14 +122,17 @@ local function fillTriangle(
 	local color: Color3
 	local material: Enum.Material
 	local transparency: number
+	local materialVariant: string
 	if existingParts and existingParts[1] then
 		color = existingParts[1].Color
 		material = existingParts[1].Material
 		transparency = existingParts[1].Transparency
+		materialVariant = existingParts[1].MaterialVariant
 	else
 		color = if props and props.Color then props.Color else Color3.fromRGB(163, 162, 165)
 		material = if props and props.Material then props.Material else Enum.Material.Plastic
 		transparency = if props and props.Transparency then props.Transparency else 0
+		materialVariant = if props and props.MaterialVariant then props.MaterialVariant else ""
 	end
 
 	local partIndex = 0
@@ -147,6 +151,7 @@ local function fillTriangle(
 			newPart.Anchored = true
 			newPart.Color = color
 			newPart.Material = material
+			newPart.MaterialVariant = materialVariant
 			newPart.Transparency = transparency
 			newPart.Parent = parent
 			part1 = newPart
@@ -168,6 +173,7 @@ local function fillTriangle(
 			newPart.Anchored = true
 			newPart.Color = color
 			newPart.Material = material
+			newPart.MaterialVariant = materialVariant
 			newPart.Transparency = transparency
 			newPart.Parent = parent
 			part2 = newPart

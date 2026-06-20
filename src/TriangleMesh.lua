@@ -314,6 +314,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		local blockProps: fillTriangle.TriangleProps = {
 			Color = block.Color,
 			Material = block.Material,
+			MaterialVariant = block.MaterialVariant,
 			Transparency = block.Transparency,
 		}
 

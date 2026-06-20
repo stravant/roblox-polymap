@@ -50,6 +50,32 @@ return function(t: TestTypes.TestContext)
 		folder:Destroy()
 	end)
 
+	t.test("applies MaterialVariant to new parts and preserves it when regenerating", function()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		local a = Vector3.new(0, 0, 0)
+		local b = Vector3.new(4, 0, 0)
+		local c = Vector3.new(0, 4, 0)
+		-- New parts take the variant from props.
+		local parts = fillTriangle(a, b, c, 0.2, folder, {
+			Material = Enum.Material.Plastic,
+			MaterialVariant = "PolyMapTestVariant",
+		})
+		t.expect(#parts > 0).toBeTruthy()
+		for _, part in parts do
+			t.expect(part.MaterialVariant).toBe("PolyMapTestVariant")
+		end
+
+		-- Regenerating over the same parts (as a vertex move does) keeps the variant.
+		local moved = fillTriangle(a, Vector3.new(4, 0, 1), c, 0.2, folder, nil, parts)
+		for _, part in moved do
+			t.expect(part.MaterialVariant).toBe("PolyMapTestVariant")
+		end
+
+		folder:Destroy()
+	end)
+
 	t.test("returns empty for degenerate triangle", function()
 		local folder = Instance.new("Folder")
 		folder.Parent = workspace

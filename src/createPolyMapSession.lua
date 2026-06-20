@@ -402,7 +402,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			local tri = mMesh.getTriangle(tid)
 			local part = if tri then tri.parts[1] else nil
 			if part then
-				return { Color = part.Color, Material = part.Material }
+				return { Color = part.Color, Material = part.Material, MaterialVariant = part.MaterialVariant }
 			end
 		end
 		return nil
@@ -1236,7 +1236,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		if parentTri then
 			local part = parentTri.parts[1]
 			if part then
-				props = { Color = part.Color, Material = part.Material }
+				props = { Color = part.Color, Material = part.Material, MaterialVariant = part.MaterialVariant }
 				snappedParent = part.Parent
 			end
 		end
@@ -1309,6 +1309,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 								mAddTriangleProps = {
 									Color = part.Color,
 									Material = part.Material,
+									MaterialVariant = part.MaterialVariant,
 								}
 							end
 						end

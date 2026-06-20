@@ -719,6 +719,7 @@ return function(t: TestTypes.TestContext)
 		block.Color = Color3.fromRGB(200, 40, 40)
 		block.Material = Enum.Material.Slate
 		block.Transparency = 0.25
+		block.MaterialVariant = "PolyMapTestVariant"
 		block.Parent = folder
 
 		mesh.discoverPart(block, Vector3.new(1300, 10.2, 0))
@@ -736,6 +737,7 @@ return function(t: TestTypes.TestContext)
 				wedges += 1
 				t.expect((part :: Part).Shape).toBe(Enum.PartType.Wedge)
 				t.expect(part.Material).toBe(Enum.Material.Slate)
+				t.expect(part.MaterialVariant).toBe("PolyMapTestVariant")
 				local c = part.Color
 				t.expect(math.abs(c.R - 200 / 255) < 0.01).toBeTruthy()
 				t.expect(math.abs(c.G - 40 / 255) < 0.01).toBeTruthy()
