@@ -1184,7 +1184,10 @@ local function MaterialPanel(props: {
 								SortOrder = Enum.SortOrder.LayoutOrder,
 							}),
 							Chip = e(ChipForToggle, {
-								Text = if variant ~= "" then variant else material,
+								-- Show the variant's own name when there is one; otherwise the
+								-- dropdown's abbreviated material label (e.g. "Smooth P."),
+								-- falling back to the raw material name when it has no label.
+								Text = if variant ~= "" then variant else MaterialDropdown.GetLabel(material),
 								IsCurrent = material == props.Settings.PaintMaterial
 									and variant == props.Settings.PaintMaterialVariant,
 								LayoutOrder = 1,
