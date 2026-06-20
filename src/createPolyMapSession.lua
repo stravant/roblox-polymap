@@ -388,6 +388,25 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 		return nil
 	end
+	-- The colour/material of the geometry a snapped vertex belongs to, so new content
+	-- can match it instead of the current paint settings.
+	local function propsForVertex(vid: number?): fillTriangle.TriangleProps?
+		if not vid then
+			return nil
+		end
+		local vertex = mMesh.getVertex(vid)
+		if not vertex then
+			return nil
+		end
+		for _, tid in vertex.triangles do
+			local tri = mMesh.getTriangle(tid)
+			local part = if tri then tri.parts[1] else nil
+			if part then
+				return { Color = part.Color, Material = part.Material }
+			end
+		end
+		return nil
+	end
 	local function newMeshFolder(): Folder
 		local folder = Instance.new("Folder")
 		folder.Name = "PolyMapMesh"
@@ -709,6 +728,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			-- Snapped onto an existing vertex -> share its folder; otherwise a fresh
 			-- folder. Resolved inside the recording so an undo removes the folder too.
 			local parent = resolveNewParent(parentForVertex(snapVid))
+			-- Snapped onto existing geometry -> match its colour/material; else use the
+			-- current paint settings.
+			local props = propsForVertex(snapVid) or getTriangleProps()
 			generateGrid({
 				GridType = currentSettings.GridType,
 				Width = cols,
@@ -719,7 +741,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				Origin = origin,
 				Thickness = currentSettings.Thickness,
 				Parent = parent,
-				Props = getTriangleProps(),
+				Props = props,
 			})
 			return true
 		end)

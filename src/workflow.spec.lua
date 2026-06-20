@@ -2203,4 +2203,39 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("Place grid: snapping inherits the snapped part's colour and material", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 3
+			settings.GridHeight = 3
+			settings.GridSpacing = 4
+			settings.PaintColor = { 1, 0, 0 } -- red
+			settings.PaintMaterial = "Grass"
+			session.GenerateGrid() -- grid 1: red grass
+
+			local v: Vector3? = nil
+			for _, vert in mesh.getVertices() do
+				v = vert.position
+				break
+			end
+			assert(v)
+
+			-- Change the paint settings: a snapped place must NOT use these.
+			settings.PaintColor = { 0, 0, 1 } -- blue
+			settings.PaintMaterial = "Plastic"
+
+			session.StartGridPlacement()
+			session.PlaceGridClickAt(v + Vector3.new(1, 0, 0)) -- snaps to grid 1
+			session.PlaceGridClickAt(v + Vector3.new(13, 0, 13))
+
+			-- Every wedge matches grid 1 (red grass); none took the blue/plastic setting.
+			local red = Color3.new(1, 0, 0)
+			for _, tri in mesh.getTriangles() do
+				for _, part in tri.parts do
+					t.expect(colorsClose(part.Color, red)).toBeTruthy()
+					t.expect(part.Material == Enum.Material.Grass).toBeTruthy()
+				end
+			end
+		end)
+	end)
+
 end
