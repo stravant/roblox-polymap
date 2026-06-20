@@ -952,11 +952,15 @@ local function CustomTab(color: { number }, onChange: (color: { number }) -> ())
 	})
 end
 
+-- Remembers the last-viewed picker tab for the rest of the Studio session, so reopening
+-- the popup returns to where you left off.
+local gColorPickerTab = "BrickColor"
+
 local function ColorPickerPopup(props: {
 	Current: { number },
 	OnSelect: (color: { number }, close: boolean) -> (),
 })
-	local tab, setTab = React.useState("BrickColor")
+	local tab, setTab = React.useState(gColorPickerTab)
 	local customColor, setCustomColor = React.useState(props.Current)
 
 	local function customChange(c: { number })
@@ -988,6 +992,7 @@ local function ColorPickerPopup(props: {
 			ZIndex = 12,
 			[React.Event.MouseButton1Click] = function()
 				setTab(name)
+				gColorPickerTab = name
 			end,
 		}, { Corner = e("UICorner", { CornerRadius = UDim.new(0, 4) }) })
 	end
