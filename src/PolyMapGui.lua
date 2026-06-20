@@ -1021,6 +1021,8 @@ local function MaterialPanel(props: {
 		if found then
 			props.Settings.PaintMaterialVariant = typed
 			props.Settings.PaintMaterial = found.BaseMaterial.Name
+			-- A valid, entered variant joins the history, like an eyedropped one.
+			addRecent(Settings.EncodeRecentMaterial(found.BaseMaterial.Name, typed))
 		else
 			props.Settings.PaintMaterialVariant = ""
 		end
@@ -1136,54 +1138,6 @@ local function MaterialPanel(props: {
 				}),
 			}),
 		}),
-		VariantRow = e("Frame", {
-			Size = UDim2.new(1, 0, 0, 24),
-			BackgroundTransparency = 1,
-			LayoutOrder = nextOrder(),
-		}, {
-			ListLayout = e("UIListLayout", {
-				FillDirection = Enum.FillDirection.Horizontal,
-				VerticalAlignment = Enum.VerticalAlignment.Center,
-				SortOrder = Enum.SortOrder.LayoutOrder,
-				Padding = UDim.new(0, 4),
-			}),
-			Label = e("TextLabel", {
-				Text = "Variant",
-				TextColor3 = Colors.WHITE,
-				BackgroundTransparency = 1,
-				Size = UDim2.new(0, 0, 0, 24),
-				AutomaticSize = Enum.AutomaticSize.X,
-				Font = Enum.Font.SourceSans,
-				TextSize = 18,
-				TextXAlignment = Enum.TextXAlignment.Left,
-				LayoutOrder = 1,
-			}),
-			-- Type a MaterialVariant name (or eyedrop one). A valid name switches the
-			-- base material to match; an unknown name clears the field.
-			Box = e("TextBox", {
-				Text = props.Settings.PaintMaterialVariant,
-				PlaceholderText = "(none)",
-				PlaceholderColor3 = Color3.fromRGB(170, 170, 170),
-				TextColor3 = Colors.WHITE,
-				BackgroundColor3 = Colors.GREY,
-				Size = UDim2.new(0, 0, 0, 24),
-				Font = Enum.Font.SourceSans,
-				TextSize = 18,
-				TextXAlignment = Enum.TextXAlignment.Left,
-				ClearTextOnFocus = false,
-				LayoutOrder = 2,
-				[React.Event.FocusLost] = function(rbx: TextBox)
-					applyVariant(rbx.Text)
-				end,
-			}, {
-				Corner = e("UICorner", { CornerRadius = UDim.new(0, 4) }),
-				Padding = e("UIPadding", {
-					PaddingLeft = UDim.new(0, 6),
-					PaddingRight = UDim.new(0, 6),
-				}),
-				Flex = e("UIFlexItem", { FlexMode = Enum.UIFlexMode.Grow }),
-			}),
-		}),
 		RecentChips = e("Frame", {
 			Size = UDim2.fromScale(1, 0),
 			AutomaticSize = Enum.AutomaticSize.Y,
@@ -1211,6 +1165,61 @@ local function MaterialPanel(props: {
 			end
 			return kids
 		end)()),
+		-- The Variant field sits below the recents.
+		VariantRow = e(HelpGui.WithHelpIcon, {
+			LayoutOrder = nextOrder(),
+			Subject = e("Frame", {
+				Size = UDim2.new(1, 0, 0, 24),
+				BackgroundTransparency = 1,
+			}, {
+				ListLayout = e("UIListLayout", {
+					FillDirection = Enum.FillDirection.Horizontal,
+					VerticalAlignment = Enum.VerticalAlignment.Center,
+					SortOrder = Enum.SortOrder.LayoutOrder,
+					Padding = UDim.new(0, 4),
+				}),
+				Label = e("TextLabel", {
+					Text = "Variant",
+					TextColor3 = Colors.WHITE,
+					BackgroundTransparency = 1,
+					Size = UDim2.new(0, 0, 0, 24),
+					AutomaticSize = Enum.AutomaticSize.X,
+					Font = Enum.Font.SourceSans,
+					TextSize = 18,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					LayoutOrder = 1,
+				}),
+				Box = e("TextBox", {
+					Text = props.Settings.PaintMaterialVariant,
+					PlaceholderText = "(none)",
+					PlaceholderColor3 = Color3.fromRGB(170, 170, 170),
+					TextColor3 = Colors.WHITE,
+					BackgroundColor3 = Colors.GREY,
+					Size = UDim2.new(0, 0, 0, 24),
+					Font = Enum.Font.SourceSans,
+					TextSize = 18,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					ClearTextOnFocus = false,
+					LayoutOrder = 2,
+					[React.Event.FocusLost] = function(rbx: TextBox)
+						applyVariant(rbx.Text)
+						-- Reflect the resolved value even when it didn't change (so no
+						-- Text update was rendered) -- e.g. an invalid entry cleared to "".
+						rbx.Text = props.Settings.PaintMaterialVariant
+					end,
+				}, {
+					Corner = e("UICorner", { CornerRadius = UDim.new(0, 4) }),
+					Padding = e("UIPadding", {
+						PaddingLeft = UDim.new(0, 6),
+						PaddingRight = UDim.new(0, 6),
+					}),
+					Flex = e("UIFlexItem", { FlexMode = Enum.UIFlexMode.Grow }),
+				}),
+			}),
+			Help = e(HelpGui.BasicTooltip, {
+				HelpRichText = "Paint a <b>MaterialVariant</b> on top of the base material. Type its name (or eyedrop a part that has one); a valid name also switches the base material to match, and is added to the recents. An unknown name clears the field. Leave it empty for no variant.",
+			}),
+		}),
 	})
 end
 
