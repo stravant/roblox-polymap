@@ -2971,8 +2971,13 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 		-- Then the in-memory positions, for full coverage (e.g. an op with no
 		-- selection snapshot, or geometry the snapshot's component doesn't reach).
-		for _, vertex in mMesh.getVertices() do
+		-- Remember the current ids too: clear() fires nothing and the rebuild assigns fresh
+		-- ids, so the discovered-vertex markers need these reconciled afterwards to drop any
+		-- whose vertex the rebuild didn't recreate (e.g. undoing a grid generation).
+		local priorIds: { number } = {}
+		for id, vertex in mMesh.getVertices() do
 			table.insert(seeds, vertex.position)
+			table.insert(priorIds, id)
 		end
 		-- When there is still nothing to seed from -- e.g. redoing a creation after
 		-- it was fully undone -- fall back to the most recent known positions.
@@ -2985,6 +2990,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		if #seeds > 0 then
 			mMesh.discoverRegion(seeds, math.huge)
 		end
+		-- Reconcile the markers: the rebuild reused/repositioned markers for ids it recreated;
+		-- this drops the rest (vertices the rebuild left behind, e.g. an undone grid).
+		mMesh.notifyVerticesChanged(priorIds)
 	end
 
 	-- Abandon any transient in-progress action when an undo/redo interrupts it, so its

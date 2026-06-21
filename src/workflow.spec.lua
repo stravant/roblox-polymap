@@ -634,6 +634,46 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("workflow: undoing a grid generation clears the discovered-vertex markers", function()
+		withSession(function(session, mesh, settings)
+			-- Mirror the discovered-vertex markers' reconcile: an id is pooled while
+			-- VertexChanged last saw a vertex for it, and dropped when it saw none. A leftover
+			-- marker is a pooled id whose vertex is gone -- which is what an Add Grid undo left
+			-- behind, because that undo rebuilds via the silent clear() rather than the bounded
+			-- path Add Poly uses.
+			local pool: { [number]: boolean } = {}
+			local conn = mesh.VertexChanged:Connect(function(id)
+				if mesh.getVertex(id) then
+					pool[id] = true
+				else
+					pool[id] = nil
+				end
+			end)
+
+			settings.GridWidth = 4
+			settings.GridHeight = 4
+			session.GenerateGrid()
+			settle()
+			local marked = 0
+			for _ in pool do
+				marked += 1
+			end
+			t.expect(marked > 0).toBeTruthy() -- the grid produced markers
+
+			-- Undo the generation: no pooled marker is left pointing at a now-missing vertex.
+			ChangeHistoryService:Undo()
+			settle()
+			conn:Disconnect()
+			local stale = 0
+			for id in pool do
+				if mesh.getVertex(id) == nil then
+					stale += 1
+				end
+			end
+			t.expect(stale).toBe(0)
+		end)
+	end)
+
 	t.test("workflow: undo while placing a grid cancels the placement", function()
 		withSession(function(session, mesh, settings)
 			settings.GridType = "Square"

@@ -84,6 +84,7 @@ export type TriangleMesh = {
 	getPartTriangle: (part: BasePart, hintPoint: Vector3) -> number?,
 	getPartTriangles: (part: BasePart) -> { TriangleId },
 	clear: () -> (),
+	notifyVerticesChanged: (ids: { number }) -> (),
 }
 
 -- Distance under which two positions are treated as the same vertex. Must stay
@@ -2530,6 +2531,18 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		mNextEdgeId = 1
 	end
 
+	-- Fire VertexChanged for each of the given ids without otherwise touching the mesh. After
+	-- a full rediscovery (clear + rebuild) the caller passes the pre-clear ids so listeners --
+	-- the discovered-vertex markers -- reconcile them: an id the rebuild recreated still has a
+	-- vertex (its marker is kept/repositioned), while one it didn't (e.g. geometry removed by
+	-- undoing a grid generation) now resolves to nil, so its stale marker is dropped. clear()
+	-- stays silent so the rebuild can reuse the markers it does recreate, no instance churn.
+	local function notifyVerticesChanged(ids: { number })
+		for _, id in ids do
+			mVertexChanged:Fire(id)
+		end
+	end
+
 	---------------------------------------------------------------------------
 	-- Return the mesh interface
 	---------------------------------------------------------------------------
@@ -2569,6 +2582,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		getPartTriangle = getPartTriangle,
 		getPartTriangles = getPartTriangles,
 		clear = clear,
+		notifyVerticesChanged = notifyVerticesChanged,
 	} :: TriangleMesh
 end
 
