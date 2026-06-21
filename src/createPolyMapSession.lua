@@ -2918,9 +2918,14 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			return false
 		end
 		local center = (minV + maxV) / 2
-		-- Sphere enclosing the bounds, floored so a single/tiny selection frames at a sensible
-		-- distance rather than putting the camera right on top of it.
-		local radius = math.max((maxV - minV).Magnitude / 2, 2)
+		-- Sphere enclosing the selection, grown by the influence radius (in Move/Rotate, where
+		-- it applies) so the whole soft-selection region a drag would affect ends up in frame.
+		-- Floored so a single/tiny selection still frames at a sensible distance rather than
+		-- putting the camera right on top of it.
+		local influence = if currentSettings.Mode == "Move" or currentSettings.Mode == "Rotate"
+			then currentSettings.InfluenceRadius
+			else 0
+		local radius = math.max((maxV - minV).Magnitude / 2 + influence, 2)
 		-- Distance that fits the sphere in the vertical field of view, plus a margin.
 		local distance = radius / math.sin(math.rad(camera.FieldOfView) / 2) + radius
 		local newPos = center - camera.CFrame.LookVector * distance

@@ -3075,9 +3075,10 @@ return function(t: TestTypes.TestContext)
 			assert(minV and maxV)
 			local center = (minV + maxV) / 2
 
-			-- Aim the camera somewhere arbitrary, then focus.
+			-- Aim the camera somewhere arbitrary; focus with no influence radius first.
 			cam.CFrame = CFrame.lookAt(Vector3.new(50, 40, 60), Vector3.zero)
 			local dirBefore = cam.CFrame.LookVector
+			settings.InfluenceRadius = 0
 			t.expect(session.FocusSelection()).toBe(true)
 
 			-- Orbit focus is the selection centre, the view direction is unchanged, and the
@@ -3087,6 +3088,14 @@ return function(t: TestTypes.TestContext)
 			local toCenter = center - cam.CFrame.Position
 			t.expect(toCenter.Magnitude > 1).toBeTruthy() -- pulled back off the selection
 			t.expect(toCenter.Unit:Dot(cam.CFrame.LookVector) > 0.999).toBeTruthy() -- looking at it
+			local d0 = toCenter.Magnitude
+
+			-- A non-zero influence radius pulls the camera back further, so the whole
+			-- soft-selection region fits (distance grows by more than the added radius).
+			settings.InfluenceRadius = 50
+			t.expect(session.FocusSelection()).toBe(true)
+			local d50 = (center - cam.CFrame.Position).Magnitude
+			t.expect(d50 > d0 + 50).toBeTruthy()
 		end)
 	end)
 
