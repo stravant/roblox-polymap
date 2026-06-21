@@ -3037,6 +3037,59 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("workflow: F-to-focus frames the camera on the vertex selection", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 4
+			settings.GridHeight = 4
+			session.GenerateGrid()
+			settings.Mode = "Move"
+
+			local cam = workspace.CurrentCamera
+			assert(cam)
+
+			-- No selection -> no focus, camera untouched.
+			local before = cam.CFrame
+			t.expect(session.FocusSelection()).toBe(false)
+			t.expect(cam.CFrame).toBe(before)
+
+			-- Select a few vertices; compute their bounding-box centre.
+			local positions: { Vector3 } = {}
+			for _, v in mesh.getVertices() do
+				table.insert(positions, v.position)
+				if #positions >= 3 then
+					break
+				end
+			end
+			session.SelectVerticesNear(positions)
+			t.expect(session.GetSelectedVertexCount() > 0).toBeTruthy()
+
+			local minV: Vector3? = nil
+			local maxV: Vector3? = nil
+			for _, id in session.GetSelectedVertexIds() do
+				local v = mesh.getVertex(id)
+				if v then
+					minV = if minV then minV:Min(v.position) else v.position
+					maxV = if maxV then maxV:Max(v.position) else v.position
+				end
+			end
+			assert(minV and maxV)
+			local center = (minV + maxV) / 2
+
+			-- Aim the camera somewhere arbitrary, then focus.
+			cam.CFrame = CFrame.lookAt(Vector3.new(50, 40, 60), Vector3.zero)
+			local dirBefore = cam.CFrame.LookVector
+			t.expect(session.FocusSelection()).toBe(true)
+
+			-- Orbit focus is the selection centre, the view direction is unchanged, and the
+			-- camera now looks at the centre from some distance back.
+			t.expect((cam.Focus.Position - center).Magnitude < 0.1).toBeTruthy()
+			t.expect(cam.CFrame.LookVector:Dot(dirBefore) > 0.999).toBeTruthy()
+			local toCenter = center - cam.CFrame.Position
+			t.expect(toCenter.Magnitude > 1).toBeTruthy() -- pulled back off the selection
+			t.expect(toCenter.Unit:Dot(cam.CFrame.LookVector) > 0.999).toBeTruthy() -- looking at it
+		end)
+	end)
+
 	t.test("workflow: Escape in Move/Rotate clears the selection", function()
 		withSession(function(session, mesh, settings)
 			settings.GridWidth = 4

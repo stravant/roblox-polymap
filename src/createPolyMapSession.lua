@@ -2897,6 +2897,38 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 	end
 
+	-- Frame the camera on the current vertex selection -- the F-to-focus key. Keeps the
+	-- camera's orientation and pulls back to fit the selection's bounds, and points the orbit
+	-- focus at its centre. Returns whether it focused (there was a selection to focus on).
+	local function focusOnSelection(): boolean
+		local camera = workspace.CurrentCamera
+		if not camera then
+			return false
+		end
+		local minV: Vector3? = nil
+		local maxV: Vector3? = nil
+		for _, id in getSelectedVertexIds() do
+			local v = mMesh.getVertex(id)
+			if v then
+				minV = if minV then minV:Min(v.position) else v.position
+				maxV = if maxV then maxV:Max(v.position) else v.position
+			end
+		end
+		if not minV or not maxV then
+			return false
+		end
+		local center = (minV + maxV) / 2
+		-- Sphere enclosing the bounds, floored so a single/tiny selection frames at a sensible
+		-- distance rather than putting the camera right on top of it.
+		local radius = math.max((maxV - minV).Magnitude / 2, 2)
+		-- Distance that fits the sphere in the vertical field of view, plus a margin.
+		local distance = radius / math.sin(math.rad(camera.FieldOfView) / 2) + radius
+		local newPos = center - camera.CFrame.LookVector * distance
+		camera.CFrame = camera.CFrame.Rotation + newPos
+		camera.Focus = CFrame.new(center)
+		return true
+	end
+
 	local inputBeganCn: RBXScriptConnection? = nil
 	local inputEndedCn: RBXScriptConnection? = nil
 	local delayedBeginCn = task.delay(0, function()
@@ -2914,6 +2946,12 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			-- Escape cancels the current in-progress interaction (Add, grid place, Pick).
 			if input.KeyCode == Enum.KeyCode.Escape and not gameProcessed then
 				handleEscape()
+			end
+			-- F focuses on the vertex selection, but only when Studio's own selection is empty
+			-- so we don't fight its built-in F-to-focus (it's empty most of the time in PolyMap,
+			-- which drives its own vertex selection).
+			if input.KeyCode == Enum.KeyCode.F and not gameProcessed and #Selection:Get() == 0 then
+				focusOnSelection()
 			end
 		end)
 
@@ -3151,6 +3189,11 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	end
 	session.GetSelectionCentroid = function(): Vector3?
 		return getSelectionCentroid()
+	end
+	-- Test hook: the F-to-focus camera framing (the live key handler also gates on Studio's
+	-- selection being empty). Returns whether there was a selection to focus on.
+	session.FocusSelection = function(): boolean
+		return focusOnSelection()
 	end
 	session.GetHoverVertexId = function(): number?
 		return mHoverVertexId
