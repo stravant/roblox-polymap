@@ -2865,6 +2865,15 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			clearGridPlacement()
 			changeSignal:Fire()
 		end
+		-- Move/Rotate: clear the current selection (same as clicking empty space).
+		if
+			(currentSettings.Mode == "Move" or currentSettings.Mode == "Rotate")
+			and next(mSelectedVertices) ~= nil
+		then
+			mSelectedVertices = {}
+			mSavedVertexPositions = {}
+			changeSignal:Fire()
+		end
 		-- Cancel an active Paint eyedropper (Pick Colour / Pick Material), returning to
 		-- normal painting without sampling anything.
 		if currentSettings.Mode == "Paint" and currentSettings.PaintEyedropper ~= "None" then

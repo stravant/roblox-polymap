@@ -3037,6 +3037,30 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("workflow: Escape in Move/Rotate clears the selection", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 4
+			settings.GridHeight = 4
+			session.GenerateGrid()
+
+			local positions: { Vector3 } = {}
+			for _, v in mesh.getVertices() do
+				table.insert(positions, v.position)
+				if #positions >= 2 then
+					break
+				end
+			end
+
+			for _, mode in { "Move", "Rotate" } do
+				settings.Mode = mode
+				session.SelectVerticesNear(positions)
+				t.expect(session.GetSelectedVertexCount() > 0).toBeTruthy()
+				session.DebugEscape()
+				t.expect(session.GetSelectedVertexCount()).toBe(0)
+			end
+		end)
+	end)
+
 	t.test("Paint: Escape cancels an active Pick (eyedropper) mode", function()
 		withSession(function(session, _mesh, settings)
 			settings.Mode = "Paint"
