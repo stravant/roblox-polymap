@@ -278,6 +278,71 @@ return function(t: TestTypes.TestContext)
 		t.expect(checked).toBe(vertexCount)
 	end)
 
+	t.test("show discovered vertices: hidden for the selected and hovered vertices", function()
+		-- Three distinct vertices at three distinct grid positions.
+		local ids: { number } = {}
+		local posById: { [number]: Vector3 } = {}
+		for id, vert in mesh.getVertices() do
+			table.insert(ids, id)
+			posById[id] = vert.position
+		end
+		t.expect(#ids >= 3).toBe(true)
+		local vertA, vertB, hoverV = ids[1], ids[2], ids[3]
+
+		-- The discovered marker (de-emphasized, not-always-on-top sphere) at a position, or
+		-- nil; the selected/hover markers are AlwaysOnTop and so excluded.
+		local function discoveredAt(pos: Vector3): SphereHandleAdornment?
+			local overlay = CoreGui:FindFirstChild("$PolyMapOverlay")
+			if not overlay then
+				return nil
+			end
+			local key = string.format("%.1f,%.1f,%.1f", pos.X, pos.Y, pos.Z)
+			for _, d in overlay:GetDescendants() do
+				if d:IsA("SphereHandleAdornment") and not d.AlwaysOnTop then
+					local p = d.CFrame.Position
+					if string.format("%.1f,%.1f,%.1f", p.X, p.Y, p.Z) == key then
+						return d
+					end
+				end
+			end
+			return nil
+		end
+
+		-- Clean slate, then mount fresh with A selected and hoverV hovered -- exercises the
+		-- per-vertex reconcile that builds each marker.
+		ReactRoblox.act(function()
+			root:render(e(MeshOverlay, { Mesh = mesh }))
+		end)
+		ReactRoblox.act(function()
+			root:render(e(MeshOverlay, {
+				Mesh = mesh,
+				ShowDiscoveredVertices = true,
+				SelectedVertices = { [vertA] = true },
+				HoverVertexId = hoverV,
+			}))
+		end)
+		local mA, mH, mB = discoveredAt(posById[vertA]), discoveredAt(posById[hoverV]), discoveredAt(posById[vertB])
+		assert(mA and mH and mB)
+		t.expect(mA.Visible).toBe(false) -- selected -> hidden
+		t.expect(mH.Visible).toBe(false) -- hovered -> hidden
+		t.expect(mB.Visible).toBe(true) -- plain -> visible
+
+		-- Re-render moving the selection to B and dropping the hover -- exercises the
+		-- incremental visibility diff (the live path: markers already on screen).
+		ReactRoblox.act(function()
+			root:render(e(MeshOverlay, {
+				Mesh = mesh,
+				ShowDiscoveredVertices = true,
+				SelectedVertices = { [vertB] = true },
+			}))
+		end)
+		local mA2, mH2, mB2 = discoveredAt(posById[vertA]), discoveredAt(posById[hoverV]), discoveredAt(posById[vertB])
+		assert(mA2 and mH2 and mB2)
+		t.expect(mB2.Visible).toBe(false) -- now selected -> hidden
+		t.expect(mA2.Visible).toBe(true) -- no longer selected -> visible
+		t.expect(mH2.Visible).toBe(true) -- no longer hovered -> visible
+	end)
+
 	t.test("discovered markers are a fixed size, not depth-scaled", function()
 		-- A large mesh so the cost is representative (~1024 vertices).
 		local perfFolder = Instance.new("Folder")

@@ -37,6 +37,10 @@ local DISCOVERED_VERTEX_COLOR = Color3.fromRGB(255, 255, 255)
 local function DiscoveredMarkers(props: {
 	Mesh: TriangleMesh.TriangleMesh,
 	Size: number, -- diameter
+	-- Vertices whose discovered marker is hidden (the selected/hovered ones, which have their
+	-- own markers). Hiding rather than relying on z-order: a fixed-world-size discovered dot
+	-- can be larger on screen than the constant-size marker over it and peek out around it.
+	Hidden: { [number]: boolean }?,
 })
 	local containerRef = React.useRef(nil :: Folder?)
 	-- Live adornment pool keyed by VertexId, held in a ref so the size effect can reach
@@ -45,6 +49,9 @@ local function DiscoveredMarkers(props: {
 	-- Latest size, read by the long-lived reconcile closure when it creates a marker.
 	local sizeRef = React.useRef(props.Size)
 	sizeRef.current = props.Size
+	-- Latest hidden set, read by the reconcile closure so a marker (re)built while its vertex
+	-- is selected/hovered starts hidden; the effect below toggles the rest as it changes.
+	local hiddenRef = React.useRef(props.Hidden or {})
 
 	-- Build the pool once and keep it in sync with the mesh. Re-runs only if the mesh
 	-- instance itself changes (a new session), never on an ordinary re-render.
@@ -73,6 +80,7 @@ local function DiscoveredMarkers(props: {
 					adorns[id] = adorn
 				end
 				adorn.CFrame = CFrame.new(vertex.position)
+				adorn.Visible = not hiddenRef.current[id]
 			else
 				local adorn = adorns[id]
 				if adorn then
@@ -106,6 +114,36 @@ local function DiscoveredMarkers(props: {
 			end
 		end
 	end, { props.Size } :: { any })
+
+	-- Toggle visibility as the selected/hovered set changes: only the markers whose hidden
+	-- state flipped, so a hover sliding over the mesh touches at most a couple of markers,
+	-- never all ~1000. The parent recomputes Hidden each render, so this catches in-place
+	-- selection edits (shift-click) too, not just reassignments.
+	React.useEffect(function()
+		local newHidden = props.Hidden or {}
+		local oldHidden = hiddenRef.current
+		hiddenRef.current = newHidden
+		local adorns = adornsRef.current
+		if not adorns then
+			return
+		end
+		for id in newHidden do
+			if not oldHidden[id] then
+				local adorn = adorns[id]
+				if adorn then
+					adorn.Visible = false
+				end
+			end
+		end
+		for id in oldHidden do
+			if not newHidden[id] then
+				local adorn = adorns[id]
+				if adorn then
+					adorn.Visible = true
+				end
+			end
+		end
+	end, { props.Hidden } :: { any })
 
 	-- The pool is parented to this Folder imperatively; React only owns the Folder.
 	return e("Folder", { ref = containerRef })
@@ -204,12 +242,21 @@ local function VertexMarkers(props: {
 
 	-- Every discovered vertex in a faint, de-emphasized state (opt-in via the global
 	-- "Show discovered vertices" setting), via an incrementally-updated child so a hover
-	-- does no work for it. No need to skip the selected/hovered vertices: those markers
-	-- are AlwaysOnTop and cover the faint dot underneath them.
+	-- does no work for it. The selected/hovered vertices' discovered dots are hidden -- they
+	-- have their own markers, and a fixed-world-size dot can peek out around a constant-size
+	-- marker rather than being covered by it.
 	if props.ShowDiscoveredVertices then
+		local hidden: { [number]: boolean } = {}
+		for id in selectedVertices do
+			hidden[id] = true
+		end
+		if props.HoverVertexId then
+			hidden[props.HoverVertexId] = true
+		end
 		children["Discovered"] = e(DiscoveredMarkers, {
 			Mesh = mesh,
 			Size = props.DiscoveredVertexSize or 0.4,
+			Hidden = hidden,
 		})
 	end
 
