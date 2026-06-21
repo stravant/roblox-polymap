@@ -1931,6 +1931,44 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("Add: a point beside the surface still snaps to a vertex by screen position", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 3
+			settings.GridHeight = 3
+			settings.GridSpacing = 4
+			session.GenerateGrid()
+			settings.Mode = "Add"
+			settings.Thickness = 1
+			local vertsBefore = countDict(mesh.getVertices())
+
+			local v: Vector3? = nil
+			for _, vert in mesh.getVertices() do
+				v = vert.position
+				break
+			end
+			assert(v)
+
+			local cam = workspace.CurrentCamera
+			assert(cam)
+			-- A point on the camera ray THROUGH the vertex but well past it: it shares the
+			-- vertex's screen position (so screen-space snapping finds it) yet is far from it
+			-- in world -- the situation when the cursor is beside the geometry and worldPos
+			-- lands on an unrelated plane. A pure world-radius snap would miss it.
+			local eye = cam.CFrame.Position
+			local dir = ((v :: Vector3) - eye).Unit
+			local far = eye + dir * (((v :: Vector3) - eye).Magnitude + 12)
+			t.expect((far - (v :: Vector3)).Magnitude > 5).toBeTruthy() -- outside the world snap radius
+
+			-- Two far-out corners and the screen-aligned point; the middle click reuses v.
+			session.AddClickAt((v :: Vector3) + Vector3.new(40, 0, 0), nil)
+			session.AddClickAt(far, nil) -- snaps to v by screen position
+			session.AddClickAt((v :: Vector3) + Vector3.new(40, 0, 40), nil)
+
+			-- Only the two far corners are new; the screen-aligned click reused the vertex.
+			t.expect(countDict(mesh.getVertices())).toBe(vertsBefore + 2)
+		end)
+	end)
+
 	t.test("Add: place an apex then click an existing edge to extend it (either order)", function()
 		withSession(function(session, mesh, settings)
 			settings.GridWidth = 3

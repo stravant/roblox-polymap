@@ -752,24 +752,51 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return ray.Origin + ray.Direction * t
 	end
 
-	-- Snap an Add point to a nearby existing vertex so fresh geometry can connect to
-	-- the mesh; returns the (possibly snapped) position and that vertex id, or the
-	-- original position and nil.
+	-- Snap an Add point to a nearby existing vertex so fresh geometry can connect to the mesh;
+	-- returns the (possibly snapped) position and that vertex id, or the original position and
+	-- nil. A vertex qualifies if it is close to the point in 3D (good when the cursor is over a
+	-- surface, so worldPos sits on it) OR close to the cursor on screen. The on-screen test is
+	-- what makes snapping work when the cursor is BESIDE the geometry rather than over it:
+	-- there the raycast misses and worldPos is projected onto an unrelated plane, so the vertex
+	-- can be far away in depth while still sitting right under the cursor. The on-screen match
+	-- is preferred, since that is what the user is pointing at.
 	local kAddSnapRadius = 2.0
+	local kAddSnapPixels = 24
 	local function snapAddPoint(worldPos: Vector3): (Vector3, number?)
-		local bestVid: number? = nil
-		local bestDist = kAddSnapRadius
-		for id, vertex in mMesh.getVertices() do
-			local dist = (vertex.position - worldPos).Magnitude
-			if dist < bestDist then
-				bestDist = dist
-				bestVid = id
+		local camera = workspace.CurrentCamera
+		local cursor2: Vector2? = nil
+		if camera then
+			local c = camera:WorldToViewportPoint(worldPos)
+			if c.Z > 0 then
+				cursor2 = Vector2.new(c.X, c.Y)
 			end
 		end
-		if bestVid then
-			local v = mMesh.getVertex(bestVid)
+		local screenVid: number? = nil
+		local screenBest = kAddSnapPixels
+		local worldVid: number? = nil
+		local worldBest = kAddSnapRadius
+		for id, vertex in mMesh.getVertices() do
+			local worldDist = (vertex.position - worldPos).Magnitude
+			if worldDist < worldBest then
+				worldBest = worldDist
+				worldVid = id
+			end
+			if camera and cursor2 then
+				local vs = camera:WorldToViewportPoint(vertex.position)
+				if vs.Z > 0 then
+					local screenDist = (Vector2.new(vs.X, vs.Y) - cursor2).Magnitude
+					if screenDist < screenBest then
+						screenBest = screenDist
+						screenVid = id
+					end
+				end
+			end
+		end
+		local vid = screenVid or worldVid
+		if vid then
+			local v = mMesh.getVertex(vid)
 			if v then
-				return v.position, bestVid
+				return v.position, vid
 			end
 		end
 		return worldPos, nil
