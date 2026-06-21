@@ -875,24 +875,44 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	end
 
 	-- An Add point near a boundary edge can snap to the edge OR to one of its corner
-	-- vertices. When the cursor sits within this (tight) radius of a corner, prefer the
-	-- corner -- returns that vertex id, else nil to use the edge. The radius is well under
-	-- the edge length so the edge interior (the common target) still wins; you pick a corner
-	-- only by hovering right on it. This is what lets a fresh-point build snap its 2nd/3rd
-	-- corner onto an existing vertex instead of always closing onto the edge.
-	local kAddVertexSnapRadius = 1.0
+	-- vertices. The world-space edge pick itself is left alone (it is well tuned); this only
+	-- disambiguates corner-vs-edge, in SCREEN space: project the chosen edge's endpoints and
+	-- the cursor, and if the cursor falls in a screen-pixel band near one projected endpoint,
+	-- snap that corner; else use the edge. Returns the corner vertex id, or nil for the edge.
+	-- The band is a fixed pixel reach near each end, but clamped to a fraction of the edge's
+	-- screen length so a small or foreshortened edge still keeps a selectable middle.
+	local kAddCornerPixels = 24
+	local kAddCornerMaxFrac = 0.4
 	local function addCornerSnap(worldPos: Vector3, edgeKey: string): number?
+		local camera = workspace.CurrentCamera
 		local edge = mMesh.getEdges()[edgeKey]
-		if not edge then
+		if not camera or not edge then
 			return nil
 		end
 		local v1 = mMesh.getVertex(edge.v1)
 		local v2 = mMesh.getVertex(edge.v2)
-		local d1 = if v1 then (v1.position - worldPos).Magnitude else math.huge
-		local d2 = if v2 then (v2.position - worldPos).Magnitude else math.huge
-		if d1 <= kAddVertexSnapRadius and d1 <= d2 then
+		if not v1 or not v2 then
+			return nil
+		end
+		local a = camera:WorldToViewportPoint(v1.position)
+		local b = camera:WorldToViewportPoint(v2.position)
+		local c = camera:WorldToViewportPoint(worldPos)
+		-- A point behind the camera projects unreliably; leave the edge to win.
+		if a.Z <= 0 or b.Z <= 0 or c.Z <= 0 then
+			return nil
+		end
+		local a2 = Vector2.new(a.X, a.Y)
+		local seg = Vector2.new(b.X, b.Y) - a2
+		local segLen = seg.Magnitude
+		if segLen < 1 then
+			return nil
+		end
+		-- Cursor's position along the screen-space edge (0 at v1, 1 at v2).
+		local t = math.clamp((Vector2.new(c.X, c.Y) - a2):Dot(seg) / (segLen * segLen), 0, 1)
+		local band = math.min(kAddCornerPixels / segLen, kAddCornerMaxFrac)
+		if t <= band then
 			return edge.v1
-		elseif d2 <= kAddVertexSnapRadius then
+		elseif t >= 1 - band then
 			return edge.v2
 		end
 		return nil
