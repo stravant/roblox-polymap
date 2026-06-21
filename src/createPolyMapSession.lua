@@ -760,12 +760,18 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	-- there the raycast misses and worldPos is projected onto an unrelated plane, so the vertex
 	-- can be far away in depth while still sitting right under the cursor. The on-screen match
 	-- is preferred, since that is what the user is pointing at.
+	--
+	-- cursorScreen is the true cursor viewport position. Pass it whenever it's known (the live
+	-- hover/click), because worldPos can be a spherecast hit offset from the cursor ray when the
+	-- cursor is beside thin geometry -- measuring the screen distance from that offset point is
+	-- what made the snap margin shrink near edges. It falls back to projecting worldPos so the
+	-- tests, which drive everything through worldPos, still work.
 	local kAddSnapRadius = 2.0
 	local kAddSnapPixels = 24
-	local function snapAddPoint(worldPos: Vector3): (Vector3, number?)
+	local function snapAddPoint(worldPos: Vector3, cursorScreen: Vector2?): (Vector3, number?)
 		local camera = workspace.CurrentCamera
-		local cursor2: Vector2? = nil
-		if camera then
+		local cursor2: Vector2? = cursorScreen
+		if camera and not cursor2 then
 			local c = camera:WorldToViewportPoint(worldPos)
 			if c.Z > 0 then
 				cursor2 = Vector2.new(c.X, c.Y)
@@ -901,48 +907,57 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return findNearestBoundaryEdge(worldPos, partTriIds, nil)
 	end
 
-	-- An Add point near a boundary edge can snap to the edge OR to one of its corner
-	-- vertices. The world-space edge pick itself is left alone (it is well tuned); this only
-	-- disambiguates corner-vs-edge, in SCREEN space: project the chosen edge's endpoints and
-	-- the cursor, and if the cursor falls in a screen-pixel band near one projected endpoint,
-	-- snap that corner; else use the edge. Returns the corner vertex id, or nil for the edge.
-	-- The band is a fixed pixel reach near each end, but clamped to a fraction of the edge's
-	-- screen length so a small or foreshortened edge still keeps a selectable middle.
-	local kAddCornerPixels = 24
-	local kAddCornerMaxFrac = 0.4
-	local function addCornerSnap(worldPos: Vector3, edgeKey: string): number?
-		local camera = workspace.CurrentCamera
+	-- Corner-vs-edge for the Add tool. A vertex within snapAddPoint's screen radius wins over a
+	-- grabbed edge, so a corner is just as easy to hit over the poly as beside it (snapAddPoint
+	-- is the same circle in both cases) -- the world-space edge pick is left alone, it's well
+	-- tuned. The one exception keeps a SHORT grabbed edge selectable: snapDefersToEdge reserves
+	-- the edge's central screen span, so when an endpoint's snap radius would otherwise cover
+	-- the whole edge you can still aim at its middle. (An along-edge band can't do this without
+	-- also shrinking the corner reach on small edges, which is what made corners hard to hit.)
+	local kAddEdgeMiddleFrac = 0.4
+	local function snapDefersToEdge(worldPos: Vector3, edgeKey: string, snapVid: number, cursorScreen: Vector2?): boolean
 		local edge = mMesh.getEdges()[edgeKey]
-		if not camera or not edge then
-			return nil
+		if not edge or (snapVid ~= edge.v1 and snapVid ~= edge.v2) then
+			return false
 		end
+		local camera = workspace.CurrentCamera
 		local v1 = mMesh.getVertex(edge.v1)
 		local v2 = mMesh.getVertex(edge.v2)
-		if not v1 or not v2 then
-			return nil
+		if not camera or not v1 or not v2 then
+			return false
 		end
 		local a = camera:WorldToViewportPoint(v1.position)
 		local b = camera:WorldToViewportPoint(v2.position)
-		local c = camera:WorldToViewportPoint(worldPos)
-		-- A point behind the camera projects unreliably; leave the edge to win.
-		if a.Z <= 0 or b.Z <= 0 or c.Z <= 0 then
-			return nil
+		if a.Z <= 0 or b.Z <= 0 then
+			return false
+		end
+		-- True cursor viewport position (see snapAddPoint): the live caller passes it; tests
+		-- fall back to projecting worldPos.
+		local c2 = cursorScreen
+		if not c2 then
+			local c = camera:WorldToViewportPoint(worldPos)
+			if c.Z <= 0 then
+				return false
+			end
+			c2 = Vector2.new(c.X, c.Y)
 		end
 		local a2 = Vector2.new(a.X, a.Y)
 		local seg = Vector2.new(b.X, b.Y) - a2
 		local segLen = seg.Magnitude
 		if segLen < 1 then
-			return nil
+			return false
 		end
-		-- Cursor's position along the screen-space edge (0 at v1, 1 at v2).
-		local t = math.clamp((Vector2.new(c.X, c.Y) - a2):Dot(seg) / (segLen * segLen), 0, 1)
-		local band = math.min(kAddCornerPixels / segLen, kAddCornerMaxFrac)
-		if t <= band then
-			return edge.v1
-		elseif t >= 1 - band then
-			return edge.v2
-		end
-		return nil
+		-- Cursor's position along the screen-space edge (0 at v1, 1 at v2); the reserved
+		-- middle span belongs to the edge.
+		local t = math.clamp((c2 - a2):Dot(seg) / (segLen * segLen), 0, 1)
+		return t > kAddEdgeMiddleFrac and t < 1 - kAddEdgeMiddleFrac
+	end
+
+	-- Whether an Add click should snap to a vertex rather than grab/close the given edge: a
+	-- vertex is within the screen snap radius and isn't deferring to the edge's middle.
+	local function addVertexBeatsEdge(worldPos: Vector3, edgeKey: string, cursorScreen: Vector2?): boolean
+		local _, snapVid = snapAddPoint(worldPos, cursorScreen)
+		return snapVid ~= nil and not snapDefersToEdge(worldPos, edgeKey, snapVid, cursorScreen)
 	end
 
 	----------------------------------------------------------------------
@@ -1146,6 +1161,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local mode = currentSettings.Mode
 		local useLoose = mode == "Move" or mode == "Rotate" or mode == "Add"
 		local result = if useLoose then mouseRaycastLoose(screenPosOverride) else mouseRaycast(screenPosOverride)
+		-- The true cursor position (see handleClick): Add's vertex snap measures screen distance
+		-- from here, not from a possibly-offset spherecast hit.
+		local cursorScreen = screenPosOverride or UserInputService:GetMouseLocation()
 		local newHoverVertex: number? = nil
 		local newHoverEdge: string? = nil
 		local newHoverTriangles: { number } = {}
@@ -1258,17 +1276,22 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			if worldPos and #mAddPoints <= 1 and result and result.Instance:IsA("BasePart") then
 				grabbedEdge = boundaryEdgeAt(worldPos, result.Instance :: BasePart, result.Normal)
 			end
-			-- A click right on one of the grabbed edge's corners snaps that vertex instead of
-			-- the edge, so a corner can be picked deliberately; the edge interior still wins.
-			if grabbedEdge and worldPos and not addCornerSnap(worldPos, grabbedEdge) then
-				newHoverEdge = grabbedEdge
-			elseif worldPos then
-				-- No edge nearby (or snapping to a corner of it): offer fresh vertex placement.
-				local snapped, snapVid = snapAddPoint(worldPos)
+			if worldPos then
+				-- A vertex within the screen snap radius wins over the edge -- so a corner is as
+				-- easy to hit over the poly as beside it -- except in a short edge's reserved
+				-- middle. Otherwise grab/close the edge, or offer a fresh point.
+				local snapped, snapVid = snapAddPoint(worldPos, cursorScreen)
+				if snapVid and grabbedEdge and snapDefersToEdge(worldPos, grabbedEdge, snapVid, cursorScreen) then
+					snapVid = nil
+				end
 				if snapVid then
 					newHoverVertex = snapVid
+					mAddHoverTarget = { type = "freshVertex", position = snapped }
+				elseif grabbedEdge then
+					newHoverEdge = grabbedEdge
+				else
+					mAddHoverTarget = { type = "freshVertex", position = snapped }
 				end
-				mAddHoverTarget = { type = "freshVertex", position = snapped }
 			end
 		end
 
@@ -1442,8 +1465,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	-- Place one fresh corner, snapped to a nearby vertex if there is one. The corners
 	-- are stored where they were placed; commitFreshTriangle lifts the whole triangle
 	-- afterwards unless one of them snapped. The third corner commits.
-	local function placeFreshPoint(worldPos: Vector3)
-		local snapped, vid = snapAddPoint(worldPos)
+	local function placeFreshPoint(worldPos: Vector3, cursorScreen: Vector2?)
+		local snapped, vid = snapAddPoint(worldPos, cursorScreen)
 		if vid then
 			mAddSnappedAny = true
 			if not mAddSnappedParent then
@@ -1526,7 +1549,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		changeSignal:Fire()
 	end
 
-	local function handleAddClick(worldPos: Vector3, hitPart: BasePart?, hitNormal: Vector3?)
+	local function handleAddClick(worldPos: Vector3, hitPart: BasePart?, hitNormal: Vector3?, cursorScreen: Vector2?)
 		-- Discover the clicked part with the camera viewpoint BEFORE the region scan
 		-- below. That scan (discoverRegion) has no viewpoint and is seeded at the click
 		-- point, which on a thin box often lies on the back side -- discovering it
@@ -1542,9 +1565,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			-- grabbing the edge first, which is just as common a way to build).
 			if #mAddPoints == 1 and hitPart then
 				local closeKey = boundaryEdgeAt(worldPos, hitPart, hitNormal)
-				-- Close onto the edge unless the cursor is right on one of its corners, where
-				-- it falls through to placeFreshPoint below and snaps the point to that vertex.
-				if closeKey and not addCornerSnap(worldPos, closeKey) then
+				-- Close onto the edge unless a vertex wins (cursor within the snap radius of one),
+				-- where it falls through to placeFreshPoint below and snaps the point to it.
+				if closeKey and not addVertexBeatsEdge(worldPos, closeKey, cursorScreen) then
 					closeFreshOntoEdge(closeKey)
 					return
 				end
@@ -1552,13 +1575,13 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			-- Otherwise place a fresh point when over empty space, or once the fresh-
 			-- point path has started; else grab a boundary edge to build from.
 			if not hitPart or #mAddPoints > 0 then
-				placeFreshPoint(worldPos)
+				placeFreshPoint(worldPos, cursorScreen)
 				return
 			end
 			local edgeKey = boundaryEdgeAt(worldPos, hitPart, hitNormal)
-			-- Right on a corner of that edge? Snap the first point to the vertex (fall to the
+			-- A vertex within the snap radius wins? Snap the first point to it (fall to the
 			-- final placeFreshPoint) instead of grabbing the edge to build from.
-			if edgeKey and not addCornerSnap(worldPos, edgeKey) then
+			if edgeKey and not addVertexBeatsEdge(worldPos, edgeKey, cursorScreen) then
 				local edge = mMesh.getEdges()[edgeKey]
 				if edge then
 					mAddBoundaryEdge = { v1 = edge.v1, v2 = edge.v2 }
@@ -1587,10 +1610,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					end
 					changeSignal:Fire()
 				else
-					placeFreshPoint(worldPos)
+					placeFreshPoint(worldPos, cursorScreen)
 				end
 			else
-				placeFreshPoint(worldPos)
+				placeFreshPoint(worldPos, cursorScreen)
 			end
 		else
 			-- Phase 2: place triangle(s) based on hover target
@@ -2391,6 +2414,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local mode = currentSettings.Mode
 		local useLoose = mode == "Move" or mode == "Rotate" or mode == "Add"
 		local result = if useLoose then mouseRaycastLoose() else mouseRaycast()
+		-- The true cursor position. result can be a spherecast hit offset from the cursor ray
+		-- (near thin geometry), so Add's vertex snap measures screen distance from here, not from
+		-- the offset hit point -- otherwise the snap margin shrinks as you near an edge.
+		local cursorScreen = UserInputService:GetMouseLocation()
 		if not result then
 			if (mode == "Move" or mode == "Rotate") and not isShiftHeld() then
 				mSelectedVertices = {}
@@ -2402,7 +2429,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				-- by projecting onto the working plane, instead of cancelling.
 				local p = addProjectedPos()
 				if p then
-					handleAddClick(p, nil, nil)
+					handleAddClick(p, nil, nil, cursorScreen)
 				end
 			end
 			return
@@ -2454,7 +2481,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		if mode == "Move" or mode == "Rotate" then
 			handleSelectClick(result.Position, hitPart)
 		elseif mode == "Add" then
-			handleAddClick(result.Position, hitPart, result.Normal)
+			handleAddClick(result.Position, hitPart, result.Normal, cursorScreen)
 		elseif mode == "Delete" or mode == "Paint" or mode == "Relax" or mode == "Flatten" or mode == "Heal" then
 			startStroke()
 			applyStrokeAtCursor()
@@ -3259,8 +3286,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	-- hitPart when the click is on existing geometry (to grab its boundary edge),
 	-- or nil for an empty-space click. Lets tests exercise the click flow without
 	-- the mouse.
-	session.AddClickAt = function(worldPos: Vector3, hitPart: BasePart?)
-		handleAddClick(worldPos, hitPart, nil)
+	session.AddClickAt = function(worldPos: Vector3, hitPart: BasePart?, cursorScreen: Vector2?)
+		-- cursorScreen lets a test stand in for the case where the click's worldPos (a
+		-- spherecast hit) is offset from the true cursor ray; nil means worldPos is the cursor.
+		handleAddClick(worldPos, hitPart, nil, cursorScreen)
 	end
 	session.GetAddBoundaryEdge = function(): { v1: number, v2: number }?
 		return mAddBoundaryEdge

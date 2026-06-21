@@ -2060,6 +2060,53 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("Add: the vertex snap follows the true cursor, not an offset hit point", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 3
+			settings.GridHeight = 3
+			settings.GridSpacing = 8
+			session.GenerateGrid()
+			settings.Mode = "Add"
+			settings.Thickness = 1
+			local before = countDict(mesh.getTriangles())
+
+			local boundary = mesh.getBoundaryEdges()
+			local edge = boundary[1]
+			local a = mesh.getVertex(edge.v1)
+			local b = mesh.getVertex(edge.v2)
+			local tri = mesh.getTriangle(edge.triangles[1])
+			assert(a and b and tri)
+			local part = tri.parts[1]
+			local edgeMid = (a.position + b.position) / 2
+
+			local cam = workspace.CurrentCamera
+			assert(cam)
+			local av = cam:WorldToViewportPoint(a.position)
+			local cornerScreen = Vector2.new(av.X, av.Y)
+
+			-- Place a fresh apex.
+			local sum, cnt = Vector3.zero, 0
+			for _, vv in mesh.getVertices() do
+				sum += vv.position
+				cnt += 1
+			end
+			local outward = (edgeMid - sum / cnt) * Vector3.new(1, 0, 1)
+			outward = if outward.Magnitude > 0.1 then outward.Unit else Vector3.new(1, 0, 0)
+			session.AddClickAt(edgeMid + outward * 5, nil)
+			t.expect(#session.GetAddPoints()).toBe(1)
+
+			-- The hit point is at the edge MIDDLE (far from any corner in world), but the true
+			-- cursor is over corner `a` on screen -- what happens when a spherecast returns a hit
+			-- offset from the cursor ray near thin geometry. The snap must follow the cursor to
+			-- the corner, not close a triangle onto the edge.
+			session.AddClickAt(edgeMid, part, cornerScreen)
+			t.expect(countDict(mesh.getTriangles())).toBe(before) -- nothing closed onto the edge
+			local pts = session.GetAddPoints()
+			t.expect(#pts).toBe(2)
+			t.expect((pts[2] - a.position).Magnitude < 0.3).toBeTruthy() -- snapped to corner a
+		end)
+	end)
+
 	-- Thickness of whatever triangle reaches `pos`, or nil. The new Add triangle is the
 	-- only one out at its far corner, so this identifies it among the existing grid.
 	local function triThicknessAt(mesh: any, pos: Vector3): number?
