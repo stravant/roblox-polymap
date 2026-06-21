@@ -2260,6 +2260,67 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("Add: a triangle built from snapped vertices inherits their colour and material", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 3
+			settings.GridHeight = 3
+			settings.GridSpacing = 4
+			session.GenerateGrid()
+			settings.Mode = "Add"
+
+			-- Pick a grid vertex and recolour the geometry it belongs to distinctively.
+			local v: Vector3? = nil
+			local vid: number? = nil
+			for id, vert in mesh.getVertices() do
+				v = vert.position
+				vid = id
+				break
+			end
+			assert(v and vid)
+			local vertex = mesh.getVertex(vid)
+			assert(vertex)
+			local markColor = Color3.fromRGB(12, 200, 34)
+			local markMaterial = Enum.Material.Wood
+			for _, tid in vertex.triangles do
+				local tri = mesh.getTriangle(tid)
+				if tri then
+					for _, part in tri.parts do
+						part.Color = markColor
+						part.Material = markMaterial
+					end
+				end
+			end
+
+			-- Current paint settings are deliberately different, to prove the snap wins.
+			settings.PaintColor = { 1, 0, 0 }
+			settings.PaintMaterial = "Plastic"
+
+			-- Two corners in empty space, the third snapping onto v -- commits the triangle.
+			local p1 = (v :: Vector3) + Vector3.new(40, 0, 0)
+			session.AddClickAt(p1, nil)
+			session.AddClickAt((v :: Vector3) + Vector3.new(40, 0, 40), nil)
+			session.AddClickAt((v :: Vector3) + Vector3.new(1, 0, 0), nil)
+
+			-- The new triangle (the only one reaching p1) took the snapped colour/material,
+			-- not the red Plastic paint setting.
+			local newPart: BasePart? = nil
+			for _, tri in mesh.getTriangles() do
+				for _, tvid in tri.vertices do
+					local tv = mesh.getVertex(tvid)
+					if tv and (tv.position - p1).Magnitude < 0.3 then
+						newPart = tri.parts[1]
+					end
+				end
+			end
+			assert(newPart)
+			local c = (newPart :: BasePart).Color
+			t.expect(math.abs(c.R - markColor.R) < 0.02).toBeTruthy()
+			t.expect(math.abs(c.G - markColor.G) < 0.02).toBeTruthy()
+			t.expect(math.abs(c.B - markColor.B) < 0.02).toBeTruthy()
+			t.expect((newPart :: BasePart).Material == markMaterial).toBeTruthy()
+		end)
+	end)
+
 	t.test("Add: MatchThickness off uses the Thickness setting even when snapping", function()
 		withSession(function(session, mesh, settings)
 			settings.GridWidth = 3

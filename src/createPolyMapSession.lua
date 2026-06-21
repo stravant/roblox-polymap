@@ -203,6 +203,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	-- Container (folder) of the geometry a fresh polygon snapped onto, if any; new
 	-- parts join it so connected geometry stays together (else a fresh folder).
 	local mAddSnappedParent: Instance? = nil
+	-- Colour/material of the geometry the first snapped corner belongs to, so a fresh
+	-- triangle built from snapped vertices matches it instead of the current paint settings
+	-- (the edge-grab/close paths already do this via mAddTriangleProps / the parent part).
+	local mAddSnappedProps: fillTriangle.TriangleProps? = nil
 	local mAddPlanePoint: Vector3? = nil
 	local mAddPlaneNormal: Vector3? = nil
 	local mAddHoverTarget: { type: string, vertexId: number?, edgeKey: string?, position: Vector3? }? = nil
@@ -515,6 +519,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		mAddHoverTarget = nil
 		mAddTriangleProps = nil
 		mAddSnappedParent = nil
+		mAddSnappedProps = nil
 		mAddBoundaryFolder = nil
 	end
 
@@ -1450,7 +1455,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local parent = resolveNewParent(mAddSnappedParent)
 		local triId = mMesh.addTriangle(
 			p1, p2, p3,
-			resolveAddThickness(mAddSnappedThickness), parent, getTriangleProps(), centroid + Vector3.yAxis
+			resolveAddThickness(mAddSnappedThickness), parent, mAddSnappedProps or getTriangleProps(), centroid + Vector3.yAxis
 		)
 		clearAddState()
 		if recording then
@@ -1471,6 +1476,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			mAddSnappedAny = true
 			if not mAddSnappedParent then
 				mAddSnappedParent = parentForVertex(vid)
+			end
+			if not mAddSnappedProps then
+				mAddSnappedProps = propsForVertex(vid)
 			end
 			if not mAddSnappedThickness then
 				mAddSnappedThickness = vertexThickness(vid)
