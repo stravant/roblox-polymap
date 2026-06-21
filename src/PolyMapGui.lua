@@ -276,6 +276,11 @@ local function GridPanel(props: {
 })
 	local currentType = props.Settings.GridType
 	local nextOrder = createNextOrder()
+	-- While the interactive "Place..." tool is choosing its two corners, the button shows
+	-- "Placing" with a highlight border (and the viewport shows a crosshair cursor). The
+	-- panel re-renders on the session's change signal, which placement start/commit/cancel
+	-- all fire, so this stays in sync.
+	local placing = props.Session ~= nil and props.Session.IsPlacingGrid()
 	return e(SubPanel, {
 		Title = "Generate Grid",
 		LayoutOrder = props.LayoutOrder,
@@ -394,8 +399,19 @@ local function GridPanel(props: {
 				BackgroundTransparency = 1,
 				LayoutOrder = 2,
 			}, {
+				-- The border is on this wrapper (OperationButton takes no border prop); a
+				-- matching UICorner rounds the stroke to the button's corners. Both appear
+				-- only while placing.
+				Corner = placing and e("UICorner", {
+					CornerRadius = UDim.new(0, 4),
+				}),
+				Border = placing and e("UIStroke", {
+					Color = Colors.WHITE,
+					Thickness = 2,
+					ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+				}),
 				Button = e(OperationButton, {
-					Text = "Place...",
+					Text = if placing then "Placing" else "Place...",
 					Color = Colors.ACTION_BLUE,
 					Disabled = props.Session == nil,
 					Height = 30,

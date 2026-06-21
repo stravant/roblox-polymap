@@ -2967,11 +2967,12 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end)
 	end)
 
-	-- While a Paint eyedropper (Pick) is active, show a crosshair cursor over the
-	-- viewport. The plugin mouse only renders the built-in system cursors, not arbitrary
-	-- image assets, so we use rbxasset://SystemCursors/Cross. Restore the explicit arrow
-	-- cursor (not a blank icon, which misbehaves in the cursor handling stack) when the
-	-- Pick ends. Tracked so the icon is only assigned when it changes.
+	-- Show a crosshair cursor over the viewport while a point-picking interaction is active --
+	-- a Paint eyedropper (Pick) or placing a grid's two corners. The plugin mouse only renders
+	-- the built-in system cursors, not arbitrary image assets, so we use
+	-- rbxasset://SystemCursors/Cross. Restore the explicit arrow cursor (not a blank icon,
+	-- which misbehaves in the cursor handling stack) otherwise. Tracked so the icon is only
+	-- assigned when it changes.
 	local kPickCursor = "rbxasset://SystemCursors/Cross"
 	local kArrowCursor = "rbxasset://SystemCursors/Arrow"
 	local mPickMouse = plugin:GetMouse()
@@ -2981,9 +2982,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		while true do
 			updateHover()
 
-			local wantIcon = if currentSettings.Mode == "Paint" and currentSettings.PaintEyedropper ~= "None"
-				then kPickCursor
-				else kArrowCursor
+			local picking = (currentSettings.Mode == "Paint" and currentSettings.PaintEyedropper ~= "None")
+				or mGridPlacing
+			local wantIcon = if picking then kPickCursor else kArrowCursor
 			if wantIcon ~= mLastPickIcon then
 				mLastPickIcon = wantIcon
 				mPickMouse.Icon = wantIcon
