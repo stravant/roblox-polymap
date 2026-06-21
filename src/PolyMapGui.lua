@@ -775,7 +775,7 @@ local function InfluencePanel(props: {
 				Label = "Radius",
 				Value = props.Settings.InfluenceRadius,
 				Min = 0,
-				Max = 50,
+				Max = 100,
 				Step = 1,
 				ValueChanged = function(newValue: number)
 					props.Settings.InfluenceRadius = newValue
@@ -1576,7 +1576,7 @@ local function BrushPanel(props: {
 				Label = "Radius",
 				Value = props.Settings.PaintRadius,
 				Min = 0,
-				Max = 30,
+				Max = 60,
 				Step = 1,
 				ValueChanged = function(newValue: number)
 					props.Settings.PaintRadius = newValue
@@ -1659,7 +1659,7 @@ local function DeletePanel(props: {
 				Label = "Radius",
 				Value = props.Settings.DeleteRadius,
 				Min = 0,
-				Max = 30,
+				Max = 60,
 				Step = 1,
 				ValueChanged = function(newValue: number)
 					props.Settings.DeleteRadius = newValue
@@ -1690,7 +1690,7 @@ local function RelaxPanel(props: {
 				Label = "Radius",
 				Value = props.Settings.RelaxRadius,
 				Min = 1,
-				Max = 30,
+				Max = 60,
 				Step = 1,
 				ValueChanged = function(newValue: number)
 					props.Settings.RelaxRadius = newValue
@@ -1739,7 +1739,7 @@ local function FlattenPanel(props: {
 				Label = "Radius",
 				Value = props.Settings.FlattenRadius,
 				Min = 1,
-				Max = 30,
+				Max = 60,
 				Step = 1,
 				ValueChanged = function(newValue: number)
 					props.Settings.FlattenRadius = newValue
@@ -1788,7 +1788,7 @@ local function HealPanel(props: {
 				Label = "Radius",
 				Value = props.Settings.HealRadius,
 				Min = 1,
-				Max = 30,
+				Max = 60,
 				Step = 1,
 				ValueChanged = function(newValue: number)
 					props.Settings.HealRadius = newValue
