@@ -67,7 +67,7 @@ local function loadSettings(plugin: Plugin): PolyMapSettings
 		Thickness = raw.Thickness or 0.2,
 		MatchThickness = if raw.MatchThickness ~= nil then raw.MatchThickness else true,
 		AddNonSnapped = raw.AddNonSnapped or "Extend",
-		InfluenceRadius = raw.InfluenceRadius or 0,
+		InfluenceRadius = raw.InfluenceRadius or 10,
 		InfluenceFalloff = raw.InfluenceFalloff or "Smooth",
 		GridType = raw.GridType or "Square",
 		GridWidth = raw.GridWidth or 16,
