@@ -874,6 +874,30 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return findNearestBoundaryEdge(worldPos, partTriIds, nil)
 	end
 
+	-- An Add point near a boundary edge can snap to the edge OR to one of its corner
+	-- vertices. When the cursor sits within this (tight) radius of a corner, prefer the
+	-- corner -- returns that vertex id, else nil to use the edge. The radius is well under
+	-- the edge length so the edge interior (the common target) still wins; you pick a corner
+	-- only by hovering right on it. This is what lets a fresh-point build snap its 2nd/3rd
+	-- corner onto an existing vertex instead of always closing onto the edge.
+	local kAddVertexSnapRadius = 1.0
+	local function addCornerSnap(worldPos: Vector3, edgeKey: string): number?
+		local edge = mMesh.getEdges()[edgeKey]
+		if not edge then
+			return nil
+		end
+		local v1 = mMesh.getVertex(edge.v1)
+		local v2 = mMesh.getVertex(edge.v2)
+		local d1 = if v1 then (v1.position - worldPos).Magnitude else math.huge
+		local d2 = if v2 then (v2.position - worldPos).Magnitude else math.huge
+		if d1 <= kAddVertexSnapRadius and d1 <= d2 then
+			return edge.v1
+		elseif d2 <= kAddVertexSnapRadius then
+			return edge.v2
+		end
+		return nil
+	end
+
 	----------------------------------------------------------------------
 	-- Interactive grid placement (the Place... button)
 	----------------------------------------------------------------------
@@ -1187,10 +1211,12 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			if worldPos and #mAddPoints <= 1 and result and result.Instance:IsA("BasePart") then
 				grabbedEdge = boundaryEdgeAt(worldPos, result.Instance :: BasePart, result.Normal)
 			end
-			if grabbedEdge then
+			-- A click right on one of the grabbed edge's corners snaps that vertex instead of
+			-- the edge, so a corner can be picked deliberately; the edge interior still wins.
+			if grabbedEdge and worldPos and not addCornerSnap(worldPos, grabbedEdge) then
 				newHoverEdge = grabbedEdge
 			elseif worldPos then
-				-- No edge nearby: offer fresh vertex placement (snap to a near vertex).
+				-- No edge nearby (or snapping to a corner of it): offer fresh vertex placement.
 				local snapped, snapVid = snapAddPoint(worldPos)
 				if snapVid then
 					newHoverVertex = snapVid
@@ -1469,7 +1495,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			-- grabbing the edge first, which is just as common a way to build).
 			if #mAddPoints == 1 and hitPart then
 				local closeKey = boundaryEdgeAt(worldPos, hitPart, hitNormal)
-				if closeKey then
+				-- Close onto the edge unless the cursor is right on one of its corners, where
+				-- it falls through to placeFreshPoint below and snaps the point to that vertex.
+				if closeKey and not addCornerSnap(worldPos, closeKey) then
 					closeFreshOntoEdge(closeKey)
 					return
 				end
@@ -1481,7 +1509,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				return
 			end
 			local edgeKey = boundaryEdgeAt(worldPos, hitPart, hitNormal)
-			if edgeKey then
+			-- Right on a corner of that edge? Snap the first point to the vertex (fall to the
+			-- final placeFreshPoint) instead of grabbing the edge to build from.
+			if edgeKey and not addCornerSnap(worldPos, edgeKey) then
 				local edge = mMesh.getEdges()[edgeKey]
 				if edge then
 					mAddBoundaryEdge = { v1 = edge.v1, v2 = edge.v2 }

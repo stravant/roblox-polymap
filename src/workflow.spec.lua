@@ -1981,6 +1981,47 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("Add: a fresh apex then a click on a boundary corner snaps the vertex, not the edge", function()
+		withSession(function(session, mesh, settings)
+			settings.GridWidth = 3
+			settings.GridHeight = 3
+			settings.GridSpacing = 8 -- long edges, so the midpoint stays a clear edge target
+			session.GenerateGrid()
+			settings.Mode = "Add"
+			settings.Thickness = 1
+			local before = countDict(mesh.getTriangles())
+
+			local boundary = mesh.getBoundaryEdges()
+			local edge = boundary[1]
+			local a = mesh.getVertex(edge.v1)
+			local b = mesh.getVertex(edge.v2)
+			local tri = mesh.getTriangle(edge.triangles[1])
+			assert(a and b and tri)
+			local part = tri.parts[1]
+			local edgeMid = (a.position + b.position) / 2
+
+			-- Place a fresh apex out past the edge.
+			local sum, cnt = Vector3.zero, 0
+			for _, vv in mesh.getVertices() do
+				sum += vv.position
+				cnt += 1
+			end
+			local outward = (edgeMid - sum / cnt) * Vector3.new(1, 0, 1)
+			outward = if outward.Magnitude > 0.1 then outward.Unit else Vector3.new(1, 0, 0)
+			session.AddClickAt(edgeMid + outward * 5, nil)
+			t.expect(#session.GetAddPoints()).toBe(1)
+
+			-- Click right on a corner of that boundary edge: it must snap a SECOND fresh
+			-- point onto the vertex (so a third click can finish the triangle), instead of
+			-- closing a triangle onto the edge -- the old always-edge behaviour.
+			session.AddClickAt(a.position, part)
+			t.expect(countDict(mesh.getTriangles())).toBe(before) -- nothing closed onto the edge
+			local pts = session.GetAddPoints()
+			t.expect(#pts).toBe(2)
+			t.expect((pts[2] - a.position).Magnitude < 0.3).toBeTruthy() -- snapped to the corner
+		end)
+	end)
+
 	-- Thickness of whatever triangle reaches `pos`, or nil. The new Add triangle is the
 	-- only one out at its far corner, so this identifies it among the existing grid.
 	local function triThicknessAt(mesh: any, pos: Vector3): number?
