@@ -1412,6 +1412,12 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 	-- side the cursor happened to cross first. Falls back to hintPoint when absent
 	-- (the rebuild and tests), and is ignored for wedges.
 	local function discoverPart(part: BasePart, hintPoint: Vector3, viewPoint: Vector3?, nearbyResolver: ((Vector3, number) -> { Instance })?, refuseAwayFace: boolean?): number?
+		-- The mesh is built only from shaped Parts (wedges/blocks). A region scan or raycast
+		-- can also surface other BaseParts -- most importantly Terrain in a place that has
+		-- voxel terrain -- which have no Shape, so ignore them rather than error on `.Shape`.
+		if not part:IsA("Part") then
+			return nil
+		end
 		-- Never adopt the template baseplate as mesh, even when a seed point lands on
 		-- it (the region scan bootstraps any part the point sits inside). People keep
 		-- terrain Locked, so this filters the baseplate by name, not by Locked.
@@ -1930,8 +1936,9 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 	-- point (a wedge whose bounds merely reach pos) leaves discoverPart guessing the
 	-- face, and on a curved surface it picks the back one: a thickness-offset crack.
 	local function partHasCornerNear(part: BasePart, pos: Vector3): boolean
-		if (part :: Part).Shape ~= Enum.PartType.Wedge then
-			-- Non-wedge parts (e.g. Blocks) keep the prior radius-based behaviour.
+		if not part:IsA("Part") or (part :: Part).Shape ~= Enum.PartType.Wedge then
+			-- Non-Part (e.g. Terrain) or non-wedge (Blocks): keep the radius-based behaviour;
+			-- discoverPart rejects anything that isn't a shaped Part anyway.
 			return true
 		end
 		local hintA = part.CFrame.Position + part.CFrame.RightVector
@@ -2284,7 +2291,9 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 				end
 			end
 			for _, part in workspace:GetPartBoundsInBox(CFrame.new(center), size, params) do
-				if not part:IsA("BasePart") or mPartToTriangles[part] then
+				-- IsA("Part"), not BasePart: only shaped Parts carry mesh geometry, and this
+				-- skips Terrain (a BasePart with no Shape) in places that have voxel terrain.
+				if not part:IsA("Part") or mPartToTriangles[part] then
 					continue
 				end
 				if (part :: Part).Shape == Enum.PartType.Wedge then

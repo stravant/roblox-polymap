@@ -621,6 +621,35 @@ return function(t: TestTypes.TestContext)
 		folder:Destroy()
 	end)
 
+	t.test("discovery ignores Terrain / non-Part BaseParts instead of erroring on Shape", function()
+		local mesh = createTriangleMesh()
+
+		-- The reported crash: a place with voxel terrain hands discoverPart the Terrain
+		-- instance -- a BasePart with no Shape -- which must be ignored, not error on .Shape.
+		t.expect(mesh.discoverPart(workspace.Terrain, Vector3.zero)).toBe(nil)
+
+		-- And via discoverRegion, whose corner-index + walk also read .Shape: a WedgePart (the
+		-- dedicated class, likewise no Shape) in the scanned region is skipped, not crashed on.
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+		local stray = Instance.new("WedgePart")
+		stray.Size = Vector3.new(4, 2, 3)
+		stray.CFrame = CFrame.new(6000, 10, 0)
+		stray.Anchored = true
+		stray.Parent = folder
+
+		-- math.huge takes the corner-index rebuild path.
+		mesh.discoverRegion({ Vector3.new(6000, 10, 0) }, math.huge)
+
+		local triCount = 0
+		for _ in mesh.getTriangles() do
+			triCount += 1
+		end
+		t.expect(triCount).toBe(0) -- nothing adopted, and no error
+
+		folder:Destroy()
+	end)
+
 	t.test("moveVertex upgrades Block to Wedges", function()
 		local mesh = createTriangleMesh()
 		local folder = Instance.new("Folder")
