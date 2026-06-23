@@ -124,6 +124,20 @@ local function triangleEdgePairs(verts: { VertexId }): { { VertexId } }
 	}
 end
 
+-- A wedge-shaped part backing one triangle. PolyMap generates `Part`s with Shape == Wedge,
+-- but the legacy `WedgePart` class has byte-for-byte identical wedge geometry (its triangular
+-- faces are the +/-X faces, same slope), so getWedgeVertices reads either and fillTriangle can
+-- resize/reposition either in place. We adopt both. CornerWedgePart/MeshPart are NOT wedges and
+-- IsA("WedgePart") is false for them, so this stays exact.
+local function isWedgePart(part: BasePart): boolean
+	return part:IsA("WedgePart") or (part:IsA("Part") and (part :: Part).Shape == Enum.PartType.Wedge)
+end
+
+-- A thin Block part, adopted as a quad (two triangles) and upgraded to wedges on first edit.
+local function isBlockPart(part: BasePart): boolean
+	return part:IsA("Part") and (part :: Part).Shape == Enum.PartType.Block
+end
+
 local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 	thicknessHint = thicknessHint or 1.0
 
@@ -1412,10 +1426,13 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 	-- side the cursor happened to cross first. Falls back to hintPoint when absent
 	-- (the rebuild and tests), and is ignored for wedges.
 	local function discoverPart(part: BasePart, hintPoint: Vector3, viewPoint: Vector3?, nearbyResolver: ((Vector3, number) -> { Instance })?, refuseAwayFace: boolean?): number?
-		-- The mesh is built only from shaped Parts (wedges/blocks). A region scan or raycast
-		-- can also surface other BaseParts -- most importantly Terrain in a place that has
-		-- voxel terrain -- which have no Shape, so ignore them rather than error on `.Shape`.
-		if not part:IsA("Part") then
+		-- The mesh is built only from wedge/block parts. A region scan or raycast can also
+		-- surface other BaseParts -- most importantly Terrain in a place with voxel terrain,
+		-- or MeshParts -- which we ignore rather than error on `.Shape`. WedgePart (the legacy
+		-- class) is a wedge too, with identical geometry, not just Part with Shape == Wedge.
+		local partIsWedge = isWedgePart(part)
+		local partIsBlock = isBlockPart(part)
+		if not partIsWedge and not partIsBlock then
 			return nil
 		end
 		-- Never adopt the template baseplate as mesh, even when a seed point lands on
@@ -1437,7 +1454,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			return getPartTriangle(part, hintPoint) or headId
 		end
 
-		if (part :: Part).Shape == Enum.PartType.Wedge then
+		if partIsWedge then
 			-- First discovery of this wedge: try both faces and prefer the one
 			-- sharing more vertices with existing geometry, so its shared corners
 			-- land on the same vertices as already-discovered neighbours.
@@ -1555,7 +1572,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 					if nearPart == part then
 						continue
 					end
-					if not nearPart:IsA("Part") or (nearPart :: Part).Shape ~= Enum.PartType.Wedge then
+					if not isWedgePart(nearPart) then
 						continue
 					end
 					-- Already discovered?
@@ -1787,7 +1804,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 
 			return triId
 
-		elseif (part :: Part).Shape == Enum.PartType.Block then
+		elseif partIsBlock then
 			-- Thin block: treat as two triangles (a quad split into 2 tris)
 			local size = part.Size
 			local cf = part.CFrame
@@ -1936,9 +1953,9 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 	-- point (a wedge whose bounds merely reach pos) leaves discoverPart guessing the
 	-- face, and on a curved surface it picks the back one: a thickness-offset crack.
 	local function partHasCornerNear(part: BasePart, pos: Vector3): boolean
-		if not part:IsA("Part") or (part :: Part).Shape ~= Enum.PartType.Wedge then
-			-- Non-Part (e.g. Terrain) or non-wedge (Blocks): keep the radius-based behaviour;
-			-- discoverPart rejects anything that isn't a shaped Part anyway.
+		if not isWedgePart(part) then
+			-- Non-wedge (Terrain, MeshParts, Blocks): keep the radius-based behaviour;
+			-- discoverPart adopts blocks by containment and rejects everything else anyway.
 			return true
 		end
 		local hintA = part.CFrame.Position + part.CFrame.RightVector
@@ -2291,12 +2308,12 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 				end
 			end
 			for _, part in workspace:GetPartBoundsInBox(CFrame.new(center), size, params) do
-				-- IsA("Part"), not BasePart: only shaped Parts carry mesh geometry, and this
-				-- skips Terrain (a BasePart with no Shape) in places that have voxel terrain.
-				if not part:IsA("Part") or mPartToTriangles[part] then
+				-- Only wedge/block parts carry mesh geometry; this skips Terrain (a BasePart
+				-- with no Shape) in voxel-terrain places and other shapes discoverPart ignores.
+				if mPartToTriangles[part] then
 					continue
 				end
-				if (part :: Part).Shape == Enum.PartType.Wedge then
+				if isWedgePart(part) then
 					local hintA = part.CFrame.Position + part.CFrame.RightVector
 					local hintB = part.CFrame.Position - part.CFrame.RightVector
 					local a1, a2, a3 = getWedgeVertices(part, hintA)
@@ -2307,8 +2324,8 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 					add(b1, part)
 					add(b2, part)
 					add(b3, part)
-				else
-					-- Non-wedge (e.g. a Block): key by its eight bounding-box corners.
+				elseif isBlockPart(part) then
+					-- Block: key by its eight bounding-box corners.
 					local cf, hs = part.CFrame, part.Size / 2
 					for _, sgn in BOX_CORNER_SIGNS do
 						add(cf:PointToWorldSpace(hs * sgn), part)

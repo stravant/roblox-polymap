@@ -3,6 +3,7 @@
 local TestTypes = require("./TestTypes")
 local createTriangleMesh = require("./TriangleMesh")
 local fillTriangle = require("./fillTriangle")
+local getWedgeVertices = require("./getWedgeVertices")
 
 return function(t: TestTypes.TestContext)
 	t.test("addTriangle creates a triangle with vertices and edges", function()
@@ -621,18 +622,19 @@ return function(t: TestTypes.TestContext)
 		folder:Destroy()
 	end)
 
-	t.test("discovery ignores Terrain / non-Part BaseParts instead of erroring on Shape", function()
+	t.test("discovery ignores Terrain / non-mesh BaseParts instead of erroring on Shape", function()
 		local mesh = createTriangleMesh()
 
 		-- The reported crash: a place with voxel terrain hands discoverPart the Terrain
 		-- instance -- a BasePart with no Shape -- which must be ignored, not error on .Shape.
 		t.expect(mesh.discoverPart(workspace.Terrain, Vector3.zero)).toBe(nil)
 
-		-- And via discoverRegion, whose corner-index + walk also read .Shape: a WedgePart (the
-		-- dedicated class, likewise no Shape) in the scanned region is skipped, not crashed on.
+		-- And via discoverRegion, whose corner-index + walk also read .Shape: a MeshPart (a
+		-- BasePart with no Shape, and not wedge/block geometry) in the scanned region is
+		-- skipped, not crashed on. (WedgeParts, by contrast, ARE adopted -- see below.)
 		local folder = Instance.new("Folder")
 		folder.Parent = workspace
-		local stray = Instance.new("WedgePart")
+		local stray = Instance.new("MeshPart")
 		stray.Size = Vector3.new(4, 2, 3)
 		stray.CFrame = CFrame.new(6000, 10, 0)
 		stray.Anchored = true
@@ -646,6 +648,85 @@ return function(t: TestTypes.TestContext)
 			triCount += 1
 		end
 		t.expect(triCount).toBe(0) -- nothing adopted, and no error
+
+		folder:Destroy()
+	end)
+
+	t.test("discoverPart adopts a legacy WedgePart as one triangle", function()
+		-- A WedgePart (the dedicated legacy class) has identical wedge geometry to a Part with
+		-- Shape == Wedge, so PolyMap adopts it the same way: one single-sided triangle whose
+		-- corners sit on the wedge's camera-facing triangular (+/-X) face.
+		for _, p in workspace:GetPartBoundsInRadius(Vector3.new(7000, 10, 0), 20) do
+			if p:IsA("BasePart") then p:Destroy() end
+		end
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		local wedge = Instance.new("WedgePart")
+		wedge.Size = Vector3.new(0.2, 4, 6) -- thin along X, like our generated wedges
+		wedge.CFrame = CFrame.new(7000, 10, 0)
+		wedge.Anchored = true
+		wedge.Parent = folder
+
+		-- Hint above the wedge so the camera-facing face is chosen.
+		local hintPoint = Vector3.new(7000, 13, 0)
+		local triId = mesh.discoverPart(wedge, hintPoint)
+		t.expect(triId).toBeTruthy()
+
+		-- Exactly one triangle, three vertices, tracked back to the WedgePart instance.
+		local triCount = 0
+		for _ in mesh.getTriangles() do triCount += 1 end
+		t.expect(triCount).toBe(1)
+		local vertCount = 0
+		for _ in mesh.getVertices() do vertCount += 1 end
+		t.expect(vertCount).toBe(3)
+		t.expect(mesh.getPartTriangle(wedge, hintPoint)).toBeTruthy()
+
+		-- Its three vertices coincide with the wedge's actual face corners (getWedgeVertices
+		-- reads a WedgePart identically to a Shape==Wedge Part -- the geometry equivalence
+		-- the whole feature rests on).
+		local gv1, gv2, gv3 = getWedgeVertices(wedge, hintPoint)
+		for _, want in { gv1, gv2, gv3 } do
+			t.expect(mesh.findVertexNear(want, 0.05)).toBeTruthy()
+		end
+
+		folder:Destroy()
+	end)
+
+	t.test("editing an adopted WedgePart reshapes it in place (no orphaned parts)", function()
+		-- After adoption a WedgePart is just another wedge-backed triangle: moving a vertex
+		-- runs it back through fillTriangle, which reuses the existing part in place (only
+		-- Size/CFrame change -- it never touches .Shape), so the WedgePart instance survives
+		-- and follows the edit instead of being orphaned and replaced.
+		for _, p in workspace:GetPartBoundsInRadius(Vector3.new(7100, 10, 0), 20) do
+			if p:IsA("BasePart") then p:Destroy() end
+		end
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		local wedge = Instance.new("WedgePart")
+		wedge.Size = Vector3.new(0.2, 4, 6)
+		wedge.CFrame = CFrame.new(7100, 10, 0)
+		wedge.Anchored = true
+		wedge.Parent = folder
+
+		local hintPoint = Vector3.new(7100, 13, 0)
+		mesh.discoverPart(wedge, hintPoint)
+
+		-- Grab a face corner and lift it.
+		local gv1 = getWedgeVertices(wedge, hintPoint)
+		local vid = mesh.findVertexNear(gv1, 0.05)
+		t.expect(vid).toBeTruthy()
+		assert(vid)
+		local moved = gv1 + Vector3.new(0, 2, 0)
+		mesh.moveVertex(vid, moved, 0.2)
+
+		-- The WedgePart was reused in place, not destroyed...
+		t.expect(wedge.Parent).toBe(folder)
+		-- ...and the vertex now sits at the moved position.
+		t.expect(mesh.findVertexNear(moved, 0.05)).toBeTruthy()
 
 		folder:Destroy()
 	end)
