@@ -9,6 +9,9 @@
 -- by corner, in memory. This test rebuilds a large mesh that way and asserts the
 -- result is identical to the live mesh (same triangles, still manifold) and that
 -- the rebuild stays far below the old per-vertex-query cost.
+--
+-- Also guards the interactive hover -> select -> drag -> undo flow on a large
+-- mesh with a large influence radius (the flow that most needs to stay fast).
 
 local TestTypes = require("./TestTypes")
 local createPolyMapSession = require("./createPolyMapSession")
@@ -153,6 +156,94 @@ return function(t: TestTypes.TestContext)
 		end)
 
 		session.Destroy()
+		sweepRegion()
+		if cam and savedCF then
+			cam.CFrame = savedCF
+		end
+		if not ok then
+			error(err)
+		end
+	end)
+
+	t.test("large-radius hover/drag/undo flow stays fast", function()
+		local ChangeHistoryService = game:GetService("ChangeHistoryService")
+		local cam = workspace.CurrentCamera
+		local savedCF = if cam then cam.CFrame else nil
+		if cam then
+			cam.CFrame = CFrame.lookAt(Vector3.new(7000, 220, 40), kCameraTarget)
+		end
+		sweepRegion()
+		ChangeHistoryService:ResetWaypoints()
+
+		local settings = makeSettings(40, 40)
+		settings.InfluenceRadius = 60
+		local session = createPolyMapSession(t.plugin, settings)
+		local mesh = session.GetMesh()
+
+		local ok, err = pcall(function()
+			session.GenerateGrid()
+			local seeds: { Vector3 } = {}
+			for _, v in mesh.getVertices() do
+				table.insert(seeds, v.position)
+			end
+			mesh.discoverRegion(seeds, math.huge)
+
+			local camera = workspace.CurrentCamera :: Camera
+			local function screenAt(world: Vector3): Vector2
+				local p = camera:WorldToViewportPoint(world)
+				return Vector2.new(p.X, p.Y)
+			end
+
+			-- A marquee-sized selection (everything within 40 studs of centre).
+			local bigSel: { Vector3 } = {}
+			for _, v in mesh.getVertices() do
+				local d = v.position - kRegionCenter
+				if Vector3.new(d.X, 0, d.Z).Magnitude < 40 then
+					table.insert(bigSel, v.position)
+				end
+			end
+			session.SelectVerticesNear(bigSel)
+			t.expect(session.GetSelectedVertexCount() > 200).toBeTruthy()
+
+			-- Hover across the mesh, recomputing the overlay props each frame as a
+			-- render would. Was ~75ms/frame (region re-discovery per frame); now the
+			-- probed-clean memo and outline caches keep it a few ms.
+			local N = 20
+			local t0 = os.clock()
+			for i = 1, N do
+				session.DebugHoverAt(screenAt(kRegionCenter + Vector3.new((i - N / 2) * 3, 0, 0)))
+				local _a = session.GetOutlineTriangleIds()
+				local _b = session.GetHoverOutlineTriangleIds()
+			end
+			local hoverMs = (os.clock() - t0) / N * 1000
+			t.expect(hoverMs < 25).toBeTruthy()
+
+			-- Drag the selection with influence. Was ~450ms/frame (each triangle
+			-- rebuilt once per moved corner); batching keeps it well under 200.
+			session.StartHandleDrag()
+			t0 = os.clock()
+			for i = 1, N do
+				session.ApplyHandleDrag(Vector3.new(0, i * 0.1, 0))
+				local _a = session.GetOutlineTriangleIds()
+			end
+			local dragMs = (os.clock() - t0) / N * 1000
+			session.EndHandleDrag()
+			t.expect(dragMs < 250).toBeTruthy()
+
+			-- Undo the move: the bounded restore re-discovers only the moved region.
+			-- Was ~10s (workspace queries per corner, quadratic seed scans).
+			task.wait()
+			t0 = os.clock()
+			ChangeHistoryService:Undo()
+			task.wait()
+			task.wait()
+			local undoMs = (os.clock() - t0) * 1000
+			t.expect(session.GetRediscoverCount()).toBe(0)
+			t.expect(undoMs < 3000).toBeTruthy()
+		end)
+
+		session.Destroy()
+		ChangeHistoryService:ResetWaypoints()
 		sweepRegion()
 		if cam and savedCF then
 			cam.CFrame = savedCF

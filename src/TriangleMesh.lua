@@ -57,6 +57,8 @@ export type TriangleMesh = {
 	getEdges: () -> { [string]: Edge },
 	getVertex: (id: VertexId) -> Vertex?,
 	getTriangle: (id: TriangleId) -> Triangle?,
+	getGeneration: () -> number,
+	getTopologyGeneration: () -> number,
 
 	-- Queries
 	getBoundaryEdges: () -> { Edge },
@@ -172,6 +174,32 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 	-- discovering or editing a few vertices never costs a rebuild of all of them.
 	local mVertexChanged = Signal.new()
 
+	-- Change counters, so callers can cache derived data (e.g. the session's influence
+	-- outline) and recompute only when the mesh actually changed. The topology counter
+	-- ticks when the vertex/triangle SET changes (add/remove/merge/discover/clear); the
+	-- general counter also ticks on pure position moves. A handle drag moves vertices
+	-- every frame without changing topology, so drag-stable caches key on the topology
+	-- counter alone.
+	local mGeneration = 0
+	local mTopologyGeneration = 0
+
+	-- Vertex-hash cells discoverRegion has probed against the workspace since the last
+	-- mesh change, finding nothing new to adopt. While the mesh (and so the world
+	-- geometry it manages) is unchanged, re-probing the same spot every hover frame is
+	-- pure workspace-query overhead; any mesh change clears the memo.
+	local mProbedClean = {} :: { [VertexHash]: boolean }
+
+	local function bumpPositions()
+		mGeneration += 1
+		if next(mProbedClean) ~= nil then
+			table.clear(mProbedClean)
+		end
+	end
+	local function bumpTopology()
+		mTopologyGeneration += 1
+		bumpPositions()
+	end
+
 	local mNextVertexId = 1
 	local mNextTriangleId = 1
 	local mNextEdgeId = 1
@@ -221,6 +249,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		}
 		mVertices[id] = vertex
 		mSpatialHash[hash] = id
+		bumpTopology()
 		mVertexChanged:Fire(id)
 		return id
 	end
@@ -365,6 +394,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			mSpatialHash[hash] = nil
 			mVertices[vertexId] = nil
 			mVertexEdges[vertexId] = nil
+			bumpTopology()
 			mVertexChanged:Fire(vertexId)
 		end
 	end
@@ -545,6 +575,17 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 	end
 
 	local function findVertexNear(position: Vector3, radius: number): VertexId?
+		-- Fast path: a vertex within the merge tolerance of the position, via the
+		-- spatial hash. Distinct live vertices are kept at least the merge tolerance
+		-- apart, so such a match is THE nearest vertex. This is the common case for
+		-- undo/redo seed resolution -- thousands of exact-position lookups that made
+		-- the linear scan below quadratic on a large mesh.
+		if radius >= kVertexMergeTolerance then
+			local exact = findExistingVertexNear(position)
+			if exact then
+				return exact
+			end
+		end
 		local bestId: VertexId? = nil
 		local bestDist = radius
 		for _, vertex in mVertices do
@@ -679,6 +720,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			linkTriangleToPart(triangle, part)
 		end
 
+		bumpTopology()
 		return triId
 	end
 
@@ -745,6 +787,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		end
 
 		mTriangles[triangleId] = nil
+		bumpTopology()
 	end
 
 	-- Reshape a triangle's parts in place to match its vertices' current positions,
@@ -757,12 +800,9 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		if not (v1 and v2 and v3) then
 			return
 		end
-		-- Recompute normal
+		-- Recompute normal. The stored vertex order is kept wound so its natural
+		-- normal IS the outward normal, so fillTriangle never needs invertNormal.
 		tri.normal = computeNormal(v1.position, v2.position, v3.position)
-
-		-- Determine if we need invertNormal for fillTriangle
-		local naturalNormal = computeNormal(v1.position, v2.position, v3.position)
-		local shouldInvert = naturalNormal:Dot(tri.normal) < 0
 
 		-- Rebuild parts in-place at THIS triangle's own thickness (recorded at
 		-- discovery / creation) rather than snapping to the global value, so editing a
@@ -770,79 +810,110 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		local parent = tri.parts[1].Parent
 		local newParts = fillTriangle(
 			v1.position, v2.position, v3.position,
-			tri.thickness, parent :: Instance, props, tri.parts, shouldInvert
+			tri.thickness, parent :: Instance, props, tri.parts, false
 		)
 		tri.parts = relinkTriangleParts(tri, newParts)
 	end
 
-	local function moveVertex(vertexId: number, newPosition: Vector3, thickness: number, props: fillTriangle.TriangleProps?)
-		local vertex = mVertices[vertexId]
-		if not vertex then
+	local function moveVertices(moves: {[number]: Vector3}, thickness: number, props: fillTriangle.TriangleProps?)
+		-- Collect the affected edges and triangles ONCE across the whole batch: an
+		-- edge between two moved vertices is re-keyed exactly once, and a triangle
+		-- is rebuilt exactly once even when all three of its corners moved. (Moving
+		-- the vertices one at a time rebuilt each shared triangle per corner --
+		-- three fillTriangle part reshapes where one suffices -- which dominated
+		-- the per-frame cost of dragging a large influence region.)
+		local affectedEdges: { [EdgeId]: boolean } = {}
+		local affectedTris: { [TriangleId]: boolean } = {}
+		local anyMoved = false
+		for vertexId in moves do
+			local vertex = mVertices[vertexId]
+			if vertex then
+				anyMoved = true
+				local incidentEdges = mVertexEdges[vertexId]
+				if incidentEdges then
+					for edgeId in incidentEdges do
+						affectedEdges[edgeId] = true
+					end
+				end
+				for _, triId in vertex.triangles do
+					affectedTris[triId] = true
+				end
+			end
+		end
+		if not anyMoved then
 			return
 		end
 
-		-- This vertex's incident edges have position-keyed entries in mEdgeLookup that go
-		-- stale when it moves. Drop them while it's still at the old position (so the hashes
-		-- still match), move it, then re-insert at the new hashes. Walking just this vertex's
-		-- edges via the adjacency index keeps it O(degree) rather than a scan of every edge
-		-- in the mesh -- which made moving slow once a lot of unrelated geometry existed.
-		local incidentEdges = mVertexEdges[vertexId]
-		if incidentEdges then
-			for edgeId in incidentEdges do
-				local edge = mEdges[edgeId]
-				if edge then
-					local v1 = mVertices[edge.v1]
-					local v2 = mVertices[edge.v2]
-					if v1 and v2 then
-						mEdgeLookup[hashEdge(v1.position, v2.position)] = nil
-					end
+		-- The affected edges have position-keyed entries in mEdgeLookup that go stale
+		-- when their vertices move. Drop them all while every vertex is still at its
+		-- old position (so the hashes still match), move the vertices, then re-insert
+		-- at the new hashes.
+		for edgeId in affectedEdges do
+			local edge = mEdges[edgeId]
+			if edge then
+				local v1 = mVertices[edge.v1]
+				local v2 = mVertices[edge.v2]
+				if v1 and v2 then
+					mEdgeLookup[hashEdge(v1.position, v2.position)] = nil
 				end
 			end
 		end
 
-		-- Move the vertex (and its spatial-hash entry).
-		mSpatialHash[hashVertex(vertex.position)] = nil
-		vertex.position = newPosition
-		mSpatialHash[hashVertex(newPosition)] = vertexId
+		-- Move the vertices (and their spatial-hash entries). All removals happen
+		-- before any insertion so a vertex moving into a cell another vertex just
+		-- left can't have its fresh entry deleted.
+		for vertexId in moves do
+			local vertex = mVertices[vertexId]
+			if vertex then
+				mSpatialHash[hashVertex(vertex.position)] = nil
+			end
+		end
+		for vertexId, newPosition in moves do
+			local vertex = mVertices[vertexId]
+			if vertex then
+				vertex.position = newPosition
+				mSpatialHash[hashVertex(newPosition)] = vertexId
+			end
+		end
 
-		-- Re-insert the incident edges at their new positions.
-		if incidentEdges then
-			for edgeId in incidentEdges do
-				local edge = mEdges[edgeId]
-				if edge then
-					local v1 = mVertices[edge.v1]
-					local v2 = mVertices[edge.v2]
-					if v1 and v2 then
-						mEdgeLookup[hashEdge(v1.position, v2.position)] = edgeId
-					end
+		-- Re-insert the affected edges at their new positions.
+		for edgeId in affectedEdges do
+			local edge = mEdges[edgeId]
+			if edge then
+				local v1 = mVertices[edge.v1]
+				local v2 = mVertices[edge.v2]
+				if v1 and v2 then
+					mEdgeLookup[hashEdge(v1.position, v2.position)] = edgeId
 				end
 			end
 		end
 
 		-- Upgrade any Block-backed triangles before rebuilding
-		local triIds = table.clone(vertex.triangles)
-		for _, triId in triIds do
+		for triId in affectedTris do
 			local tri = mTriangles[triId]
 			if tri and tri.partsRequireUpgrade then
 				upgradeBlockTriangles(tri, tri.thickness)
 			end
 		end
 
-		-- Rebuild all triangles touching this vertex
-		for _, triId in vertex.triangles do
+		-- Rebuild each affected triangle exactly once
+		for triId in affectedTris do
 			local tri = mTriangles[triId]
 			if tri then
 				rebuildTriangleGeometry(tri, props)
 			end
 		end
 
-		mVertexChanged:Fire(vertexId)
+		bumpPositions()
+		for vertexId in moves do
+			if mVertices[vertexId] then
+				mVertexChanged:Fire(vertexId)
+			end
+		end
 	end
 
-	local function moveVertices(moves: {[number]: Vector3}, thickness: number, props: fillTriangle.TriangleProps?)
-		for vertexId, newPosition in moves do
-			moveVertex(vertexId, newPosition, thickness, props)
-		end
+	local function moveVertex(vertexId: number, newPosition: Vector3, thickness: number, props: fillTriangle.TriangleProps?)
+		moveVertices({ [vertexId] = newPosition }, thickness, props)
 	end
 
 	-- Merge `mergedId` into `survivorId`, placing the unified vertex at `position`.
@@ -968,6 +1039,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 
 		-- mergeVertices moves the survivor and removes the merged vertex directly (not
 		-- via moveVertex / cleanupVertex), so notify for both.
+		bumpTopology()
 		mVertexChanged:Fire(mergedId)
 		mVertexChanged:Fire(survivorId)
 		return true
@@ -1139,6 +1211,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		-- The foot is now interior to the merged outer edge: drop it.
 		cleanupVertex(footId)
 
+		bumpTopology()
 		return true
 	end
 
@@ -1211,8 +1284,12 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			end
 		end
 
-		while #queue > 0 do
-			local currentTriId = table.remove(queue, 1) :: TriangleId
+		-- Dequeue via a moving head index: table.remove(queue, 1) shifts the whole
+		-- queue on every pop, which made a large-radius walk quadratic.
+		local queueHead = 1
+		while queueHead <= #queue do
+			local currentTriId = queue[queueHead]
+			queueHead += 1
 			local adjacent = getAdjacentTriangles(currentTriId)
 			for _, adjTriId in adjacent do
 				if not visitedTris[adjTriId] then
@@ -1541,6 +1618,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 				thickness = wedgeThickness,
 			}
 			mTriangles[triId] = triangle
+			bumpTopology()
 
 			-- Register with vertices
 			for _, vid in orderedVerts do
@@ -1940,34 +2018,11 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			end
 			linkTriangleToPart(tri2, part)
 
+			bumpTopology()
 			return tri1Id
 		end
 
 		return nil
-	end
-
-	-- Does this wedge have a triangular-face corner coincident with pos? During a
-	-- region walk we only adopt an undiscovered part when the explore point is
-	-- genuinely one of its corners -- that shared corner gives discoverPart a real
-	-- vertex to orient its face against. Adopting a part from a nearby-but-unshared
-	-- point (a wedge whose bounds merely reach pos) leaves discoverPart guessing the
-	-- face, and on a curved surface it picks the back one: a thickness-offset crack.
-	local function partHasCornerNear(part: BasePart, pos: Vector3): boolean
-		if not isWedgePart(part) then
-			-- Non-wedge (Terrain, MeshParts, Blocks): keep the radius-based behaviour;
-			-- discoverPart adopts blocks by containment and rejects everything else anyway.
-			return true
-		end
-		local hintA = part.CFrame.Position + part.CFrame.RightVector
-		local hintB = part.CFrame.Position - part.CFrame.RightVector
-		local a1, a2, a3 = getWedgeVertices(part, hintA)
-		local b1, b2, b3 = getWedgeVertices(part, hintB)
-		for _, corner in { a1, a2, a3, b1, b2, b3 } do
-			if (corner - pos).Magnitude < kVertexMergeTolerance then
-				return true
-			end
-		end
-		return false
 	end
 
 	-- Remove a triangle from all bookkeeping but LEAVE its world parts intact and
@@ -2004,6 +2059,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			end
 		end
 		mTriangles[tri.id] = nil
+		bumpTopology()
 		for _, vid in tri.vertices do
 			cleanupVertex(vid)
 		end
@@ -2274,26 +2330,30 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		end
 
 		-- Build a corner -> {parts} spatial index from ONE bulk query covering all
-		-- seeds. Used only by the unbounded rebuild (radius == math.huge, the
-		-- undo/redo rediscovery) to feed discoverPart's merge resolver below. On
-		-- that path discoverPart runs three GetPartBoundsInRadius queries per part
-		-- to find a coplanar partner wedge to fuse -- thousands of workspace queries
-		-- per undo, the dominant cost on a large mesh. A merge partner shares an
+		-- seeds (grown by `margin`). Feeds discoverPart's merge resolver below: on
+		-- an adoption-heavy pass (an undo's region re-discovery, a fresh region
+		-- walk) discoverPart otherwise runs three GetPartBoundsInRadius queries per
+		-- part to find a coplanar partner wedge to fuse -- thousands of workspace
+		-- queries on a large region, the dominant cost. A merge partner shares an
 		-- edge (two corners) with the part, so keying each candidate part by the
 		-- hash of each of its corners turns that search into an in-memory 27-cell
 		-- probe. (Enumeration -- which undiscovered parts discoverRegion ADOPTS --
 		-- deliberately stays on the workspace query: a corner-only index there would
 		-- skip the bootstrap-by-containment case and change the discovered set.)
-		local function buildCornerIndex(seedList: { Vector3 }): ({ [VertexHash]: { BasePart } }, Vector3, Vector3)
+		local function buildCornerIndex(seedList: { Vector3 }, margin: number): ({ [VertexHash]: { BasePart } }, Vector3, Vector3)
 			local lo, hi = seedList[1], seedList[1]
 			for _, s in seedList do
 				lo = lo:Min(s)
 				hi = hi:Max(s)
 			end
-			-- A part on the mesh has every corner among the seeds, so its bounds
-			-- overlap the seed AABB; the small margin only guards FP at the boundary.
+			-- Everything the walk can adopt has its corners within the discovery
+			-- radius of a seed (the caller passes that as the margin; for the
+			-- unbounded rebuild every corner IS a seed and the margin only guards
+			-- FP at the boundary).
+			lo -= Vector3.one * margin
+			hi += Vector3.one * margin
 			local center = (lo + hi) / 2
-			local size = (hi - lo) + Vector3.one * 4
+			local size = hi - lo
 			local params = OverlapParams.new()
 			params.MaxParts = 1000000
 
@@ -2361,44 +2421,101 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			return out
 		end
 
+		-- Does this wedge have a triangular-face corner coincident with pos? During a
+		-- region walk we only adopt an undiscovered part when the explore point is
+		-- genuinely one of its corners -- that shared corner gives discoverPart a real
+		-- vertex to orient its face against. Adopting a part from a nearby-but-unshared
+		-- point (a wedge whose bounds merely reach pos) leaves discoverPart guessing the
+		-- face, and on a curved surface it picks the back one: a thickness-offset crack.
+		--
+		-- The corner reconstruction (property reads + CFrame math) is memoised for this
+		-- pass: it runs for every candidate part at every explored position, and in a
+		-- dense region the same part is re-examined from each of its neighbouring
+		-- vertices, which dominated the undo re-discovery. Parts don't move during a
+		-- pass, so the corners are computed once each.
+		local partCornersCache: { [BasePart]: { Vector3 } } = {}
+		local function hasCornerNearCached(part: BasePart, pos: Vector3): boolean
+			if not isWedgePart(part) then
+				-- Non-wedge (Terrain, MeshParts, Blocks): keep the radius-based behaviour;
+				-- discoverPart adopts blocks by containment and rejects everything else anyway.
+				return true
+			end
+			local corners = partCornersCache[part]
+			if not corners then
+				local hintA = part.CFrame.Position + part.CFrame.RightVector
+				local hintB = part.CFrame.Position - part.CFrame.RightVector
+				local a1, a2, a3 = getWedgeVertices(part, hintA)
+				local b1, b2, b3 = getWedgeVertices(part, hintB)
+				corners = { a1, a2, a3, b1, b2, b3 }
+				partCornersCache[part] = corners
+			end
+			for _, corner in corners do
+				if (corner - pos).Magnitude < kVertexMergeTolerance then
+					return true
+				end
+			end
+			return false
+		end
+
 		-- Seed the (low-priority) seed queue with starting positions
 		for _, seed in seeds do
 			table.insert(seedQueue, seed)
 		end
 
-		-- Only built for the unbounded rebuild; nil keeps every bounded
-		-- (interactive) discoverPart call on its original workspace-query merge path.
+		-- Built LAZILY, on discoverPart's first merge lookup: a pass that adopts
+		-- nothing (the common already-discovered hover frame) never pays for the
+		-- bulk query, while an adoption-heavy pass (undo re-discovery, fresh region
+		-- walk) builds it once and serves every subsequent merge search in memory.
 		local cornerIndex: { [VertexHash]: { BasePart } }? = nil
+		local cornerIndexBuilt = false
 		local regionLo, regionHi = Vector3.zero, Vector3.zero
-		if radius == math.huge and #seeds > 0 then
-			cornerIndex, regionLo, regionHi = buildCornerIndex(seeds)
+		local function ensureCornerIndex()
+			if cornerIndexBuilt then
+				return
+			end
+			cornerIndexBuilt = true
+			if #seeds == 0 then
+				return
+			end
+			-- Bounded walks can adopt parts anywhere within the discovery radius of
+			-- a seed; the unbounded rebuild seeds from every corner, so a small FP
+			-- guard suffices there.
+			local margin = if radius == math.huge then 2 else radius + 2
+			cornerIndex, regionLo, regionHi = buildCornerIndex(seeds, margin)
 		end
 
-		-- When the index exists, hand discoverPart an in-memory resolver so its
-		-- coplanar-merge search skips its three-per-part workspace queries. The
-		-- index is only COMPLETE inside the region the bulk query covered (the seed
-		-- AABB): a part with a corner there was guaranteed returned. Outside it --
-		-- e.g. an unbounded walk that reaches far past a sparse seed set -- fall back
-		-- to the live query so the merge still finds its partner. The undo path seeds
-		-- from every vertex, so every lookup lands inside and stays on the fast path.
-		local nearbyResolver: ((Vector3, number) -> { Instance })? = nil
-		if cornerIndex then
+		-- Hand discoverPart an in-memory resolver so its coplanar-merge search skips
+		-- its three-per-part workspace queries. The index is only COMPLETE inside the
+		-- region the bulk query covered: a part with a corner there was guaranteed
+		-- returned. Outside it -- e.g. an unbounded walk that reaches far past a
+		-- sparse seed set -- fall back to the live query so the merge still finds
+		-- its partner.
+		local nearbyResolver = function(p: Vector3, fallbackRadius: number): { Instance }
+			ensureCornerIndex()
 			local idx = cornerIndex
-			local lo, hi = regionLo, regionHi
-			nearbyResolver = function(p: Vector3, fallbackRadius: number): { Instance }
-				if p.X >= lo.X and p.X <= hi.X
-					and p.Y >= lo.Y and p.Y <= hi.Y
-					and p.Z >= lo.Z and p.Z <= hi.Z
-				then
-					return nearbyPartsFromCornerIndex(idx, p)
-				end
-				return workspace:GetPartBoundsInRadius(p, fallbackRadius)
+			if idx
+				and p.X >= regionLo.X and p.X <= regionHi.X
+				and p.Y >= regionLo.Y and p.Y <= regionHi.Y
+				and p.Z >= regionLo.Z and p.Z <= regionHi.Z
+			then
+				return nearbyPartsFromCornerIndex(idx, p)
 			end
+			return workspace:GetPartBoundsInRadius(p, fallbackRadius)
 		end
 
 		-- Dequeue via moving head indices, not table.remove(queue, 1): the latter
 		-- shifts every remaining element on each pop, making a full rebuild O(n^2).
 		-- Always drain walkQueue first (a seed's full walk) before the next seed.
+		--
+		-- The seed-distance filter remembers which seed matched last: BFS neighbours
+		-- almost always match the same seed, so the scan is O(1) amortized rather
+		-- than O(seeds) per position (which made a many-seed pass -- an undo
+		-- re-discovery, the influence outline of a large selection -- quadratic).
+		local lastSeedHit = 1
+		-- Whether this pass adopted anything new. When it didn't, the discovered set
+		-- was already normalised by whichever earlier passes discovered it, so the
+		-- coalesce/orient sweeps below would be O(region) no-ops -- skip them.
+		local startTopologyGeneration = mTopologyGeneration
 		local seedHead, walkHead = 1, 1
 		while walkHead <= #walkQueue or seedHead <= #seedQueue do
 			local pos: Vector3
@@ -2415,9 +2532,15 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 
 			-- Skip if outside radius of all seeds
 			local withinRadius = false
-			for _, seed in seeds do
-				if (pos - seed).Magnitude <= radius then
+			local seedCount = #seeds
+			for k = 0, seedCount - 1 do
+				local i = lastSeedHit + k
+				if i > seedCount then
+					i -= seedCount
+				end
+				if (pos - seeds[i]).Magnitude <= radius then
 					withinRadius = true
+					lastSeedHit = i
 					break
 				end
 			end
@@ -2437,23 +2560,31 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			end
 
 			-- Only do a workspace query if this is an unknown position (bootstrap)
-			-- or a boundary vertex (may have undiscovered adjacent parts)
-			if not vertId or isVertexOnBoundary(vertId) then
+			-- or a boundary vertex (may have undiscovered adjacent parts). A known
+			-- vertex probed clean since the last mesh change needs neither.
+			if vertId and mProbedClean[posHash] then
+				-- No workspace work needed here until the mesh changes.
+			elseif vertId and not isVertexOnBoundary(vertId) then
+				-- Interior vertex: every adjacent part is already tracked.
+				mProbedClean[posHash] = true
+			else
 				-- Cap search radius so we don't discover parts beyond the requested
 				-- region. For an unbounded rebuild the cap is moot (remainingRadius is
 				-- infinite), so skip the O(seeds) distance scan -- on a full rebuild
 				-- that scan is O(vertices * seeds), pure overhead the result discards.
+				local uncappedSearchRadius = getSearchRadius(vertId)
 				local searchRadius
 				if radius == math.huge then
-					searchRadius = getSearchRadius(vertId)
+					searchRadius = uncappedSearchRadius
 				else
 					local distToClosestSeed = math.huge
 					for _, seed in seeds do
 						distToClosestSeed = math.min(distToClosestSeed, (pos - seed).Magnitude)
 					end
 					local remainingRadius = radius - distToClosestSeed
-					searchRadius = math.min(getSearchRadius(vertId), math.max(remainingRadius, 0))
+					searchRadius = math.min(uncappedSearchRadius, math.max(remainingRadius, 0))
 				end
+				local genBeforeProbe = mTopologyGeneration
 				local nearbyParts = workspace:GetPartBoundsInRadius(pos, searchRadius)
 				-- pos is an already-discovered vertex when vertId is set; nil means we
 				-- are bootstrapping from a fresh seed with nothing yet to share.
@@ -2469,7 +2600,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 					if
 						part:IsA("BasePart")
 						and not mPartToTriangles[part]
-						and partHasCornerNear(part :: BasePart, pos)
+						and hasCornerNearCached(part :: BasePart, pos)
 					then
 						haveCornerMatch = true
 						break
@@ -2516,7 +2647,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 				for _, part in nearbyParts do
 					if not part:IsA("BasePart") then continue end
 					if not mPartToTriangles[part] then
-						if partHasCornerNear(part, pos) or part == bootstrapPart then
+						if hasCornerNearCached(part, pos) or part == bootstrapPart then
 							-- Pass the region's viewPoint so a bootstrapped Block adopts its
 							-- camera-facing face (nil on the rebuild, where pos is a corner).
 							discoverPart(part, pos, viewPoint, nearbyResolver)
@@ -2532,15 +2663,29 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 						end
 					end
 				end
+
+				-- A known boundary vertex whose FULL-radius probe adopted nothing:
+				-- nothing new to find here until the mesh changes, so later passes can
+				-- skip the query. A radius-capped probe (near the region edge) proves
+				-- nothing -- a later pass with more reach could still adopt here, so
+				-- it must not be memoised. (The mesh-change bump clears the memo,
+				-- including a bump this very probe caused elsewhere -- that just means
+				-- one extra re-probe.)
+				if vertId and searchRadius >= uncappedSearchRadius and mTopologyGeneration == genBeforeProbe then
+					mProbedClean[posHash] = true
+				end
 			end
 		end
 
 		-- Only normalise what this call discovered. For a full rediscover that's everything;
 		-- for a local region re-discovery (undo, brush) it keeps the cost O(region), and --
 		-- combined with the deterministic edge order -- makes a local rebuild coalesce
-		-- identically to a full one.
-		coalesceWedgePairs(discovered)
-		orientConsistently(discovered)
+		-- identically to a full one. A pass that adopted nothing discovered only triangles
+		-- earlier passes already normalised, so skip the (O(region)) sweeps outright.
+		if mTopologyGeneration ~= startTopologyGeneration then
+			coalesceWedgePairs(discovered)
+			orientConsistently(discovered)
+		end
 		return result
 	end
 
@@ -2555,6 +2700,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		mNextVertexId = 1
 		mNextTriangleId = 1
 		mNextEdgeId = 1
+		bumpTopology()
 	end
 
 	-- Fire VertexChanged for each of the given ids without otherwise touching the mesh. After
@@ -2581,6 +2727,12 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		getEdges = getEdges,
 		getVertex = getVertex,
 		getTriangle = getTriangle,
+		getGeneration = function(): number
+			return mGeneration
+		end,
+		getTopologyGeneration = function(): number
+			return mTopologyGeneration
+		end,
 
 		-- Queries
 		getBoundaryEdges = getBoundaryEdges,

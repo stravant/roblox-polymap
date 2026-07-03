@@ -117,22 +117,19 @@ local function fillTriangle(
 
 	local createdParts: { BasePart } = {}
 
-	-- Determine appearance: reused parts keep their appearance,
-	-- new parts inherit from existingParts[1] or use props/defaults
-	local color: Color3
-	local material: Enum.Material
-	local transparency: number
-	local materialVariant: string
-	if existingParts and existingParts[1] then
-		color = existingParts[1].Color
-		material = existingParts[1].Material
-		transparency = existingParts[1].Transparency
-		materialVariant = existingParts[1].MaterialVariant
-	else
-		color = if props and props.Color then props.Color else Color3.fromRGB(163, 162, 165)
-		material = if props and props.Material then props.Material else Enum.Material.Plastic
-		transparency = if props and props.Transparency then props.Transparency else 0
-		materialVariant = if props and props.MaterialVariant then props.MaterialVariant else ""
+	-- Determine appearance: reused parts keep their appearance, new parts inherit
+	-- from existingParts[1] or use props/defaults. Read lazily -- only when a NEW
+	-- part must be created -- so the per-frame drag rebuild path (which reuses
+	-- every part) never pays for the property reads.
+	local function readAppearance(): (Color3, Enum.Material, number, string)
+		if existingParts and existingParts[1] then
+			local template = existingParts[1]
+			return template.Color, template.Material, template.Transparency, template.MaterialVariant
+		end
+		return if props and props.Color then props.Color else Color3.fromRGB(163, 162, 165),
+			if props and props.Material then props.Material else Enum.Material.Plastic,
+			if props and props.Transparency then props.Transparency else 0,
+			if props and props.MaterialVariant then props.MaterialVariant else ""
 	end
 
 	local partIndex = 0
@@ -144,6 +141,7 @@ local function fillTriangle(
 		if existingParts and existingParts[partIndex] then
 			part1 = existingParts[partIndex]
 		else
+			local color, material, transparency, materialVariant = readAppearance()
 			local newPart = Instance.new("Part")
 			newPart.Shape = Enum.PartType.Wedge
 			newPart.TopSurface = Enum.SurfaceType.Smooth
@@ -166,6 +164,7 @@ local function fillTriangle(
 		if existingParts and existingParts[partIndex] then
 			part2 = existingParts[partIndex]
 		else
+			local color, material, transparency, materialVariant = readAppearance()
 			local newPart = Instance.new("Part")
 			newPart.Shape = Enum.PartType.Wedge
 			newPart.TopSurface = Enum.SurfaceType.Smooth

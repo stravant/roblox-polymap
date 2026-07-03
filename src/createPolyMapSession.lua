@@ -176,6 +176,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 	-- Selection state
 	local mSelectedVertices: { [number]: boolean } = {}
+	-- Bumped on EVERY change to mSelectedVertices (in-place edits included), so the
+	-- influence-outline cache below can tell whether the selection is still the one
+	-- it was computed for.
+	local mSelectionVersion = 0
 	local mHoverVertexId: number? = nil
 	local mHoverEdgeKey: string? = nil
 	local mHoverTriangleIds: { number } = {}
@@ -334,6 +338,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 	local function restoreSelectionFromPositions(positions: { Vector3 })
 		mSelectedVertices = {}
+		mSelectionVersion += 1
 		for _, pos in positions do
 			local vid = mMesh.findVertexNear(pos, 0.1)
 			if vid then
@@ -1430,6 +1435,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				mSelectedVertices = {}
 			end
 		end
+		mSelectionVersion += 1
 		mSavedVertexPositions = {}
 		changeSignal:Fire()
 	end
@@ -1856,6 +1862,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 							mMesh.removeTriangle(triId)
 						end
 						mSelectedVertices[vid] = nil
+						mSelectionVersion += 1
 						recordDelete()
 						changeSignal:Fire()
 					end
@@ -2429,6 +2436,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		if not result then
 			if (mode == "Move" or mode == "Rotate") and not isShiftHeld() then
 				mSelectedVertices = {}
+				mSelectionVersion += 1
 				mSavedVertexPositions = {}
 				changeSignal:Fire()
 			end
@@ -2539,6 +2547,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			end
 		end
 
+		mSelectionVersion += 1
 		mSavedVertexPositions = {}
 		changeSignal:Fire()
 	end
@@ -2609,6 +2618,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			table.insert(queue, vid)
 		end
 
+		-- As in getExpandedTriangleIds, remember which seed matched last so the
+		-- seed-distance filter is O(1) amortized rather than O(selection) per vertex.
+		local lastSeedHit = 1
+		local radiusSq = radius * radius
 		while queueHead <= #queue do
 			local vid = queue[queueHead]
 			queueHead += 1
@@ -2627,10 +2640,16 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					if not neighbor then continue end
 
 					local withinRadius = false
-					for _, seedPos in seedPositions do
-						local delta = neighbor.position - seedPos
-						if Vector3.new(delta.X, 0, delta.Z).Magnitude < radius then
+					local seedCount = #seedPositions
+					for k = 0, seedCount - 1 do
+						local i = lastSeedHit + k
+						if i > seedCount then
+							i -= seedCount
+						end
+						local delta = neighbor.position - seedPositions[i]
+						if delta.X * delta.X + delta.Z * delta.Z < radiusSq then
 							withinRadius = true
+							lastSeedHit = i
 							break
 						end
 					end
@@ -2871,6 +2890,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			and next(mSelectedVertices) ~= nil
 		then
 			mSelectedVertices = {}
+			mSelectionVersion += 1
 			mSavedVertexPositions = {}
 			changeSignal:Fire()
 		end
@@ -3110,6 +3130,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			restoreSelectionFromPositions(undoSelection)
 		else
 			mSelectedVertices = {}
+			mSelectionVersion += 1
 		end
 		mHoverVertexId = nil
 		mHoverEdgeKey = nil
@@ -3138,6 +3159,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			restoreSelectionFromPositions(redoSelection)
 		else
 			mSelectedVertices = {}
+			mSelectionVersion += 1
 		end
 		mHoverVertexId = nil
 		mHoverEdgeKey = nil
@@ -3275,6 +3297,11 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			table.insert(queue, vid)
 		end
 
+		-- The seed-distance filter remembers which seed matched last: BFS neighbours
+		-- almost always match the same seed, so the scan is O(1) amortized rather
+		-- than O(seeds) per vertex (quadratic for a large selection).
+		local lastSeedHit = 1
+		local radiusSq = radius * radius
 		while queueHead <= #queue do
 			local vid = queue[queueHead]
 			queueHead += 1
@@ -3295,10 +3322,16 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 					-- Check XZ distance to any seed
 					local withinRadius = false
-					for _, seedPos in seedPositions do
-						local delta = neighbor.position - seedPos
-						if Vector3.new(delta.X, 0, delta.Z).Magnitude < radius then
+					local seedCount = #seedPositions
+					for k = 0, seedCount - 1 do
+						local i = lastSeedHit + k
+						if i > seedCount then
+							i -= seedCount
+						end
+						local delta = neighbor.position - seedPositions[i]
+						if delta.X * delta.X + delta.Z * delta.Z < radiusSq then
 							withinRadius = true
+							lastSeedHit = i
 							break
 						end
 					end
@@ -3327,13 +3360,60 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return result
 	end
 
+	-- The influence outlines are recomputed on every render (every changeSignal), but
+	-- their inputs change far less often: cache them and recompute only when something
+	-- they depend on moved. During a handle drag the expanded set is seeded from the
+	-- SAVED pre-drag positions -- deliberately frozen -- so pure position changes
+	-- (the drag itself, every frame) don't invalidate it: the drag entry keys on the
+	-- mesh's topology generation only. Outside a drag any mesh change invalidates.
+	-- Without this, every drag frame re-ran a region discovery + BFS over the whole
+	-- influence area just to hand back the same triangle list.
+	local mSelOutlineCache: {
+		selVersion: number,
+		generation: number,
+		radius: number,
+		dragActive: boolean,
+		tris: { number },
+	}? = nil
+	local mHoverOutlineCache: {
+		vertexId: number,
+		generation: number,
+		radius: number,
+		tris: { number },
+	}? = nil
+
 	session.GetOutlineTriangleIds = function(): { number }
 		local mode = currentSettings.Mode
 		if mode == "Delete" or mode == "Paint" or mode == "Relax" or mode == "Flatten" or mode == "Heal" then
 			return mHoverTriangleIds
 		end
 		if mode == "Move" or mode == "Rotate" then
-			return getExpandedTriangleIds(mSelectedVertices)
+			local dragActive = next(mSavedVertexPositions) ~= nil
+			local radius = currentSettings.InfluenceRadius
+			local function generation(): number
+				return if dragActive then mMesh.getTopologyGeneration() else mMesh.getGeneration()
+			end
+			local c = mSelOutlineCache
+			if
+				c
+				and c.selVersion == mSelectionVersion
+				and c.generation == generation()
+				and c.radius == radius
+				and c.dragActive == dragActive
+			then
+				return c.tris
+			end
+			local tris = getExpandedTriangleIds(mSelectedVertices)
+			-- Key on the POST-compute generation: the expansion itself may discover
+			-- new geometry, and that must not immediately invalidate the entry.
+			mSelOutlineCache = {
+				selVersion = mSelectionVersion,
+				generation = generation(),
+				radius = radius,
+				dragActive = dragActive,
+				tris = tris,
+			}
+			return tris
 		end
 		return {}
 	end
@@ -3342,10 +3422,23 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		if mode ~= "Move" and mode ~= "Rotate" then
 			return {}
 		end
-		if not mHoverVertexId then
+		local hoverVid = mHoverVertexId
+		if not hoverVid then
 			return {}
 		end
-		return getExpandedTriangleIds({ [mHoverVertexId] = true })
+		local radius = currentSettings.InfluenceRadius
+		local c = mHoverOutlineCache
+		if c and c.vertexId == hoverVid and c.generation == mMesh.getGeneration() and c.radius == radius then
+			return c.tris
+		end
+		local tris = getExpandedTriangleIds({ [hoverVid] = true })
+		mHoverOutlineCache = {
+			vertexId = hoverVid,
+			generation = mMesh.getGeneration(),
+			radius = radius,
+			tris = tris,
+		}
+		return tris
 	end
 	session.GetMode = function(): string
 		return currentSettings.Mode
@@ -3640,6 +3733,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			end
 		end
 		mSelectedVertices = newSelection
+		mSelectionVersion += 1
 		mSavedVertexPositions = {}
 		changeSignal:Fire()
 	end
