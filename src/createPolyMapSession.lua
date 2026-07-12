@@ -2164,6 +2164,45 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			return 0
 		end
 
+		-- Limitations: optionally refuse to stitch across appearance boundaries, so
+		-- geometry that merely sits close (a prop resting on terrain) isn't fused
+		-- into it. Two sides are joinable when their parts share at least one
+		-- appearance key, so a tear inside one surface still heals even where a
+		-- color/material transition meets the seam.
+		local limitColor = currentSettings.HealSameColor
+		local limitMaterial = currentSettings.HealSameMaterial
+		local function appearanceKeys(triangleIds: { number }): { [string]: boolean }
+			local keys: { [string]: boolean } = {}
+			for _, tid in triangleIds do
+				local tri = mMesh.getTriangle(tid)
+				if tri then
+					for _, part in tri.parts do
+						local key = ""
+						if limitColor then
+							key ..= part.Color:ToHex()
+						end
+						if limitMaterial then
+							key ..= "|" .. part.Material.Name .. "|" .. part.MaterialVariant
+						end
+						keys[key] = true
+					end
+				end
+			end
+			return keys
+		end
+		local function appearanceJoinable(trisA: { number }, trisB: { number }): boolean
+			if not (limitColor or limitMaterial) then
+				return true
+			end
+			local keysA = appearanceKeys(trisA)
+			for key in appearanceKeys(trisB) do
+				if keysA[key] then
+					return true
+				end
+			end
+			return false
+		end
+
 		-- Make sure both sides of any seam in range are actually in the mesh.
 		discoverRegionViewed({ hitPos }, radius + tolerance + 5)
 
@@ -2202,7 +2241,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 									break
 								end
 							end
-							if not shareTri then
+							if not shareTri and appearanceJoinable(va.triangles, vb.triangles) then
 								table.insert(tearPairs, { a = candidates[i], b = candidates[j], d = d })
 							end
 						end
@@ -2273,7 +2312,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				-- region delta only if the fold actually happens.
 				local foldSeeds: { Vector3 } = {}
 				local foldSpan = math.max(collectTriangleCorners(t1, foldSeeds), collectTriangleCorners(t2, foldSeeds))
-				if mMesh.mergeWedgeTriangles(t1, t2, tolerance, nil) then
+				if appearanceJoinable({ t1 }, { t2 }) and mMesh.mergeWedgeTriangles(t1, t2, tolerance, nil) then
 					count += 1
 					for _, s in foldSeeds do
 						table.insert(mStrokeHealSeeds, s)

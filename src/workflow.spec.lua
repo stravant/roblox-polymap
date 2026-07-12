@@ -57,6 +57,8 @@ local function makeSettings(): Settings.PolyMapSettings
 		FlattenStrength = 0.5,
 		HealRadius = 5,
 		HealTolerance = 1,
+		HealSameColor = false,
+		HealSameMaterial = false,
 		ImportImageId = "",
 		ImportWidth = 50,
 		ImportHeight = 50,
@@ -3283,6 +3285,113 @@ return function(t: TestTypes.TestContext)
 			t.expect(countDict(mesh.getVertices())).toBe(3)
 			t.expect(countDict(mesh.getTriangles())).toBe(1)
 			t.expect(hasVertexNear(F)).toBe(false)
+		end)
+	end)
+
+	-- The torn-seam setup from the merge test, but with per-side appearance props,
+	-- for exercising the Heal limitations.
+	local function buildTornSeam(mesh: any, propsA: any, propsB: any)
+		local base = kRegionCenter
+		local up = base + Vector3.new(2, 6, 0)
+		mesh.addTriangle(
+			base + Vector3.new(0, 0, 0), base + Vector3.new(4, 0, 0), base + Vector3.new(2, 0, 3),
+			1, workspace.Terrain, propsA, up
+		)
+		mesh.addTriangle(
+			base + Vector3.new(0, 0, -0.2), base + Vector3.new(4, 0, -0.2), base + Vector3.new(2, 0, -3),
+			1, workspace.Terrain, propsB, up
+		)
+	end
+
+	t.test("Heal: same-color limit skips tears between differently colored geometry", function()
+		withSession(function(session, mesh, settings)
+			settings.Mode = "Heal"
+			settings.HealRadius = 8
+			settings.HealTolerance = 1
+			settings.HealSameColor = true
+
+			buildTornSeam(mesh,
+				{ Color = Color3.fromRGB(200, 40, 40) },
+				{ Color = Color3.fromRGB(40, 200, 40) })
+			t.expect(countDict(mesh.getVertices())).toBe(6)
+
+			-- Colors differ: the limit keeps the seam torn.
+			session.HealAt(kRegionCenter + Vector3.new(2, 0, -0.1))
+			t.expect(countDict(mesh.getVertices())).toBe(6)
+
+			-- Same geometry with the limit off does heal, proving the limit (and not
+			-- the setup) is what blocked the merge.
+			settings.HealSameColor = false
+			session.HealAt(kRegionCenter + Vector3.new(2, 0, -0.1))
+			t.expect(countDict(mesh.getVertices())).toBe(4)
+		end)
+	end)
+
+	t.test("Heal: same-color limit still heals matching-color tears", function()
+		withSession(function(session, mesh, settings)
+			settings.Mode = "Heal"
+			settings.HealRadius = 8
+			settings.HealTolerance = 1
+			settings.HealSameColor = true
+
+			local red = { Color = Color3.fromRGB(200, 40, 40) }
+			buildTornSeam(mesh, red, red)
+			t.expect(countDict(mesh.getVertices())).toBe(6)
+
+			session.HealAt(kRegionCenter + Vector3.new(2, 0, -0.1))
+			t.expect(countDict(mesh.getVertices())).toBe(4)
+		end)
+	end)
+
+	t.test("Heal: same-material limit skips tears between different materials", function()
+		withSession(function(session, mesh, settings)
+			settings.Mode = "Heal"
+			settings.HealRadius = 8
+			settings.HealTolerance = 1
+			settings.HealSameMaterial = true
+
+			buildTornSeam(mesh,
+				{ Material = Enum.Material.Grass },
+				{ Material = Enum.Material.Slate })
+			t.expect(countDict(mesh.getVertices())).toBe(6)
+
+			-- Materials differ: the limit keeps the seam torn.
+			session.HealAt(kRegionCenter + Vector3.new(2, 0, -0.1))
+			t.expect(countDict(mesh.getVertices())).toBe(6)
+
+			-- Matching materials heal even with the limit on.
+			settings.HealSameMaterial = false
+			session.HealAt(kRegionCenter + Vector3.new(2, 0, -0.1))
+			t.expect(countDict(mesh.getVertices())).toBe(4)
+		end)
+	end)
+
+	t.test("Heal: same-color limit skips folding differently colored wedge pairs", function()
+		withSession(function(session, mesh, settings)
+			settings.Mode = "Heal"
+			settings.HealRadius = 8
+			settings.HealTolerance = 1
+			settings.HealSameColor = true
+
+			-- The bent-wedge setup from the fold test, but the two wedges disagree
+			-- on color so the fold pass must leave them alone.
+			local base = kRegionCenter
+			local A = base + Vector3.new(0, 0, 0)
+			local B = base + Vector3.new(3, 0, 4)
+			local C = base + Vector3.new(6, 0, 0)
+			local F = base + Vector3.new(3, 0, 0.3)
+			local hint = base + Vector3.new(3, 5, 0)
+			mesh.addTriangle(A, B, F, 1, workspace.Terrain, { Color = Color3.fromRGB(200, 40, 40) }, hint)
+			mesh.addTriangle(B, C, F, 1, workspace.Terrain, { Color = Color3.fromRGB(40, 200, 40) }, hint)
+			t.expect(countDict(mesh.getTriangles())).toBe(2)
+
+			session.HealAt(base + Vector3.new(3, 0, 1))
+			t.expect(countDict(mesh.getTriangles())).toBe(2)
+
+			-- With the limit off the same pair folds.
+			settings.HealSameColor = false
+			session.HealAt(base + Vector3.new(3, 0, 1))
+			t.expect(countDict(mesh.getTriangles())).toBe(1)
 		end)
 	end)
 

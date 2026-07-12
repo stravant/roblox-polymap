@@ -49,6 +49,8 @@ local function makeSettings(mode: string): Settings.PolyMapSettings
 		FlattenStrength = 0.5,
 		HealRadius = 5,
 		HealTolerance = 1,
+		HealSameColor = false,
+		HealSameMaterial = false,
 		ImportImageId = "",
 		ImportWidth = 50,
 		ImportHeight = 50,

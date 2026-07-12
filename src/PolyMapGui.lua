@@ -1837,6 +1837,50 @@ local function HealPanel(props: {
 	})
 end
 
+-- Heal mode: optional limits that keep Heal from fusing geometry that merely
+-- sits close together but was never meant to be contiguous.
+local function HealLimitsPanel(props: {
+	Settings: Settings.PolyMapSettings,
+	UpdatedSettings: () -> (),
+	LayoutOrder: number?,
+})
+	local nextOrder = createNextOrder()
+	return e(SubPanel, {
+		Title = "Limitations",
+		LayoutOrder = props.LayoutOrder,
+		Padding = UDim.new(0, 4),
+	}, {
+		SameColor = e(HelpGui.WithHelpIcon, {
+			LayoutOrder = nextOrder(),
+			Subject = e(Checkbox, {
+				Label = "Only Heal Same Color",
+				Checked = props.Settings.HealSameColor,
+				Changed = function(checked: boolean)
+					props.Settings.HealSameColor = checked
+					props.UpdatedSettings()
+				end,
+			}),
+			Help = e(HelpGui.BasicTooltip, {
+				HelpRichText = "Only stitch a tear when the parts on both sides share a <b>color</b>, so differently-colored geometry that just sits close together doesn't get fused.",
+			}),
+		}),
+		SameMaterial = e(HelpGui.WithHelpIcon, {
+			LayoutOrder = nextOrder(),
+			Subject = e(Checkbox, {
+				Label = "Only Heal Same Material",
+				Checked = props.Settings.HealSameMaterial,
+				Changed = function(checked: boolean)
+					props.Settings.HealSameMaterial = checked
+					props.UpdatedSettings()
+				end,
+			}),
+			Help = e(HelpGui.BasicTooltip, {
+				HelpRichText = "Only stitch a tear when the parts on both sides share a <b>material</b>, so differently-textured geometry that just sits close together doesn't get fused.",
+			}),
+		}),
+	})
+end
+
 local function CloseButton(props: {
 	HandleAction: (string) -> (),
 	LayoutOrder: number?,
@@ -2145,6 +2189,11 @@ local function PolyMapGui(props: {
 				LayoutOrder = nextOrder(),
 			}),
 			HealPanel = showHeal and e(HealPanel, {
+				Settings = currentSettings,
+				UpdatedSettings = props.UpdatedSettings,
+				LayoutOrder = nextOrder(),
+			}),
+			HealLimitsPanel = showHeal and e(HealLimitsPanel, {
 				Settings = currentSettings,
 				UpdatedSettings = props.UpdatedSettings,
 				LayoutOrder = nextOrder(),
