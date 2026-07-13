@@ -2,6 +2,7 @@
 
 local ChangeHistoryService = game:GetService("ChangeHistoryService")
 local Selection = game:GetService("Selection")
+local ServerStorage = game:GetService("ServerStorage")
 local StudioService = game:GetService("StudioService")
 local UserInputService = game:GetService("UserInputService")
 
@@ -355,13 +356,14 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	----------------------------------------------------------------------
 	-- Last-editor marker (Team Create conflict detection)
 	----------------------------------------------------------------------
-	-- An Archivable=false IntValue in workspace holds the userId of whoever made
-	-- the most recent PolyMap edit: it replicates through Team Create but never
-	-- saves into the place file. Every edit stamps it with our id. Other users'
-	-- sessions watch it -- without Multiuser Support their discovered data can't
-	-- self-heal, so a foreign edit raises the conflict toast instead of silently
-	-- going stale. The owner removes the marker when their session closes, so a
-	-- user who no longer even has the plugin open doesn't leave edits flagged.
+	-- An Archivable=false IntValue in ServerStorage (out of the way of workspace
+	-- browsing) holds the userId of whoever made the most recent PolyMap edit: it
+	-- replicates through Team Create but never saves into the place file. Every
+	-- edit stamps it with our id. Other users' sessions watch it -- without
+	-- Multiuser Support their discovered data can't self-heal, so a foreign edit
+	-- raises the conflict toast instead of silently going stale. The owner removes
+	-- the marker when their session closes, so a user who no longer even has the
+	-- plugin open doesn't leave edits flagged.
 	local kLastEditorValueName = "PolyMapLastEditor"
 	local mLocalUserId = StudioService:GetUserId()
 	-- The warning shows once per session: the "may be in conflict" state it
@@ -372,7 +374,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local mMarkerValueCn: RBXScriptConnection? = nil
 
 	local function findEditorMarker(): IntValue?
-		local marker = workspace:FindFirstChild(kLastEditorValueName)
+		local marker = ServerStorage:FindFirstChild(kLastEditorValueName)
 		return if marker and marker:IsA("IntValue") then marker else nil
 	end
 
@@ -383,7 +385,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			newMarker.Name = kLastEditorValueName
 			newMarker.Archivable = false
 			newMarker.Value = mLocalUserId
-			newMarker.Parent = workspace
+			newMarker.Parent = ServerStorage
 		elseif marker.Value ~= mLocalUserId then
 			marker.Value = mLocalUserId
 		end
@@ -420,7 +422,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	if mExistingMarker then
 		watchEditorMarker(mExistingMarker)
 	end
-	local markerAddedCn = workspace.ChildAdded:Connect(function(child)
+	local markerAddedCn = ServerStorage.ChildAdded:Connect(function(child)
 		if child.Name == kLastEditorValueName and child:IsA("IntValue") then
 			watchEditorMarker(child)
 			if child.Value ~= mLocalUserId then

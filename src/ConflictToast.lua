@@ -49,7 +49,7 @@ local function ConflictToast(props: {
 			Position = UDim2.new(0.5, 0, 1, 80),
 			Size = UDim2.fromOffset(kToastWidth, 0),
 			AutomaticSize = Enum.AutomaticSize.Y,
-			BackgroundColor3 = Colors.GREY,
+			BackgroundColor3 = Colors.BLACK,
 			BorderSizePixel = 0,
 		}, {
 			Corner = e("UICorner", {
@@ -71,9 +71,10 @@ local function ConflictToast(props: {
 				Size = UDim2.new(1, 0, 0, 0),
 				AutomaticSize = Enum.AutomaticSize.Y,
 				RichText = true,
-				Text = "<b>PolyMap:</b> Another user is editing this place. Your discovered geometry"
-					.. " may be out of date with their changes.<br />Reopen the plugin — or turn on"
-					.. " <b>Multiuser support</b> in Settings — to work from fresh data.",
+				Text = "<b>PolyMap:</b> Another user just edited this place with PolyMap. If you both"
+					.. " edit the same polygons this may lead to poor results.<br />Reopen to refresh"
+					.. " the data or turn on Multiuser Support in the Settings to automatically avoid"
+					.. " conflicts at the cost of ~30% worse performance.",
 				TextColor3 = Colors.WHITE,
 				TextWrapped = true,
 				TextXAlignment = Enum.TextXAlignment.Left,

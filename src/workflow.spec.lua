@@ -7,6 +7,7 @@
 -- handleUndo / rediscoverMesh) that the mouse-driven editing relies on.
 
 local ChangeHistoryService = game:GetService("ChangeHistoryService")
+local ServerStorage = game:GetService("ServerStorage")
 local StudioService = game:GetService("StudioService")
 
 local TestTypes = require("./TestTypes")
@@ -3530,7 +3531,7 @@ return function(t: TestTypes.TestContext)
 	end
 
 	t.test("Team Create: edits stamp the last-editor marker, removed with the session", function()
-		local leftover = workspace:FindFirstChild(kMarkerName)
+		local leftover = ServerStorage:FindFirstChild(kMarkerName)
 		if leftover then
 			leftover:Destroy()
 		end
@@ -3538,7 +3539,7 @@ return function(t: TestTypes.TestContext)
 		withSession(function(session, mesh, settings)
 			paintOneTriangle(session, mesh, settings)
 
-			local marker = workspace:FindFirstChild(kMarkerName)
+			local marker = ServerStorage:FindFirstChild(kMarkerName)
 			t.expect(marker ~= nil).toBe(true)
 			t.expect((marker :: IntValue).Value).toBe(StudioService:GetUserId())
 			t.expect((marker :: IntValue).Archivable).toBe(false)
@@ -3546,11 +3547,11 @@ return function(t: TestTypes.TestContext)
 
 		-- We owned the marker, so closing the session removed it: no other user
 		-- should see a conflict warning for edits we're no longer sitting on.
-		t.expect(workspace:FindFirstChild(kMarkerName)).toBe(nil)
+		t.expect(ServerStorage:FindFirstChild(kMarkerName)).toBe(nil)
 	end)
 
 	t.test("Team Create: a foreign edit raises the conflict warning when multiuser is off", function()
-		local leftover = workspace:FindFirstChild(kMarkerName)
+		local leftover = ServerStorage:FindFirstChild(kMarkerName)
 		if leftover then
 			leftover:Destroy()
 		end
@@ -3562,7 +3563,7 @@ return function(t: TestTypes.TestContext)
 			t.expect(session.GetConflictWarning()).toBe(false)
 
 			-- Another user stamps the marker with their id.
-			local marker = workspace:FindFirstChild(kMarkerName) :: IntValue
+			local marker = ServerStorage:FindFirstChild(kMarkerName) :: IntValue
 			marker.Value = StudioService:GetUserId() + 1
 			settle()
 			t.expect(session.GetConflictWarning()).toBe(true)
@@ -3573,15 +3574,93 @@ return function(t: TestTypes.TestContext)
 
 		-- The marker was last stamped by the OTHER user; closing our session must
 		-- leave their marker alone.
-		local marker = workspace:FindFirstChild(kMarkerName)
+		local marker = ServerStorage:FindFirstChild(kMarkerName)
 		t.expect(marker ~= nil).toBe(true)
 		if marker then
 			marker:Destroy()
 		end
 	end)
 
+	t.test("Team Create: undo after another user's edit keeps both changes (multiuser on)", function()
+		withSession(function(session, mesh, settings)
+			settings.MultiuserSupport = true
+			session.Update()
+			local base = kRegionCenter
+			local t2 = buildTrianglePair(mesh)
+			settle()
+			settle()
+			-- Commit the built geometry as the undo baseline.
+			ChangeHistoryService:SetWaypoint("tc-undo-setup")
+
+			-- Our recorded edit: lift the first triangle's apex.
+			session.SelectVerticesNear({ base + Vector3.new(2, 0, 3) })
+			session.MoveSelectedVertices(Vector3.new(0, 1, 0))
+			t.expect(mesh.findVertexNear(base + Vector3.new(2, 1, 3), 0.1) ~= nil).toBe(true)
+			settle()
+			settle()
+
+			-- Another user moves the second triangle; watching flushes and re-discovers it.
+			local parts = table.clone(mesh.getTriangle(t2).parts)
+			for _, part in parts do
+				part.CFrame = part.CFrame + Vector3.new(0, 2, 0)
+			end
+			settle()
+			settle()
+			t.expect(mesh.findVertexNear(base + Vector3.new(2, 2, -3), 0.1) ~= nil).toBe(true)
+
+			-- Undo our move. In real Team Create the other user's edit lives in THEIR
+			-- change history; here the test's "other user" shares ours, so Studio also
+			-- reverts their move (it trails our waypoint). What this guards is the
+			-- interplay: the bounded restore reverts our region without a whole-mesh
+			-- rebuild, the revert of the foreign parts lands as one more external
+			-- change for the watcher to flush, and the mesh ends up matching the
+			-- world with no stale or duplicated geometry.
+			local before = session.GetRediscoverCount()
+			ChangeHistoryService:Undo()
+			settle()
+			settle()
+			t.expect(session.GetRediscoverCount()).toBe(before)
+			t.expect(mesh.findVertexNear(base + Vector3.new(2, 0, 3), 0.1) ~= nil).toBe(true)
+			t.expect(mesh.findVertexNear(base + Vector3.new(2, 1, 3), 0.1)).toBe(nil)
+			t.expect(mesh.findVertexNear(base + Vector3.new(2, 0, -3), 0.1) ~= nil).toBe(true)
+			t.expect(mesh.findVertexNear(base + Vector3.new(2, 2, -3), 0.1)).toBe(nil)
+			t.expect(countDict(mesh.getTriangles())).toBe(2)
+		end)
+	end)
+
+	t.test("Team Create: undo after another user's edit still restores our op (multiuser off)", function()
+		withSession(function(session, mesh, settings)
+			local base = kRegionCenter
+			local t2 = buildTrianglePair(mesh)
+			ChangeHistoryService:SetWaypoint("tc-undo-setup")
+
+			session.SelectVerticesNear({ base + Vector3.new(2, 0, 3) })
+			session.MoveSelectedVertices(Vector3.new(0, 1, 0))
+			t.expect(mesh.findVertexNear(base + Vector3.new(2, 1, 3), 0.1) ~= nil).toBe(true)
+
+			-- Another user moves the second triangle. With no watching, the mesh
+			-- keeps its stale picture of it (that's what the conflict toast is for).
+			local parts = table.clone(mesh.getTriangle(t2).parts)
+			for _, part in parts do
+				part.CFrame = part.CFrame + Vector3.new(0, 2, 0)
+			end
+			settle()
+			settle()
+			t.expect(mesh.findVertexNear(base + Vector3.new(2, 0, -3), 0.1) ~= nil).toBe(true)
+
+			-- Undo our move: the restore re-reads OUR region from the world and
+			-- must not error or disturb the (stale) picture of theirs.
+			ChangeHistoryService:Undo()
+			settle()
+			settle()
+			t.expect(mesh.findVertexNear(base + Vector3.new(2, 0, 3), 0.1) ~= nil).toBe(true)
+			t.expect(mesh.findVertexNear(base + Vector3.new(2, 1, 3), 0.1)).toBe(nil)
+			t.expect(mesh.findVertexNear(base + Vector3.new(2, 0, -3), 0.1) ~= nil).toBe(true)
+		end)
+	end)
+
 	t.test("Team Create: multiuser support on suppresses the conflict warning", function()
-		local leftover = workspace:FindFirstChild(kMarkerName)
+		local leftover = ServerStorage:FindFirstChild(kMarkerName)
 		if leftover then
 			leftover:Destroy()
 		end
@@ -3595,14 +3674,14 @@ return function(t: TestTypes.TestContext)
 			marker.Name = kMarkerName
 			marker.Archivable = false
 			marker.Value = StudioService:GetUserId() + 1
-			marker.Parent = workspace
+			marker.Parent = ServerStorage
 			settle()
 
 			-- Part watching keeps data fresh; no warning needed.
 			t.expect(session.GetConflictWarning()).toBe(false)
 		end)
 
-		local marker = workspace:FindFirstChild(kMarkerName)
+		local marker = ServerStorage:FindFirstChild(kMarkerName)
 		if marker then
 			marker:Destroy()
 		end
