@@ -7,6 +7,7 @@
 -- handleUndo / rediscoverMesh) that the mouse-driven editing relies on.
 
 local ChangeHistoryService = game:GetService("ChangeHistoryService")
+local StudioService = game:GetService("StudioService")
 
 local TestTypes = require("./TestTypes")
 local createPolyMapSession = require("./createPolyMapSession")
@@ -31,6 +32,7 @@ local function makeSettings(): Settings.PolyMapSettings
 		Mode = "Move",
 		ShowDiscoveredVertices = false,
 		DiscoveredVertexSize = 0.4,
+		MultiuserSupport = false,
 		DeleteTarget = "Face",
 		DeleteRadius = 0,
 		PaintRadius = 0,
@@ -3413,6 +3415,8 @@ return function(t: TestTypes.TestContext)
 
 	t.test("Team Create: an external part move flushes and re-discovers that part", function()
 		withSession(function(session, mesh, settings)
+			settings.MultiuserSupport = true
+			session.Update()
 			local base = kRegionCenter
 			local t2 = buildTrianglePair(mesh)
 			-- Let the adoption self-stamps expire: an external edit lands frames after
@@ -3440,6 +3444,8 @@ return function(t: TestTypes.TestContext)
 
 	t.test("Team Create: an external part delete drops its triangles", function()
 		withSession(function(session, mesh, settings)
+			settings.MultiuserSupport = true
+			session.Update()
 			local base = kRegionCenter
 			local t2 = buildTrianglePair(mesh)
 			t.expect(countDict(mesh.getTriangles())).toBe(2)
@@ -3462,6 +3468,8 @@ return function(t: TestTypes.TestContext)
 
 	t.test("Team Create: the plugin's own edits never read as external", function()
 		withSession(function(session, mesh, settings)
+			settings.MultiuserSupport = true
+			session.Update()
 			local base = kRegionCenter
 			buildTrianglePair(mesh)
 
@@ -3482,6 +3490,122 @@ return function(t: TestTypes.TestContext)
 			t.expect(stats.watchedParts > 0).toBe(true)
 			t.expect(stats.events > 0).toBe(true)
 		end)
+	end)
+
+	t.test("Team Create: with multiuser support off, external edits leave data stale", function()
+		withSession(function(session, mesh, settings)
+			-- Default settings: MultiuserSupport = false, so nothing is watched.
+			local base = kRegionCenter
+			local t2 = buildTrianglePair(mesh)
+			settle()
+			settle()
+
+			local parts = table.clone(mesh.getTriangle(t2).parts)
+			for _, part in parts do
+				part.CFrame = part.CFrame + Vector3.new(0, 2, 0)
+			end
+			settle()
+			settle()
+
+			-- No flush happened: the mesh still holds the pre-move (stale) picture.
+			local stats = mesh.debugGetWatchStats()
+			t.expect(stats.watchedParts).toBe(0)
+			t.expect(stats.externalParts).toBe(0)
+			t.expect(mesh.findVertexNear(base + Vector3.new(2, 0, -3), 0.1) ~= nil).toBe(true)
+		end)
+	end)
+
+	local kMarkerName = "PolyMapLastEditor"
+
+	-- An edit that goes through a real session edit path (Paint stamps ownership
+	-- via its pre-recording undo snapshot).
+	local function paintOneTriangle(session: any, mesh: any, settings: Settings.PolyMapSettings)
+		local base = kRegionCenter
+		mesh.addTriangle(
+			base, base + Vector3.new(4, 0, 0), base + Vector3.new(2, 0, 3),
+			1, workspace.Terrain, nil, base + Vector3.new(2, 6, 0)
+		)
+		settings.Mode = "Paint"
+		session.PaintAt(base + Vector3.new(2, 0, 1))
+	end
+
+	t.test("Team Create: edits stamp the last-editor marker, removed with the session", function()
+		local leftover = workspace:FindFirstChild(kMarkerName)
+		if leftover then
+			leftover:Destroy()
+		end
+
+		withSession(function(session, mesh, settings)
+			paintOneTriangle(session, mesh, settings)
+
+			local marker = workspace:FindFirstChild(kMarkerName)
+			t.expect(marker ~= nil).toBe(true)
+			t.expect((marker :: IntValue).Value).toBe(StudioService:GetUserId())
+			t.expect((marker :: IntValue).Archivable).toBe(false)
+		end)
+
+		-- We owned the marker, so closing the session removed it: no other user
+		-- should see a conflict warning for edits we're no longer sitting on.
+		t.expect(workspace:FindFirstChild(kMarkerName)).toBe(nil)
+	end)
+
+	t.test("Team Create: a foreign edit raises the conflict warning when multiuser is off", function()
+		local leftover = workspace:FindFirstChild(kMarkerName)
+		if leftover then
+			leftover:Destroy()
+		end
+
+		withSession(function(session, mesh, settings)
+			paintOneTriangle(session, mesh, settings)
+			settle()
+			-- Our own edit doesn't warn.
+			t.expect(session.GetConflictWarning()).toBe(false)
+
+			-- Another user stamps the marker with their id.
+			local marker = workspace:FindFirstChild(kMarkerName) :: IntValue
+			marker.Value = StudioService:GetUserId() + 1
+			settle()
+			t.expect(session.GetConflictWarning()).toBe(true)
+
+			session.DismissConflictWarning()
+			t.expect(session.GetConflictWarning()).toBe(false)
+		end)
+
+		-- The marker was last stamped by the OTHER user; closing our session must
+		-- leave their marker alone.
+		local marker = workspace:FindFirstChild(kMarkerName)
+		t.expect(marker ~= nil).toBe(true)
+		if marker then
+			marker:Destroy()
+		end
+	end)
+
+	t.test("Team Create: multiuser support on suppresses the conflict warning", function()
+		local leftover = workspace:FindFirstChild(kMarkerName)
+		if leftover then
+			leftover:Destroy()
+		end
+
+		withSession(function(session, mesh, settings)
+			settings.MultiuserSupport = true
+			session.Update()
+
+			-- Another user's first edit creates the marker with their id.
+			local marker = Instance.new("IntValue")
+			marker.Name = kMarkerName
+			marker.Archivable = false
+			marker.Value = StudioService:GetUserId() + 1
+			marker.Parent = workspace
+			settle()
+
+			-- Part watching keeps data fresh; no warning needed.
+			t.expect(session.GetConflictWarning()).toBe(false)
+		end)
+
+		local marker = workspace:FindFirstChild(kMarkerName)
+		if marker then
+			marker:Destroy()
+		end
 	end)
 
 end

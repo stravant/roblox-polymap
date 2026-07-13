@@ -7,6 +7,7 @@ local Packages = Plugin.Packages
 local React = require(Packages.React)
 local ReactRoblox = require(Packages.ReactRoblox)
 
+local ConflictToast = require("./ConflictToast")
 local PolyMapGui = require("./PolyMapGui")
 local Settings = require("./Settings")
 local TestTypes = require("./TestTypes")
@@ -26,6 +27,7 @@ local function makeSettings(mode: string): Settings.PolyMapSettings
 		Mode = mode,
 		ShowDiscoveredVertices = false,
 		DiscoveredVertexSize = 0.4,
+		MultiuserSupport = false,
 		DeleteTarget = "Face",
 		DeleteRadius = 0,
 		PaintRadius = 0,
@@ -95,4 +97,38 @@ return function(t: TestTypes.TestContext)
 			t.expect(ok).toBe(true)
 		end)
 	end
+
+	t.test("conflict toast mounts into CoreGui and unmounts cleanly", function()
+		local screen = Instance.new("ScreenGui")
+		screen.Name = "$PolyMapToastTest"
+		screen.Parent = CoreGui
+
+		local root = ReactRoblox.createRoot(screen)
+		local ok, err = pcall(function()
+			ReactRoblox.act(function()
+				root:render(e(ConflictToast, {
+					OnDismiss = function() end,
+				}))
+			end)
+
+			-- The toast portals into its own ScreenGui over the viewport, with the
+			-- message and dismiss affordance present.
+			local toastGui = CoreGui:FindFirstChild("PolyMapConflictToast")
+			t.expect(toastGui ~= nil).toBe(true)
+			local frame = (toastGui :: Instance):FindFirstChild("Toast")
+			t.expect(frame ~= nil).toBe(true)
+			t.expect((frame :: Instance):FindFirstChild("Message") ~= nil).toBe(true)
+			t.expect((frame :: Instance):FindFirstChild("DismissButton") ~= nil).toBe(true)
+		end)
+
+		ReactRoblox.act(function()
+			root:unmount()
+		end)
+		screen:Destroy()
+
+		if not ok then
+			error(err)
+		end
+		t.expect(CoreGui:FindFirstChild("PolyMapConflictToast")).toBe(nil)
+	end)
 end

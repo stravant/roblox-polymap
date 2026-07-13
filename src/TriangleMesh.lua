@@ -93,6 +93,7 @@ export type TriangleMesh = {
 	-- External-change watching (Team Create staleness)
 	PartsExternallyChanged: typeof(Signal.new()),
 	markPartsEdited: (parts: { BasePart }) -> (),
+	setWatchEnabled: (enabled: boolean) -> (),
 	debugGetWatchStats: () -> WatchStats,
 	destroy: () -> (),
 }
@@ -353,6 +354,25 @@ local function createTriangleMesh(thicknessHint: number?, watchParts: boolean?):
 		table.clear(mPendingDisconnect)
 		mWatchStats.disconnects += mWatchStats.watchedParts
 		mWatchStats.watchedParts = 0
+	end
+
+	-- Turn part watching on or off mid-session (the Multiuser Support toggle).
+	-- Enabling attaches listeners to everything already tracked (stamped, so any
+	-- in-flight events of our own don't read as external); disabling drops them all.
+	local function setWatchEnabled(enabled: boolean)
+		if mWatchParts == enabled then
+			return
+		end
+		mWatchParts = enabled
+		if enabled then
+			for part in mPartToTriangles do
+				mSelfTouched[part] = mSweepFrame
+				watchPart(part)
+			end
+			scheduleSweep()
+		else
+			unwatchAllParts()
+		end
 	end
 
 	---------------------------------------------------------------------------
@@ -2939,6 +2959,7 @@ local function createTriangleMesh(thicknessHint: number?, watchParts: boolean?):
 		-- External-change watching (Team Create staleness)
 		PartsExternallyChanged = mPartsExternallyChanged,
 		markPartsEdited = markPartsEdited,
+		setWatchEnabled = setWatchEnabled,
 		debugGetWatchStats = function(): WatchStats
 			return table.clone(mWatchStats)
 		end,

@@ -19,6 +19,7 @@ local MaterialDropdown = require("./PluginGui/MaterialDropdown")
 local Checkbox = require("./PluginGui/Checkbox")
 local Settings = require("./Settings")
 local PluginGuiTypes = require("./PluginGui/Types")
+local ConflictToast = require("./ConflictToast")
 local MeshOverlay = require("./MeshOverlay")
 local createPolyMapSession = require("./createPolyMapSession")
 
@@ -1978,6 +1979,23 @@ local function SettingsPanel(props: {
 				HelpRichText = "Diameter of the discovered-vertex dots, in studs. They are a fixed world size, so distant ones look smaller.",
 			}),
 		}),
+		Multiuser = e(HelpGui.WithHelpIcon, {
+			LayoutOrder = 3,
+			Subject = e(Checkbox, {
+				Label = "Multiuser support (slow)",
+				Checked = props.Settings.MultiuserSupport,
+				Changed = function(checked: boolean)
+					props.Settings.MultiuserSupport = checked
+					props.UpdatedSettings()
+				end,
+			}),
+			Help = e(HelpGui.BasicTooltip, {
+				HelpRichText = "Watch every discovered part for edits made by other Team Create users, and refresh"
+					.. " PolyMap's data for parts they change.<br /><br />Costs some performance on every edit,"
+					.. " so leave it off when working alone. When off, PolyMap instead shows a warning if"
+					.. " another user edits while you work.",
+			}),
+		}),
 	})
 end
 
@@ -2207,6 +2225,9 @@ local function PolyMapGui(props: {
 				HandleAction = props.HandleAction,
 				LayoutOrder = nextOrder(),
 			}),
+			ConflictToast = (session and session.GetConflictWarning()) and e(ConflictToast, {
+				OnDismiss = session.DismissConflictWarning,
+			}) or nil,
 		}),
 	})
 end

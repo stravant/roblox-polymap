@@ -2,6 +2,7 @@
 
 local ChangeHistoryService = game:GetService("ChangeHistoryService")
 local Selection = game:GetService("Selection")
+local StudioService = game:GetService("StudioService")
 local UserInputService = game:GetService("UserInputService")
 
 local Packages = script.Parent.Parent.Packages
@@ -173,7 +174,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local session = {}
 	local changeSignal = Signal.new()
 
-	local mMesh = createTriangleMesh(currentSettings.Thickness)
+	-- Part watching (the flush-on-external-edit machinery) follows the Multiuser
+	-- Support setting: it is what keeps discovery fresh under Team Create, at a
+	-- per-edit cost, so it is opt-in.
+	local mMesh = createTriangleMesh(currentSettings.Thickness, currentSettings.MultiuserSupport)
 
 	-- Selection state
 	local mSelectedVertices: { [number]: boolean } = {}
@@ -348,11 +352,91 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 	end
 
+	----------------------------------------------------------------------
+	-- Last-editor marker (Team Create conflict detection)
+	----------------------------------------------------------------------
+	-- An Archivable=false IntValue in workspace holds the userId of whoever made
+	-- the most recent PolyMap edit: it replicates through Team Create but never
+	-- saves into the place file. Every edit stamps it with our id. Other users'
+	-- sessions watch it -- without Multiuser Support their discovered data can't
+	-- self-heal, so a foreign edit raises the conflict toast instead of silently
+	-- going stale. The owner removes the marker when their session closes, so a
+	-- user who no longer even has the plugin open doesn't leave edits flagged.
+	local kLastEditorValueName = "PolyMapLastEditor"
+	local mLocalUserId = StudioService:GetUserId()
+	-- The warning shows once per session: the "may be in conflict" state it
+	-- describes persists until the user refreshes, so repeating it per edit
+	-- would only nag. Enabling Multiuser Support resets both flags.
+	local mConflictWarning = false
+	local mConflictSeen = false
+	local mMarkerValueCn: RBXScriptConnection? = nil
+
+	local function findEditorMarker(): IntValue?
+		local marker = workspace:FindFirstChild(kLastEditorValueName)
+		return if marker and marker:IsA("IntValue") then marker else nil
+	end
+
+	local function recordEditOwnership()
+		local marker = findEditorMarker()
+		if not marker then
+			local newMarker = Instance.new("IntValue")
+			newMarker.Name = kLastEditorValueName
+			newMarker.Archivable = false
+			newMarker.Value = mLocalUserId
+			newMarker.Parent = workspace
+		elseif marker.Value ~= mLocalUserId then
+			marker.Value = mLocalUserId
+		end
+	end
+
+	local function onForeignEdit()
+		if currentSettings.MultiuserSupport then
+			-- Part watching flushes the affected discovery; nothing goes stale.
+			return
+		end
+		if mConflictSeen then
+			return
+		end
+		mConflictSeen = true
+		mConflictWarning = true
+		changeSignal:Fire()
+	end
+
+	local function watchEditorMarker(marker: IntValue)
+		if mMarkerValueCn then
+			mMarkerValueCn:Disconnect()
+		end
+		mMarkerValueCn = marker:GetPropertyChangedSignal("Value"):Connect(function()
+			if marker.Value ~= mLocalUserId then
+				onForeignEdit()
+			end
+		end)
+	end
+
+	-- A marker that already exists at session start is NOT a conflict: the mesh
+	-- starts empty and discovers from the world as it stands now. Only edits made
+	-- during our session can invalidate what we've discovered.
+	local mExistingMarker = findEditorMarker()
+	if mExistingMarker then
+		watchEditorMarker(mExistingMarker)
+	end
+	local markerAddedCn = workspace.ChildAdded:Connect(function(child)
+		if child.Name == kLastEditorValueName and child:IsA("IntValue") then
+			watchEditorMarker(child)
+			if child.Value ~= mLocalUserId then
+				onForeignEdit()
+			end
+		end
+	end)
+
 	local function pushUndoSnapshot()
 		table.insert(mUndoSelections, captureSelectionPositions())
 		table.insert(mUndoDeltas, false)
 		mRedoSelections = {}
 		mRedoDeltas = {}
+		-- Every edit path snapshots before starting its ChangeHistory recording, so
+		-- this stamps ownership outside the recording (undo must not revert it).
+		recordEditOwnership()
 	end
 
 	-- Run a one-shot mesh edit inside a ChangeHistory recording. The pre-op
@@ -375,6 +459,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			else
 				ChangeHistoryService:SetWaypoint(name)
 			end
+			-- After the recording, so undo doesn't revert the ownership stamp.
+			recordEditOwnership()
 		elseif recording then
 			ChangeHistoryService:FinishRecording(recording, Enum.FinishRecordingOperation.Cancel)
 		end
@@ -3223,6 +3309,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		mHoverVertexId = nil
 		mHoverEdgeKey = nil
 		Selection:Set({})
+		recordEditOwnership() -- an undo changes the world like any other edit
 		changeSignal:Fire()
 	end
 
@@ -3252,6 +3339,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		mHoverVertexId = nil
 		mHoverEdgeKey = nil
 		Selection:Set({})
+		recordEditOwnership() -- a redo changes the world like any other edit
 		changeSignal:Fire()
 	end
 
@@ -3267,6 +3355,17 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		undoCn:Disconnect()
 		redoCn:Disconnect()
 		externalChangesCn:Disconnect()
+		markerAddedCn:Disconnect()
+		if mMarkerValueCn then
+			mMarkerValueCn:Disconnect()
+		end
+		-- Remove the last-editor marker if we own it: with our session closed there
+		-- is no PolyMap data left to conflict with, and leaving it would flag our
+		-- past edits to other users indefinitely.
+		local marker = findEditorMarker()
+		if marker and marker.Value == mLocalUserId then
+			marker:Destroy()
+		end
 		mMesh.destroy()
 		if inputBeganCn then
 			inputBeganCn:Disconnect()
@@ -3284,12 +3383,38 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	----------------------------------------------------------------------
 
 	session.ChangeSignal = changeSignal
+	local mLastMultiuserSetting = currentSettings.MultiuserSupport
 	session.Update = function()
 		fixedSelection.SelectionChanged:Fire()
 		mMesh.setThicknessHint(currentSettings.Thickness)
+		if currentSettings.MultiuserSupport ~= mLastMultiuserSetting then
+			mLastMultiuserSetting = currentSettings.MultiuserSupport
+			mMesh.setWatchEnabled(currentSettings.MultiuserSupport)
+			if currentSettings.MultiuserSupport then
+				-- Discovery may already be stale from other users' edits; rebuild from
+				-- the current world so "enable the setting to get fresh data" holds.
+				-- Also re-arm the conflict warning for a later toggle back off.
+				rediscoverMesh()
+				mConflictWarning = false
+				mConflictSeen = false
+				changeSignal:Fire()
+			end
+		end
 	end
 	session.Destroy = function()
 		teardown()
+	end
+
+	-- Conflict warning (the "data may be stale" toast): raised by a foreign edit
+	-- of the last-editor marker while Multiuser Support is off.
+	session.GetConflictWarning = function(): boolean
+		return mConflictWarning
+	end
+	session.DismissConflictWarning = function()
+		if mConflictWarning then
+			mConflictWarning = false
+			changeSignal:Fire()
+		end
 	end
 
 	-- Accessors for UI/overlay
