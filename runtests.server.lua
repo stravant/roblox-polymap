@@ -29,6 +29,7 @@ type TestContext = {
 	expect: (value: any) -> ExpectResult,
 	fail: (message: string) -> (),
 	screenshot: (name: string?) -> (),
+	log: (message: string) -> (),
 }
 
 local function deepEqual(a: any, b: any): boolean
@@ -161,6 +162,11 @@ local function runTests(ws: WebSocketClient, filter: string)
 			end,
 			screenshot = function(name: string?)
 				takeScreenshot(ws, name)
+			end,
+			-- Forward a line to the test runner's terminal output (print() only reaches
+			-- the Studio console, which the runner doesn't read).
+			log = function(message: string)
+				sendJson(ws, { type = "output", message = message })
 			end,
 			plugin = plugin,
 		}

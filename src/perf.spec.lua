@@ -15,6 +15,7 @@
 
 local TestTypes = require("./TestTypes")
 local createPolyMapSession = require("./createPolyMapSession")
+local createTriangleMesh = require("./TriangleMesh")
 local Settings = require("./Settings")
 
 local kCameraEye = Vector3.new(7000, 30, 60)
@@ -246,6 +247,146 @@ return function(t: TestTypes.TestContext)
 
 		session.Destroy()
 		ChangeHistoryService:ResetWaypoints()
+		sweepRegion()
+		if cam and savedCF then
+			cam.CFrame = savedCF
+		end
+		if not ok then
+			error(err)
+		end
+	end)
+
+	-- A/B analysis of the part-watching (Team Create staleness) overhead: build one
+	-- large mesh's worth of parts, then discover and bulk-drag them through a raw
+	-- TriangleMesh with watching off vs on, printing where the time goes. The
+	-- assertions are deliberately loose (this is an analysis harness first, a
+	-- regression tripwire second).
+	t.test("part watching: connection and self-filter overhead stays modest", function()
+		local cam = workspace.CurrentCamera
+		local savedCF = if cam then cam.CFrame else nil
+		if cam then
+			cam.CFrame = CFrame.lookAt(kCameraEye, kCameraTarget)
+		end
+		sweepRegion()
+
+		-- 32x32 grid ~= 2048 triangles / ~2-4k wedge parts.
+		local settings = makeSettings(32, 32)
+		local session = createPolyMapSession(t.plugin, settings)
+		local buildMesh = session.GetMesh()
+		local sessionDestroyed = false
+
+		local ok, err = pcall(function()
+			session.GenerateGrid()
+			local seeds: { Vector3 } = {}
+			for _, v in buildMesh.getVertices() do
+				table.insert(seeds, v.position)
+			end
+			buildMesh.discoverRegion(seeds, math.huge)
+			table.clear(seeds)
+			for _, v in buildMesh.getVertices() do
+				table.insert(seeds, v.position)
+			end
+			local expectTris = countDict(buildMesh.getTriangles())
+			t.expect(expectTris > 1500).toBeTruthy()
+			session.Destroy() -- the parts stay in the world
+			sessionDestroyed = true
+
+			local kDragFrames = 5
+			local function measure(watch: boolean)
+				local mem0 = gcinfo()
+				local mesh = createTriangleMesh(0.2, watch)
+				local t0 = os.clock()
+				mesh.discoverRegion(seeds, math.huge)
+				local discoverMs = (os.clock() - t0) * 1000
+				local memKb = gcinfo() - mem0
+				t.expect(countDict(mesh.getTriangles())).toBe(expectTris)
+
+				-- Whole-mesh drag: rebuilds every part in place each frame (the worst
+				-- realistic stress for the self-touch stamping and event volume).
+				t0 = os.clock()
+				for _ = 1, kDragFrames do
+					local moves: { [number]: Vector3 } = {}
+					for vid, v in mesh.getVertices() do
+						moves[vid] = v.position + Vector3.new(0, 0.05, 0)
+					end
+					mesh.moveVertices(moves, 0.2, nil)
+				end
+				local dragMs = (os.clock() - t0) / kDragFrames * 1000
+
+				-- The timed loop never yields, so (with deferred signals) every Changed
+				-- event it queued delivers during the frames right after it. Timing
+				-- those frames captures the event-delivery cost the loop timing can't.
+				t0 = os.clock()
+				task.wait()
+				task.wait()
+				local settleMs = (os.clock() - t0) * 1000
+
+				local stats = mesh.debugGetWatchStats()
+
+				-- Put the mesh back where it started: the next measurement discovers
+				-- from the same seed positions, which must still be part corners.
+				local restore: { [number]: Vector3 } = {}
+				for vid, v in mesh.getVertices() do
+					restore[vid] = v.position - Vector3.new(0, 0.05 * kDragFrames, 0)
+				end
+				mesh.moveVertices(restore, 0.2, nil)
+
+				mesh.clear()
+				task.wait() -- let the final sweep run before the next measurement
+				return {
+					discoverMs = discoverMs,
+					dragMs = dragMs,
+					settleMs = settleMs,
+					memKb = memKb,
+					stats = stats,
+				}
+			end
+
+			local off = measure(false)
+			local on = measure(true)
+
+			local okSb, signalBehavior = pcall(function()
+				return tostring((workspace :: any).SignalBehavior)
+			end)
+			t.log(string.format(
+				"[PartWatch perf] SignalBehavior=%s, %d triangles, %d watched parts",
+				if okSb then signalBehavior else "unknown", expectTris, on.stats.watchedParts
+			))
+			t.log(string.format(
+				"[PartWatch perf] discover: off=%.1fms on=%.1fms (+%.1fms, %.2fus/part connect)",
+				off.discoverMs, on.discoverMs, on.discoverMs - off.discoverMs,
+				(on.discoverMs - off.discoverMs) * 1000 / math.max(1, on.stats.connects)
+			))
+			t.log(string.format(
+				"[PartWatch perf] whole-mesh drag frame: off=%.1fms on=%.1fms (+%.1fms)",
+				off.dragMs, on.dragMs, on.dragMs - off.dragMs
+			))
+			t.log(string.format(
+				"[PartWatch perf] post-drag settle: off=%.1fms on=%.1fms; events=%d selfDropped=%d external=%d",
+				off.settleMs, on.settleMs, on.stats.events, on.stats.selfDropped, on.stats.externalParts
+			))
+			t.log(string.format(
+				"[PartWatch perf] discovery memory: off=%dKB on=%dKB (+%dKB, ~%dB/part; rough, GC noise)",
+				off.memKb, on.memKb, on.memKb - off.memKb,
+				math.floor((on.memKb - off.memKb) * 1024 / math.max(1, on.stats.watchedParts))
+			))
+
+			-- Watching disabled must be entirely inert.
+			t.expect(off.stats.connects).toBe(0)
+			t.expect(off.stats.events).toBe(0)
+			-- Every part of the discovered mesh is being watched, and none of our own
+			-- edits leaked through as an external change.
+			t.expect(on.stats.watchedParts > 1500).toBeTruthy()
+			t.expect(on.stats.externalParts).toBe(0)
+			-- Loose regression bounds: connecting shouldn't dominate discovery, and
+			-- stamping shouldn't dominate a drag frame.
+			t.expect(on.discoverMs < off.discoverMs * 3 + 500).toBeTruthy()
+			t.expect(on.dragMs < off.dragMs * 2 + 150).toBeTruthy()
+		end)
+
+		if not sessionDestroyed then
+			session.Destroy()
+		end
 		sweepRegion()
 		if cam and savedCF then
 			cam.CFrame = savedCF

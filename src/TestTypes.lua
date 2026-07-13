@@ -10,6 +10,7 @@ export type TestContext = {
 	expect: (value: any) -> ExpectResult,
 	fail: (message: string) -> (),
 	screenshot: (name: string?) -> (),
+	log: (message: string) -> (),
 	plugin: Plugin,
 }
 

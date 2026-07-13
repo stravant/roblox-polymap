@@ -19,6 +19,7 @@ local Settings = require("./Settings")
 local createTriangleMesh = require("./TriangleMesh")
 local fillTriangle = require("./fillTriangle")
 local generateGrid = require("./generateGrid")
+local getWedgeVertices = require("./getWedgeVertices")
 local importHeightmap = require("./importHeightmap")
 
 local kSpherecastRadius = 2
@@ -1780,6 +1781,53 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return reach
 	end
 
+	-- Something other than this plugin (another Team Create user, another plugin, a
+	-- manual property edit) changed discovered parts, so their cached triangles are
+	-- stale. Forget those triangles (keeping the parts in the world) and re-discover
+	-- from both the remembered corner positions and each part's current location, so
+	-- the mesh matches the world again whether the part was moved, recolored, resized,
+	-- or deleted.
+	local function handleExternalPartChanges(parts: { BasePart })
+		local seeds: { Vector3 } = {}
+		local radius = 0
+		local affected: { [number]: boolean } = {}
+		for _, part in parts do
+			for _, tid in mMesh.getPartTriangles(part) do
+				affected[tid] = true
+			end
+			if part:IsDescendantOf(workspace) then
+				-- Seed a moved wedge at its view-side CORNERS, not its center: discovery
+				-- adopts a fresh part reliably only from a genuine corner, and a center
+				-- seed sits equidistant from the front and back faces, letting workspace
+				-- query ordering decide which face gets adopted (a thickness-offset mesh).
+				local isWedge = part:IsA("WedgePart")
+					or (part:IsA("Part") and (part :: Part).Shape == Enum.PartType.Wedge)
+				if isWedge then
+					local hint = cameraViewPoint() or (part.Position + Vector3.yAxis * part.Size.Magnitude)
+					local c1, c2, c3 = getWedgeVertices(part, hint)
+					table.insert(seeds, c1)
+					table.insert(seeds, c2)
+					table.insert(seeds, c3)
+				else
+					table.insert(seeds, part.Position)
+				end
+				radius = math.max(radius, part.Size.Magnitude)
+			end
+		end
+		-- Collect corners before removal (removeTriangle drops the vertices).
+		for tid in affected do
+			radius = math.max(radius, collectTriangleCorners(tid, seeds))
+		end
+		for tid in affected do
+			mMesh.removeTriangle(tid, true)
+		end
+		if #seeds > 0 then
+			discoverRegionViewed(seeds, radius + 5)
+		end
+		changeSignal:Fire()
+	end
+	local externalChangesCn = mMesh.PartsExternallyChanged:Connect(handleExternalPartChanges)
+
 	-- Record a triangle's corners (and its own span) for the Delete undo delta, just before
 	-- it is removed. Called per removed triangle so the accumulated seeds cover exactly the
 	-- swept region while the radius stays local to a single triangle.
@@ -1935,6 +1983,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			local paintTarget = currentSettings.PaintTarget
 			local doColor = paintTarget ~= "Material"
 			local doMaterial = paintTarget ~= "Color"
+			mMesh.markPartsEdited(partsToPaint)
 			for _, part in partsToPaint do
 				if doColor then
 					if paintStrength >= 1.0 then
@@ -3217,6 +3266,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		inputChangedCn:Disconnect()
 		undoCn:Disconnect()
 		redoCn:Disconnect()
+		externalChangesCn:Disconnect()
+		mMesh.destroy()
 		if inputBeganCn then
 			inputBeganCn:Disconnect()
 		end
@@ -4018,6 +4069,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local paintTarget = currentSettings.PaintTarget
 		local doColor = paintTarget ~= "Material"
 		local doMaterial = paintTarget ~= "Color"
+		mMesh.markPartsEdited(partsToPaint)
 		for _, part in partsToPaint do
 			if doColor then
 				if paintStrength >= 1.0 then

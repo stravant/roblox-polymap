@@ -1,5 +1,7 @@
 --!strict
 
+local RunService = game:GetService("RunService")
+
 local fillTriangle = require("./fillTriangle")
 
 local Plugin = script.Parent.Parent
@@ -87,6 +89,21 @@ export type TriangleMesh = {
 	getPartTriangles: (part: BasePart) -> { TriangleId },
 	clear: () -> (),
 	notifyVerticesChanged: (ids: { number }) -> (),
+
+	-- External-change watching (Team Create staleness)
+	PartsExternallyChanged: typeof(Signal.new()),
+	markPartsEdited: (parts: { BasePart }) -> (),
+	debugGetWatchStats: () -> WatchStats,
+	destroy: () -> (),
+}
+
+export type WatchStats = {
+	watchedParts: number,
+	connects: number,
+	disconnects: number,
+	events: number,
+	selfDropped: number,
+	externalParts: number,
 }
 
 -- Distance under which two positions are treated as the same vertex. Must stay
@@ -140,8 +157,14 @@ local function isBlockPart(part: BasePart): boolean
 	return part:IsA("Part") and (part :: Part).Shape == Enum.PartType.Block
 end
 
-local function createTriangleMesh(thicknessHint: number?): TriangleMesh
+-- watchParts (default true) connects a Changed listener to every part the mesh tracks,
+-- so edits made by something OTHER than this plugin (another Team Create user, another
+-- plugin, a manual property edit) can flush that part's stale discovery. Pass false to
+-- measure the overhead of that watching, or for throwaway meshes that never live long
+-- enough for external edits to matter.
+local function createTriangleMesh(thicknessHint: number?, watchParts: boolean?): TriangleMesh
 	thicknessHint = thicknessHint or 1.0
+	local mWatchParts = watchParts ~= false
 
 	local mTriangles = {} :: {[TriangleId]: Triangle}
 	local mVertices = {} :: {[VertexId]: Vertex}
@@ -203,6 +226,134 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 	local mNextVertexId = 1
 	local mNextTriangleId = 1
 	local mNextEdgeId = 1
+
+	---------------------------------------------------------------------------
+	-- External-change watching (Team Create staleness)
+	---------------------------------------------------------------------------
+	-- Every tracked part gets one part.Changed connection. The plugin's OWN writes fire
+	-- that same signal, so parts the mesh is about to mutate are stamped in mSelfTouched
+	-- and the handler drops their events; anything unstamped is an external edit (another
+	-- Team Create user, another plugin, a manual property edit) and is queued for a
+	-- once-per-Heartbeat batch that fires PartsExternallyChanged so the session can
+	-- flush that part's discovery.
+	--
+	-- Stamps expire after two sweep frames: long enough to outlive the same frame's
+	-- deferred Changed events (and immediate ones, which run synchronously inside the
+	-- write), short enough that a later genuine external edit still gets through. The
+	-- cost of the window: an external edit landing within ~2 frames of our own edit to
+	-- the SAME part is treated as ours -- with two users editing the same part in the
+	-- same instant, discovery is stale either way until one of them touches it again.
+	--
+	-- Disconnects are deferred to the sweep instead of happening inside
+	-- unlinkTriangleFromPart: a drag rebuilds triangles every frame via
+	-- relink (unlink + link of the SAME part), and eagerly disconnecting would
+	-- reconnect every part's listener every frame.
+	local mPartConnections = {} :: { [BasePart]: RBXScriptConnection }
+	local mSelfTouched = {} :: { [BasePart]: number }
+	local mPendingExternal = {} :: { [BasePart]: boolean }
+	local mPendingDisconnect = {} :: { [BasePart]: boolean }
+	local mSweepFrame = 0
+	local mSweepScheduled = false
+	local mPartsExternallyChanged = Signal.new()
+	local mWatchStats: WatchStats = {
+		watchedParts = 0,
+		connects = 0,
+		disconnects = 0,
+		events = 0,
+		selfDropped = 0,
+		externalParts = 0,
+	}
+
+	local scheduleSweep: () -> ()
+
+	local function watchSweep()
+		mSweepScheduled = false
+		mSweepFrame += 1
+		for part in mPendingDisconnect do
+			if not mPartToTriangles[part] then
+				local cn = mPartConnections[part]
+				if cn then
+					cn:Disconnect()
+					mPartConnections[part] = nil
+					mWatchStats.watchedParts -= 1
+					mWatchStats.disconnects += 1
+				end
+			end
+		end
+		table.clear(mPendingDisconnect)
+		for part, stamp in mSelfTouched do
+			if mSweepFrame - stamp >= 2 then
+				mSelfTouched[part] = nil
+			end
+		end
+		local external: { BasePart } = {}
+		for part in mPendingExternal do
+			-- A part that got untracked (or re-touched by us) since its event was queued
+			-- is no longer stale from the mesh's point of view.
+			if mPartToTriangles[part] and not mSelfTouched[part] then
+				table.insert(external, part)
+			end
+		end
+		table.clear(mPendingExternal)
+		-- Keep sweeping while stamps remain so they eventually expire, even when the
+		-- mesh goes quiet. Idle meshes have no stamps and schedule nothing.
+		if next(mSelfTouched) ~= nil then
+			scheduleSweep()
+		end
+		if #external > 0 then
+			mWatchStats.externalParts += #external
+			mPartsExternallyChanged:Fire(external)
+		end
+	end
+
+	scheduleSweep = function()
+		if not mSweepScheduled then
+			mSweepScheduled = true
+			RunService.Heartbeat:Once(watchSweep)
+		end
+	end
+
+	-- Stamp parts the mesh (or the session, e.g. Paint) is about to write to, so their
+	-- Changed events read as our own. Must be called BEFORE the writes: with immediate
+	-- signal behavior the handler runs inside the write itself.
+	local function markPartsEdited(parts: { BasePart })
+		if not mWatchParts then
+			return
+		end
+		for _, part in parts do
+			mSelfTouched[part] = mSweepFrame
+		end
+		scheduleSweep()
+	end
+
+	local function watchPart(part: BasePart)
+		if not mWatchParts or mPartConnections[part] then
+			return
+		end
+		mWatchStats.watchedParts += 1
+		mWatchStats.connects += 1
+		mPartConnections[part] = part.Changed:Connect(function()
+			mWatchStats.events += 1
+			if mSelfTouched[part] then
+				mWatchStats.selfDropped += 1
+				return
+			end
+			mPendingExternal[part] = true
+			scheduleSweep()
+		end)
+	end
+
+	local function unwatchAllParts()
+		for _, cn in mPartConnections do
+			cn:Disconnect()
+		end
+		table.clear(mPartConnections)
+		table.clear(mSelfTouched)
+		table.clear(mPendingExternal)
+		table.clear(mPendingDisconnect)
+		mWatchStats.disconnects += mWatchStats.watchedParts
+		mWatchStats.watchedParts = 0
+	end
 
 	---------------------------------------------------------------------------
 	-- Internal helpers
@@ -333,6 +484,16 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			head.prev = tri
 		end
 		mPartToTriangles[part] = tri.id
+		if mWatchParts and not headId then
+			-- Newly tracked. Adoption is our own doing, so stamp the part and drop any
+			-- event already queued for it: after an undo, ChangeHistory's property
+			-- reverts fire Changed BEFORE the undo handler re-discovers the region and
+			-- re-adopts these same parts, and those events must not read as external.
+			mSelfTouched[part] = mSweepFrame
+			mPendingExternal[part] = nil
+			watchPart(part)
+			scheduleSweep()
+		end
 	end
 
 	-- Unlink a triangle from the per-part linked list
@@ -352,6 +513,10 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		end
 		tri.prev = nil
 		tri.next = nil
+		if mWatchParts and not mPartToTriangles[part] then
+			mPendingDisconnect[part] = true
+			scheduleSweep()
+		end
 	end
 
 	-- Reassign a triangle's parts, keeping mPartToTriangles in sync: unlink the
@@ -460,7 +625,9 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			end
 		end
 
-		-- Remove the block
+		-- Remove the block (our own edit: the block's Changed listener may still be
+		-- live until the deferred-disconnect sweep runs)
+		markPartsEdited({ block })
 		block.Parent = nil
 	end
 
@@ -744,6 +911,9 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 			unlinkTriangleFromPart(tri, part)
 			-- Only parent-out if no other triangles reference this part
 			if not keepParts and not mPartToTriangles[part] then
+				-- Our own edit: the part's Changed listener stays live until the
+				-- deferred-disconnect sweep runs.
+				markPartsEdited({ part })
 				part.Parent = nil
 			end
 		end
@@ -807,6 +977,9 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		-- Rebuild parts in-place at THIS triangle's own thickness (recorded at
 		-- discovery / creation) rather than snapping to the global value, so editing a
 		-- vertex regenerates parts as thick as they already were.
+		-- fillTriangle writes Size/CFrame to the reused parts (and parents-out any
+		-- excess one), so stamp them as our own edit first.
+		markPartsEdited(tri.parts)
 		local parent = tri.parts[1].Parent
 		local newParts = fillTriangle(
 			v1.position, v2.position, v3.position,
@@ -2697,6 +2870,7 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		table.clear(mSpatialHash)
 		table.clear(mEdgeLookup)
 		table.clear(mVertexEdges)
+		unwatchAllParts()
 		mNextVertexId = 1
 		mNextTriangleId = 1
 		mNextEdgeId = 1
@@ -2761,6 +2935,17 @@ local function createTriangleMesh(thicknessHint: number?): TriangleMesh
 		getPartTriangles = getPartTriangles,
 		clear = clear,
 		notifyVerticesChanged = notifyVerticesChanged,
+
+		-- External-change watching (Team Create staleness)
+		PartsExternallyChanged = mPartsExternallyChanged,
+		markPartsEdited = markPartsEdited,
+		debugGetWatchStats = function(): WatchStats
+			return table.clone(mWatchStats)
+		end,
+		-- Drop all part listeners. Call when the session owning the mesh goes away;
+		-- the mesh is unusable for watching afterwards (tracked parts stay tracked
+		-- but external edits to them go unseen).
+		destroy = unwatchAllParts,
 	} :: TriangleMesh
 end
 

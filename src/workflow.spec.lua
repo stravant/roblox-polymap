@@ -3395,4 +3395,93 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	-- Two triangles sharing the A-B edge, one apex forward, one back. Returns the
+	-- second triangle's id, for the Team Create external-change tests.
+	local function buildTrianglePair(mesh: any): number
+		local base = kRegionCenter
+		local hint = base + Vector3.new(2, 6, 0)
+		mesh.addTriangle(
+			base, base + Vector3.new(4, 0, 0), base + Vector3.new(2, 0, 3),
+			1, workspace.Terrain, nil, hint
+		)
+		local t2 = mesh.addTriangle(
+			base, base + Vector3.new(4, 0, 0), base + Vector3.new(2, 0, -3),
+			1, workspace.Terrain, nil, hint
+		)
+		return t2
+	end
+
+	t.test("Team Create: an external part move flushes and re-discovers that part", function()
+		withSession(function(session, mesh, settings)
+			local base = kRegionCenter
+			local t2 = buildTrianglePair(mesh)
+			-- Let the adoption self-stamps expire: an external edit lands frames after
+			-- the plugin last touched the part, never in the same instant.
+			settle()
+			settle()
+
+			-- Simulate another user moving the second triangle's parts: raw property
+			-- writes, not routed through the plugin's own (self-stamped) edit paths.
+			local parts = table.clone(mesh.getTriangle(t2).parts)
+			for _, part in parts do
+				part.CFrame = part.CFrame + Vector3.new(0, 2, 0)
+			end
+			settle()
+			settle()
+
+			-- The moved triangle was flushed and re-discovered at its new position;
+			-- its stale apex vertex is gone, and the untouched triangle still stands.
+			t.expect(mesh.findVertexNear(base + Vector3.new(2, 2, -3), 0.1) ~= nil).toBe(true)
+			t.expect(mesh.findVertexNear(base + Vector3.new(2, 0, -3), 0.1)).toBe(nil)
+			t.expect(mesh.findVertexNear(base + Vector3.new(2, 0, 3), 0.1) ~= nil).toBe(true)
+			t.expect(mesh.debugGetWatchStats().externalParts > 0).toBe(true)
+		end)
+	end)
+
+	t.test("Team Create: an external part delete drops its triangles", function()
+		withSession(function(session, mesh, settings)
+			local base = kRegionCenter
+			local t2 = buildTrianglePair(mesh)
+			t.expect(countDict(mesh.getTriangles())).toBe(2)
+			-- Let the adoption self-stamps expire (see the external-move test).
+			settle()
+			settle()
+
+			local parts = table.clone(mesh.getTriangle(t2).parts)
+			for _, part in parts do
+				part.Parent = nil
+			end
+			settle()
+			settle()
+
+			t.expect(countDict(mesh.getTriangles())).toBe(1)
+			t.expect(mesh.findVertexNear(base + Vector3.new(2, 0, -3), 0.1)).toBe(nil)
+			t.expect(mesh.findVertexNear(base + Vector3.new(2, 0, 3), 0.1) ~= nil).toBe(true)
+		end)
+	end)
+
+	t.test("Team Create: the plugin's own edits never read as external", function()
+		withSession(function(session, mesh, settings)
+			local base = kRegionCenter
+			buildTrianglePair(mesh)
+
+			-- Drive the plugin's own part-writing paths: a vertex move (rebuilds parts
+			-- in place) and a paint (recolors parts).
+			local apex = mesh.findVertexNear(base + Vector3.new(2, 0, 3), 0.1)
+			t.expect(apex ~= nil).toBe(true)
+			mesh.moveVertices({ [apex :: number] = base + Vector3.new(2, 1, 3) }, 1, nil)
+			settings.Mode = "Paint"
+			session.PaintAt(base + Vector3.new(2, 0.5, -1))
+			settle()
+			settle()
+
+			local stats = mesh.debugGetWatchStats()
+			t.expect(stats.externalParts).toBe(0)
+			-- The listeners really are attached and firing; the self-edit stamps are
+			-- what kept the flush from running, not an absence of events.
+			t.expect(stats.watchedParts > 0).toBe(true)
+			t.expect(stats.events > 0).toBe(true)
+		end)
+	end)
+
 end
