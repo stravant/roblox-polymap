@@ -1991,7 +1991,7 @@ local function SettingsPanel(props: {
 			}),
 			Help = e(HelpGui.BasicTooltip, {
 				HelpRichText = "Watch every discovered part for edits made by other Team Create users, and refresh"
-					.. " PolyMap's data for parts they change.<br /><br />Costs some performance on every edit,"
+					.. " PolyMap's data for parts they change.<br /><br />Makes editing roughly 30% slower,"
 					.. " so leave it off when working alone. When off, PolyMap instead shows a warning if"
 					.. " another user edits while you work.",
 			}),

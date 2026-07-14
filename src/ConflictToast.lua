@@ -72,9 +72,9 @@ local function ConflictToast(props: {
 				AutomaticSize = Enum.AutomaticSize.Y,
 				RichText = true,
 				Text = "<b>PolyMap:</b> Another user just edited this place with PolyMap. If you both"
-					.. " edit the same polygons this may lead to poor results.<br />Reopen to refresh"
-					.. " the data or turn on Multiuser Support in the Settings to automatically avoid"
-					.. " conflicts at the cost of ~30% worse performance.",
+					.. " edit the same polygons this may lead to poor results.<br />Reopen PolyMap to"
+					.. " refresh the data or turn on <b>Multiuser Support</b> in the Settings to"
+					.. " automatically avoid conflicts at some perf cost.",
 				TextColor3 = Colors.WHITE,
 				TextWrapped = true,
 				TextXAlignment = Enum.TextXAlignment.Left,
