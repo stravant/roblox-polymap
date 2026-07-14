@@ -3720,6 +3720,9 @@ return function(t: TestTypes.TestContext)
 			t.expect(shellCount > 0).toBe(true)
 			for _, tri in mesh.getTriangles() do
 				t.expect(tri.normal.Y > 0).toBe(true)
+				-- The test mesh has no texture, so the converted triangles fall
+				-- back to the part's color.
+				t.expect(tri.parts[1].Color).toBe(meshPart.Color)
 			end
 			t.expect(meshPart.Parent).toBe(nil)
 

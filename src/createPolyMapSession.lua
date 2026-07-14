@@ -25,6 +25,7 @@ local fillTriangle = require("./fillTriangle")
 local generateGrid = require("./generateGrid")
 local getWedgeVertices = require("./getWedgeVertices")
 local importHeightmap = require("./importHeightmap")
+local meshFaceColors = require("./meshFaceColors")
 
 local kSpherecastRadius = 2
 
@@ -1240,13 +1241,23 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	-- positions into the part's object space: a MeshPart normalizes its mesh to
 	-- MeshSize and stretches it to Size, while a SpecialMesh applies its Scale and
 	-- Offset to the mesh's native coordinates directly.
-	local function meshSourceForPart(part: BasePart): { meshId: string, scale: Vector3, offset: Vector3 }?
+	local function meshSourceForPart(part: BasePart): { meshId: string, textureId: string, scale: Vector3, offset: Vector3 }?
 		if part:IsA("MeshPart") then
-			return { meshId = part.MeshId, scale = part.Size / part.MeshSize, offset = Vector3.zero }
+			return {
+				meshId = part.MeshId,
+				textureId = part.TextureID,
+				scale = part.Size / part.MeshSize,
+				offset = Vector3.zero,
+			}
 		end
 		local specialMesh = part:FindFirstChildOfClass("SpecialMesh")
 		if specialMesh and specialMesh.MeshType == Enum.MeshType.FileMesh then
-			return { meshId = specialMesh.MeshId, scale = specialMesh.Scale, offset = specialMesh.Offset }
+			return {
+				meshId = specialMesh.MeshId,
+				textureId = specialMesh.TextureId,
+				scale = specialMesh.Scale,
+				offset = specialMesh.Offset,
+			}
 		end
 		return nil
 	end
@@ -2682,6 +2693,22 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 		local editable = editableOrErr :: EditableMesh
 
+		-- When the mesh has a readable texture, sample each face's UV-mapped color
+		-- so the converted triangles carry the texture's look. An unreadable texture
+		-- (permission, size limits, no pixels) silently falls back to the part's
+		-- color -- the geometry still converts.
+		local faceColors: { [number]: Color3 }? = nil
+		if source.textureId ~= "" then
+			local okImage, image = pcall(function()
+				return AssetService:CreateEditableImageAsync(Content.fromUri(source.textureId))
+			end)
+			if okImage then
+				local editableImage = image :: EditableImage
+				faceColors = meshFaceColors(editable, editableImage)
+				editableImage:Destroy()
+			end
+		end
+
 		-- Gather world-space triangles: raw mesh positions mapped into the part's
 		-- object space (see meshSourceForPart), then transformed by its CFrame. The
 		-- outward normal comes from the face winding, computed on the WORLD positions
@@ -2690,7 +2717,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local offset = source.offset
 		local cf = meshPart.CFrame
 		local topShellOnly = currentSettings.ConvertTopShellOnly
-		local tris: { { p1: Vector3, p2: Vector3, p3: Vector3, hint: Vector3 } } = {}
+		local tris: { { p1: Vector3, p2: Vector3, p3: Vector3, hint: Vector3, color: Color3? } } = {}
 		for _, faceId in editable:GetFaces() do
 			local fv = editable:GetFaceVertices(faceId)
 			if #fv == 3 then
@@ -2702,7 +2729,13 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				if mag > 0.000001 then -- skip degenerate faces
 					if not topShellOnly or normal.Y / mag > kTopShellMinNormalY then
 						local centroid = (p1 + p2 + p3) / 3
-						table.insert(tris, { p1 = p1, p2 = p2, p3 = p3, hint = centroid + normal / mag })
+						table.insert(tris, {
+							p1 = p1,
+							p2 = p2,
+							p3 = p3,
+							hint = centroid + normal / mag,
+							color = if faceColors then faceColors[faceId] else nil,
+						})
 					end
 				end
 			end
@@ -2719,9 +2752,11 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			return
 		end
 
-		-- The converted triangles keep the part's appearance and land in a fresh
-		-- PolyMapMesh folder. Each face's hint point sits off its outward side so the
-		-- built wedges' thickness extends inward, matching the mesh surface.
+		-- The converted triangles keep the part's appearance -- with the sampled
+		-- texture color instead of the part color, per face, when available -- and
+		-- land in a fresh PolyMapMesh folder. Each face's hint point sits off its
+		-- outward side so the built wedges' thickness extends inward, matching the
+		-- mesh surface.
 		local props: fillTriangle.TriangleProps = {
 			Color = meshPart.Color,
 			Material = meshPart.Material,
@@ -2732,9 +2767,12 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			-- Resolved inside the recording so an undo removes the folder too.
 			local parent = resolveNewParent(nil)
 			for _, tri in tris do
+				local triProps: fillTriangle.TriangleProps = if tri.color
+					then { Color = tri.color, Material = props.Material, MaterialVariant = props.MaterialVariant }
+					else props
 				local id = mMesh.addTriangle(
 					tri.p1, tri.p2, tri.p3,
-					currentSettings.Thickness, parent, props, tri.hint
+					currentSettings.Thickness, parent, triProps, tri.hint
 				)
 				if id then
 					table.insert(createdIds, id)
