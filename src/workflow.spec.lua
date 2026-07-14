@@ -64,6 +64,7 @@ local function makeSettings(): Settings.PolyMapSettings
 		HealSameColor = false,
 		HealSameMaterial = false,
 		ConvertTopShellOnly = true,
+		ConvertDeleteOriginal = true,
 		ImportImageId = "",
 		ImportWidth = 50,
 		ImportHeight = 50,
@@ -3705,33 +3706,44 @@ return function(t: TestTypes.TestContext)
 		withSession(function(session, mesh, settings)
 			settings.Mode = "Convert"
 			local meshPart = makeTestMeshPart()
+			-- Commit the MeshPart as the undo baseline (the live tool always converts
+			-- already-committed geometry), so undo can restore its parent.
+			ChangeHistoryService:SetWaypoint("convert-test-setup")
 
 			session.ConvertMeshPart(meshPart)
 			t.expect(session.GetErrorToast()).toBe(nil)
 
 			-- Top shell only (the default): some faces convert, and every one of
-			-- them faces at least somewhat upward.
+			-- them faces at least somewhat upward. Delete original (also the
+			-- default) removed the MeshPart along with the conversion.
 			local shellCount = countDict(mesh.getTriangles())
 			t.expect(shellCount > 0).toBe(true)
 			for _, tri in mesh.getTriangles() do
 				t.expect(tri.normal.Y > 0).toBe(true)
 			end
+			t.expect(meshPart.Parent).toBe(nil)
 
-			-- The conversion is one undoable op.
+			-- The conversion (including the original's removal) is one undoable op.
 			ChangeHistoryService:Undo()
 			settle()
 			t.expect(countDict(mesh.getTriangles())).toBe(0)
+			t.expect(meshPart.Parent).toBe(workspace)
 			ChangeHistoryService:Redo()
 			settle()
 			t.expect(countDict(mesh.getTriangles())).toBe(shellCount)
-
-			-- With the top-shell limit off, the whole mesh converts: strictly more
-			-- triangles (the sides and underside come along).
+			t.expect(meshPart.Parent).toBe(nil)
 			ChangeHistoryService:Undo()
 			settle()
+			t.expect(meshPart.Parent).toBe(workspace)
+
+			-- With the top-shell limit off, the whole mesh converts: strictly more
+			-- triangles (the sides and underside come along). Delete original off
+			-- keeps the MeshPart.
 			settings.ConvertTopShellOnly = false
+			settings.ConvertDeleteOriginal = false
 			session.ConvertMeshPart(meshPart)
 			t.expect(countDict(mesh.getTriangles()) > shellCount).toBe(true)
+			t.expect(meshPart.Parent).toBe(workspace)
 		end)
 	end)
 

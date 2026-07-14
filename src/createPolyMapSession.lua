@@ -2,6 +2,7 @@
 
 local AssetService = game:GetService("AssetService")
 local ChangeHistoryService = game:GetService("ChangeHistoryService")
+local CoreGui = game:GetService("CoreGui")
 local Selection = game:GetService("Selection")
 local ServerStorage = game:GetService("ServerStorage")
 local StudioService = game:GetService("StudioService")
@@ -1234,6 +1235,30 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 	end
 
+	-- Convert mode: outline the MeshPart a click would convert. One lazily-created
+	-- Highlight, re-adorned as the hover moves (matching the hover-outline blue).
+	local kConvertHoverColor = Color3.fromRGB(100, 150, 255)
+	local mConvertHighlight: Highlight? = nil
+	local function setConvertHoverPart(part: MeshPart?)
+		if part then
+			local highlight = mConvertHighlight
+			if not highlight then
+				highlight = Instance.new("Highlight")
+				highlight.Name = "$PolyMapConvertHover"
+				highlight.Archivable = false
+				highlight.FillTransparency = 1
+				highlight.OutlineColor = kConvertHoverColor
+				highlight.OutlineTransparency = 0
+				highlight.DepthMode = Enum.HighlightDepthMode.Occluded
+				highlight.Parent = CoreGui
+				mConvertHighlight = highlight
+			end
+			highlight.Adornee = part
+		elseif mConvertHighlight and mConvertHighlight.Adornee ~= nil then
+			mConvertHighlight.Adornee = nil
+		end
+	end
+
 	local function updateHover(screenPosOverride: Vector2?)
 		-- Leaving Add mode abandons any in-progress triangle (edge grab or fresh
 		-- points), so stale state doesn't reappear on returning to Add.
@@ -1249,6 +1274,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		-- Hide all hover feedback when the cursor is over the panel, mid-drag, or
 		-- over a Move/Rotate handle (the dragger hovers the handle, not the surface).
 		if mIsOverUI or mIsDraggingHandle or (queryMouseOverHandle ~= nil and queryMouseOverHandle()) then
+			setConvertHoverPart(nil)
 			if mHoverVertexId ~= nil or mHoverEdgeKey ~= nil or #mHoverTriangleIds > 0 or mAddHoverTarget ~= nil then
 				mHoverVertexId = nil
 				mHoverEdgeKey = nil
@@ -1261,6 +1287,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 		-- While placing a grid, the cursor only updates the placement preview.
 		if mGridPlacing then
+			setConvertHoverPart(nil)
 			updateGridPlaceHover()
 			return
 		end
@@ -1374,6 +1401,12 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				end
 			end
 		end
+
+		setConvertHoverPart(
+			if mode == "Convert" and result and result.Instance:IsA("MeshPart")
+				then result.Instance :: MeshPart
+				else nil
+		)
 
 		if mode == "Add" and not mAddBoundaryEdge then
 			-- Phase 1: highlight a boundary edge of geometry under the cursor. With no
@@ -2682,6 +2715,11 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 					table.insert(createdIds, id)
 				end
 			end
+			if #createdIds > 0 and currentSettings.ConvertDeleteOriginal then
+				-- Inside the recording so an undo brings the MeshPart back. Parent-out
+				-- rather than Destroy: a destroyed instance can't be reparented by undo.
+				meshPart.Parent = nil
+			end
 			return #createdIds > 0
 		end, function(): MoveDelta
 			return buildAddDelta(createdIds)
@@ -3283,6 +3321,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 
 			local picking = (currentSettings.Mode == "Paint" and currentSettings.PaintEyedropper ~= "None")
 				or mGridPlacing
+				or currentSettings.Mode == "Convert"
 			local wantIcon = if picking then kPickCursor else kArrowCursor
 			if wantIcon ~= mLastPickIcon then
 				mLastPickIcon = wantIcon
@@ -3480,6 +3519,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 		task.cancel(delayedBeginCn)
 		task.cancel(cursorTargetTask)
+		if mConvertHighlight then
+			mConvertHighlight:Destroy()
+			mConvertHighlight = nil
+		end
 		mPickMouse.Icon = kArrowCursor -- restore the arrow cursor (not a blank icon)
 	end
 

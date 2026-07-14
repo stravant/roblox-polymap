@@ -1866,6 +1866,21 @@ local function ConvertPanel(props: {
 					.. " and underside.",
 			}),
 		}),
+		DeleteOriginal = e(HelpGui.WithHelpIcon, {
+			LayoutOrder = 2,
+			Subject = e(Checkbox, {
+				Label = "Delete original",
+				Checked = props.Settings.ConvertDeleteOriginal,
+				Changed = function(checked: boolean)
+					props.Settings.ConvertDeleteOriginal = checked
+					props.UpdatedSettings()
+				end,
+			}),
+			Help = e(HelpGui.BasicTooltip, {
+				HelpRichText = "Remove the MeshPart after converting it, leaving just the generated"
+					.. " polygons in its place. Undo brings it back.",
+			}),
+		}),
 	})
 end
 
