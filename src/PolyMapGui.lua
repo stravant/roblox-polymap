@@ -1915,26 +1915,33 @@ end
 local function InstructionsPanel(props: {
 	LayoutOrder: number?,
 })
-	return e(SubPanel, {
-		Title = "Instructions",
-		LayoutOrder = props.LayoutOrder,
-		Padding = UDim.new(0, 8),
-	}, {
-		Description = e("TextLabel", {
+	local function paragraph(order: number, text: string)
+		return e("TextLabel", {
 			Size = UDim2.new(1, 0, 0, 0),
 			AutomaticSize = Enum.AutomaticSize.Y,
 			BackgroundTransparency = 1,
 			RichText = true,
-			Text = "PolyMap lets you edit the Parts in your place by vertex, as though they formed a triangle mesh."
-				.. "<br />• To get started, pick <b>Move</b> or <b>Rotate</b>, click a vertex of one of your parts, and drag the handles."
-				.. "<br />• Next, try adding new geometry with <b>Add Poly</b> or <b>Add Grid</b>.",
+			LayoutOrder = order,
+			Text = text,
 			TextColor3 = Colors.WHITE,
 			TextWrapped = true,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextYAlignment = Enum.TextYAlignment.Top,
 			Font = Enum.Font.SourceSans,
 			TextSize = 16,
-		}),
+		})
+	end
+	return e(SubPanel, {
+		Title = "Instructions",
+		LayoutOrder = props.LayoutOrder,
+		Padding = UDim.new(0, 3),
+	}, {
+		Intro = paragraph(1,
+			"PolyMap lets you edit the Parts in your place by vertex, as though they formed a triangle mesh."),
+		GetStarted = paragraph(2,
+			"• To get started, pick <b>Move</b> or <b>Rotate</b>, click a vertex of one of your parts, and drag the handles."),
+		Next = paragraph(3,
+			"• Next, try adding new geometry with <b>Add Poly</b> or <b>Add Grid</b>."),
 	})
 end
 
