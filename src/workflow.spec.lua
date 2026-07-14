@@ -3764,10 +3764,18 @@ return function(t: TestTypes.TestContext)
 			part.Parent = workspace
 			ChangeHistoryService:SetWaypoint("convert-legacy-setup")
 
+			-- Hovering discovers the legacy part as a plain block quad (discovery
+			-- doesn't know about the SpecialMesh). Reproduce that pre-convert state.
+			mesh.discoverPart(part, part.Position + Vector3.new(0, 0.5, 0))
+			t.expect(#mesh.getPartTriangles(part)).toBe(2)
+
 			settings.ConvertTopShellOnly = false
 			session.ConvertMeshPart(part)
 			t.expect(session.GetErrorToast()).toBe(nil)
 			t.expect(countDict(mesh.getTriangles()) > 0).toBe(true)
+
+			-- Deleting the original also forgot its stale block-quad triangles.
+			t.expect(#mesh.getPartTriangles(part)).toBe(0)
 
 			-- The test mesh is natively 16 studs wide; at Scale 2 the converted
 			-- geometry must span ~32, confirming Scale applies to native coordinates.

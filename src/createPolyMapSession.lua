@@ -2741,6 +2741,12 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				end
 			end
 			if #createdIds > 0 and currentSettings.ConvertDeleteOriginal then
+				-- A legacy mesh Part is a plain Block to discovery, so hovering it may
+				-- have adopted it as quad triangles; forget those or they'd linger in
+				-- the mesh pointing at a part that's about to leave the world.
+				for _, tid in mMesh.getPartTriangles(meshPart) do
+					mMesh.removeTriangle(tid, true)
+				end
 				-- Inside the recording so an undo brings the part back. Parent-out
 				-- rather than Destroy: a destroyed instance can't be reparented by undo.
 				meshPart.Parent = nil
