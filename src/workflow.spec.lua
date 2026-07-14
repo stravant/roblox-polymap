@@ -3747,6 +3747,45 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("Convert: a legacy Part with a FileMesh SpecialMesh converts too", function()
+		withSession(function(session, mesh, settings)
+			settings.Mode = "Convert"
+			-- Legacy combo: the mesh id lives on the SpecialMesh, and its Scale
+			-- multiplies the mesh's NATIVE coordinates (no MeshSize normalization).
+			local part = Instance.new("Part")
+			part.Anchored = true
+			part.Size = Vector3.new(4, 1, 4)
+			part.CFrame = CFrame.new(kRegionCenter + Vector3.new(0, 10, 0))
+			local specialMesh = Instance.new("SpecialMesh")
+			specialMesh.MeshType = Enum.MeshType.FileMesh
+			specialMesh.MeshId = kTestMeshId
+			specialMesh.Scale = Vector3.new(2, 2, 2)
+			specialMesh.Parent = part
+			part.Parent = workspace
+			ChangeHistoryService:SetWaypoint("convert-legacy-setup")
+
+			settings.ConvertTopShellOnly = false
+			session.ConvertMeshPart(part)
+			t.expect(session.GetErrorToast()).toBe(nil)
+			t.expect(countDict(mesh.getTriangles()) > 0).toBe(true)
+
+			-- The test mesh is natively 16 studs wide; at Scale 2 the converted
+			-- geometry must span ~32, confirming Scale applies to native coordinates.
+			local minX, maxX = math.huge, -math.huge
+			for _, v in mesh.getVertices() do
+				minX = math.min(minX, v.position.X)
+				maxX = math.max(maxX, v.position.X)
+			end
+			t.expect(math.abs((maxX - minX) - 32) < 0.5).toBe(true)
+
+			-- Delete original applies to the legacy part too, undoably.
+			t.expect(part.Parent).toBe(nil)
+			ChangeHistoryService:Undo()
+			settle()
+			t.expect(part.Parent).toBe(workspace)
+		end)
+	end)
+
 	t.test("Convert: an unloadable mesh shows a clean error toast", function()
 		withSession(function(session, mesh, settings)
 			settings.Mode = "Convert"

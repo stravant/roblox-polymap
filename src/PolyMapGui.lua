@@ -137,7 +137,7 @@ local function getStatusText(mode: string, settings: Settings.PolyMapSettings, s
 	elseif mode == "Heal" then
 		return "Brush over a torn seam to merge nearby vertices and close the gap."
 	elseif mode == "Convert" then
-		return "Click a MeshPart to convert it into PolyMap polygons."
+		return "Click a MeshPart (or a Part with a SpecialMesh) to convert it into PolyMap polygons."
 	end
 	return ""
 end

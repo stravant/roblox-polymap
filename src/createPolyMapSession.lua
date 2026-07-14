@@ -1235,11 +1235,27 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 	end
 
-	-- Convert mode: outline the MeshPart a click would convert. One lazily-created
+	-- The convertible mesh geometry on a part, or nil: a MeshPart's own mesh, or
+	-- the legacy Part + FileMesh SpecialMesh combo. `scale`/`offset` map raw mesh
+	-- positions into the part's object space: a MeshPart normalizes its mesh to
+	-- MeshSize and stretches it to Size, while a SpecialMesh applies its Scale and
+	-- Offset to the mesh's native coordinates directly.
+	local function meshSourceForPart(part: BasePart): { meshId: string, scale: Vector3, offset: Vector3 }?
+		if part:IsA("MeshPart") then
+			return { meshId = part.MeshId, scale = part.Size / part.MeshSize, offset = Vector3.zero }
+		end
+		local specialMesh = part:FindFirstChildOfClass("SpecialMesh")
+		if specialMesh and specialMesh.MeshType == Enum.MeshType.FileMesh then
+			return { meshId = specialMesh.MeshId, scale = specialMesh.Scale, offset = specialMesh.Offset }
+		end
+		return nil
+	end
+
+	-- Convert mode: outline the part a click would convert. One lazily-created
 	-- Highlight, re-adorned as the hover moves (matching the hover-outline blue).
 	local kConvertHoverColor = Color3.fromRGB(100, 150, 255)
 	local mConvertHighlight: Highlight? = nil
-	local function setConvertHoverPart(part: MeshPart?)
+	local function setConvertHoverPart(part: BasePart?)
 		if part then
 			local highlight = mConvertHighlight
 			if not highlight then
@@ -1403,8 +1419,11 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 
 		setConvertHoverPart(
-			if mode == "Convert" and result and result.Instance:IsA("MeshPart")
-				then result.Instance :: MeshPart
+			if mode == "Convert"
+					and result
+					and result.Instance:IsA("BasePart")
+					and meshSourceForPart(result.Instance :: BasePart) ~= nil
+				then result.Instance :: BasePart
 				else nil
 		)
 
@@ -2632,15 +2651,19 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		mBrushAmounts = {}
 	end
 
-	-- Convert tool: turn a clicked MeshPart into PolyMap triangles by reading its
-	-- geometry through the EditableMesh API. The MeshPart itself is left untouched.
-	-- A face counts as part of the "top shell" when its outward normal points at
-	-- least somewhat upward.
+	-- Convert tool: turn a clicked mesh (a MeshPart, or a legacy Part carrying a
+	-- FileMesh SpecialMesh) into PolyMap triangles by reading its geometry through
+	-- the EditableMesh API. A face counts as part of the "top shell" when its
+	-- outward normal points at least somewhat upward.
 	local kTopShellMinNormalY = 0.05
 
-	local function convertMeshPart(meshPart: MeshPart)
+	local function convertMeshPart(meshPart: BasePart)
+		local source = meshSourceForPart(meshPart)
+		if not source then
+			return
+		end
 		local okCreate, editableOrErr = pcall(function()
-			return AssetService:CreateEditableMeshAsync(Content.fromUri(meshPart.MeshId))
+			return AssetService:CreateEditableMeshAsync(Content.fromUri(source.meshId))
 		end)
 		if not okCreate then
 			-- Reading a mesh's geometry needs edit permission on the asset; Studio
@@ -2658,20 +2681,21 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 		local editable = editableOrErr :: EditableMesh
 
-		-- Gather world-space triangles: object-space positions scaled by the part's
-		-- stretch (Size / MeshSize), then transformed by its CFrame. The outward
-		-- normal comes from the face winding, computed on the WORLD positions so a
-		-- non-uniform stretch can't skew the top-shell test.
-		local scale = meshPart.Size / meshPart.MeshSize
+		-- Gather world-space triangles: raw mesh positions mapped into the part's
+		-- object space (see meshSourceForPart), then transformed by its CFrame. The
+		-- outward normal comes from the face winding, computed on the WORLD positions
+		-- so a non-uniform stretch can't skew the top-shell test.
+		local scale = source.scale
+		local offset = source.offset
 		local cf = meshPart.CFrame
 		local topShellOnly = currentSettings.ConvertTopShellOnly
 		local tris: { { p1: Vector3, p2: Vector3, p3: Vector3, hint: Vector3 } } = {}
 		for _, faceId in editable:GetFaces() do
 			local fv = editable:GetFaceVertices(faceId)
 			if #fv == 3 then
-				local p1 = cf:PointToWorldSpace(editable:GetPosition(fv[1]) * scale)
-				local p2 = cf:PointToWorldSpace(editable:GetPosition(fv[2]) * scale)
-				local p3 = cf:PointToWorldSpace(editable:GetPosition(fv[3]) * scale)
+				local p1 = cf:PointToWorldSpace(editable:GetPosition(fv[1]) * scale + offset)
+				local p2 = cf:PointToWorldSpace(editable:GetPosition(fv[2]) * scale + offset)
+				local p3 = cf:PointToWorldSpace(editable:GetPosition(fv[3]) * scale + offset)
 				local normal = (p2 - p1):Cross(p3 - p1)
 				local mag = normal.Magnitude
 				if mag > 0.000001 then -- skip degenerate faces
@@ -2694,7 +2718,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			return
 		end
 
-		-- The converted triangles keep the MeshPart's appearance and land in a fresh
+		-- The converted triangles keep the part's appearance and land in a fresh
 		-- PolyMapMesh folder. Each face's hint point sits off its outward side so the
 		-- built wedges' thickness extends inward, matching the mesh surface.
 		local props: fillTriangle.TriangleProps = {
@@ -2716,7 +2740,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				end
 			end
 			if #createdIds > 0 and currentSettings.ConvertDeleteOriginal then
-				-- Inside the recording so an undo brings the MeshPart back. Parent-out
+				-- Inside the recording so an undo brings the part back. Parent-out
 				-- rather than Destroy: a destroyed instance can't be reparented by undo.
 				meshPart.Parent = nil
 			end
@@ -2812,8 +2836,8 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		elseif mode == "Add" then
 			handleAddClick(result.Position, hitPart, result.Normal, cursorScreen)
 		elseif mode == "Convert" then
-			if hitPart and hitPart:IsA("MeshPart") then
-				convertMeshPart(hitPart :: MeshPart)
+			if hitPart and meshSourceForPart(hitPart) then
+				convertMeshPart(hitPart)
 			end
 		elseif mode == "Delete" or mode == "Paint" or mode == "Relax" or mode == "Flatten" or mode == "Heal" then
 			startStroke()
@@ -3576,9 +3600,9 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		end
 	end
 
-	-- Convert a MeshPart into PolyMap triangles (the Convert tool's click action;
-	-- also the test entry point).
-	session.ConvertMeshPart = function(meshPart: MeshPart)
+	-- Convert a MeshPart (or legacy Part + SpecialMesh) into PolyMap triangles
+	-- (the Convert tool's click action; also the test entry point).
+	session.ConvertMeshPart = function(meshPart: BasePart)
 		convertMeshPart(meshPart)
 	end
 
