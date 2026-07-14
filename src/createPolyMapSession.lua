@@ -2670,9 +2670,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			-- throws "...no permission to load asset" for meshes the user doesn't own.
 			local msg = tostring(editableOrErr)
 			if string.find(string.lower(msg), "permission", 1, true) then
-				showErrorToast("<b>PolyMap:</b> Can't convert this mesh because you don't have"
-					.. " permission to read its geometry. Only mesh assets owned by you (or your"
-					.. " group) can be converted.")
+				showErrorToast("<b>PolyMap:</b> This mesh can't be converted because Roblox won't"
+					.. " let plugins read the geometry of meshes you don't own. I'm sure they had"
+					.. " a great reason for locking the EditableMesh API down that tightly."
+					.. " Until they reconsider, only meshes owned by you (or your group) will convert.")
 			else
 				showErrorToast("<b>PolyMap:</b> Can't convert this mesh because its geometry"
 					.. " failed to load: " .. msg)
