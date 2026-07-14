@@ -70,7 +70,7 @@ export type TriangleMesh = {
 
 	-- Mutations
 	addTriangle: (v1Pos: Vector3, v2Pos: Vector3, v3Pos: Vector3, thickness: number, parent: Instance, props: fillTriangle.TriangleProps?, hintPoint: Vector3) -> number?,
-	removeTriangle: (triangleId: number, keepParts: boolean?) -> (),
+	removeTriangle: (triangleId: number, keepParts: boolean?, skipBlockUpgrade: boolean?) -> (),
 	moveVertex: (vertexId: number, newPosition: Vector3, thickness: number, props: fillTriangle.TriangleProps?) -> (),
 	moveVertices: (moves: { [number]: Vector3 }, thickness: number, props: fillTriangle.TriangleProps?) -> (),
 	mergeVertices: (survivorId: number, mergedId: number, position: Vector3, props: fillTriangle.TriangleProps?) -> boolean,
@@ -914,7 +914,11 @@ local function createTriangleMesh(thicknessHint: number?, watchParts: boolean?):
 	-- keepParts leaves the parts in the world (just forgets the triangle in-memory) so an
 	-- undo can locally re-discover them after ChangeHistory has reverted them, instead of
 	-- rebuilding the whole mesh. The Delete path leaves it nil/false to parent the parts out.
-	local function removeTriangle(triangleId: number, keepParts: boolean?)
+	-- skipBlockUpgrade is for callers forgetting ALL of a block's triangles at once
+	-- (Convert's delete-original): the upgrade exists to give REMAINING sibling triangles
+	-- real wedge parts, so with no siblings kept it would only materialize wedges that,
+	-- under keepParts, nothing ever cleans up.
+	local function removeTriangle(triangleId: number, keepParts: boolean?, skipBlockUpgrade: boolean?)
 		local tri = mTriangles[triangleId]
 		if not tri then
 			return
@@ -922,7 +926,7 @@ local function createTriangleMesh(thicknessHint: number?, watchParts: boolean?):
 
 		-- If this is a Block-backed triangle, upgrade all siblings first
 		-- so the remaining triangles get proper Wedge parts
-		if tri.partsRequireUpgrade then
+		if tri.partsRequireUpgrade and not skipBlockUpgrade then
 			upgradeBlockTriangles(tri, tri.thickness)
 		end
 

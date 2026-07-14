@@ -3777,6 +3777,17 @@ return function(t: TestTypes.TestContext)
 			-- Deleting the original also forgot its stale block-quad triangles.
 			t.expect(#mesh.getPartTriangles(part)).toBe(0)
 
+			-- And the forget must not have materialized the quad into real wedge
+			-- parts (removeTriangle's block upgrade): every part left in the region
+			-- must be tracked by the mesh.
+			local strays = 0
+			for _, p in workspace:GetPartBoundsInRadius(kRegionCenter + Vector3.new(0, 10, 0), 100) do
+				if p:IsA("BasePart") and not p:IsA("Terrain") and #mesh.getPartTriangles(p) == 0 then
+					strays += 1
+				end
+			end
+			t.expect(strays).toBe(0)
+
 			-- The test mesh is natively 16 studs wide; at Scale 2 the converted
 			-- geometry must span ~32, confirming Scale applies to native coordinates.
 			local minX, maxX = math.huge, -math.huge

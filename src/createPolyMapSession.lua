@@ -2744,8 +2744,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 				-- A legacy mesh Part is a plain Block to discovery, so hovering it may
 				-- have adopted it as quad triangles; forget those or they'd linger in
 				-- the mesh pointing at a part that's about to leave the world.
+				-- skipBlockUpgrade: we're dropping ALL of the block's triangles, and the
+				-- upgrade would materialize the quad as real wedge parts left behind.
 				for _, tid in mMesh.getPartTriangles(meshPart) do
-					mMesh.removeTriangle(tid, true)
+					mMesh.removeTriangle(tid, true, true)
 				end
 				-- Inside the recording so an undo brings the part back. Parent-out
 				-- rather than Destroy: a destroyed instance can't be reparented by undo.
