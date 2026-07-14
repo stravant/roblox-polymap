@@ -61,6 +61,7 @@ local function makeSettings(): Settings.PolyMapSettings
 		HealTolerance = 1,
 		HealSameColor = false,
 		HealSameMaterial = false,
+		ConvertTopShellOnly = true,
 		ImportImageId = "",
 		ImportWidth = 50,
 		ImportHeight = 50,

@@ -7,14 +7,14 @@ local Packages = Plugin.Packages
 local React = require(Packages.React)
 local ReactRoblox = require(Packages.ReactRoblox)
 
-local ConflictToast = require("./ConflictToast")
+local Toast = require("./Toast")
 local PolyMapGui = require("./PolyMapGui")
 local Settings = require("./Settings")
 local TestTypes = require("./TestTypes")
 
 local e = React.createElement
 
-local ALL_MODES = { "Settings", "Move", "Rotate", "Add", "Delete", "Paint", "Generate", "Import", "Relax", "Flatten", "Heal" }
+local ALL_MODES = { "Settings", "Move", "Rotate", "Add", "Delete", "Paint", "Generate", "Import", "Relax", "Flatten", "Heal", "Convert" }
 
 local function makeSettings(mode: string): Settings.PolyMapSettings
 	return {
@@ -53,6 +53,7 @@ local function makeSettings(mode: string): Settings.PolyMapSettings
 		HealTolerance = 1,
 		HealSameColor = false,
 		HealSameMaterial = false,
+		ConvertTopShellOnly = true,
 		ImportImageId = "",
 		ImportWidth = 50,
 		ImportHeight = 50,
@@ -98,7 +99,7 @@ return function(t: TestTypes.TestContext)
 		end)
 	end
 
-	t.test("conflict toast mounts into CoreGui and unmounts cleanly", function()
+	t.test("toast mounts into CoreGui and unmounts cleanly", function()
 		local screen = Instance.new("ScreenGui")
 		screen.Name = "$PolyMapToastTest"
 		screen.Parent = CoreGui
@@ -106,14 +107,15 @@ return function(t: TestTypes.TestContext)
 		local root = ReactRoblox.createRoot(screen)
 		local ok, err = pcall(function()
 			ReactRoblox.act(function()
-				root:render(e(ConflictToast, {
+				root:render(e(Toast, {
+					Text = "<b>PolyMap:</b> Test message.",
 					OnDismiss = function() end,
 				}))
 			end)
 
 			-- The toast portals into its own ScreenGui over the viewport, with the
 			-- message and dismiss affordance present.
-			local toastGui = CoreGui:FindFirstChild("PolyMapConflictToast")
+			local toastGui = CoreGui:FindFirstChild("PolyMapToast")
 			t.expect(toastGui ~= nil).toBe(true)
 			local frame = (toastGui :: Instance):FindFirstChild("Toast")
 			t.expect(frame ~= nil).toBe(true)
@@ -129,6 +131,6 @@ return function(t: TestTypes.TestContext)
 		if not ok then
 			error(err)
 		end
-		t.expect(CoreGui:FindFirstChild("PolyMapConflictToast")).toBe(nil)
+		t.expect(CoreGui:FindFirstChild("PolyMapToast")).toBe(nil)
 	end)
 end

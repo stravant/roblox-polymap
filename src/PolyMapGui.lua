@@ -19,7 +19,7 @@ local MaterialDropdown = require("./PluginGui/MaterialDropdown")
 local Checkbox = require("./PluginGui/Checkbox")
 local Settings = require("./Settings")
 local PluginGuiTypes = require("./PluginGui/Types")
-local ConflictToast = require("./ConflictToast")
+local Toast = require("./Toast")
 local MeshOverlay = require("./MeshOverlay")
 local createPolyMapSession = require("./createPolyMapSession")
 
@@ -136,6 +136,8 @@ local function getStatusText(mode: string, settings: Settings.PolyMapSettings, s
 		return "Click and drag to smooth surface normals within the brush radius."
 	elseif mode == "Heal" then
 		return "Brush over a torn seam to merge nearby vertices and close the gap."
+	elseif mode == "Convert" then
+		return "Click a MeshPart to convert it into PolyMap polygons."
 	end
 	return ""
 end
@@ -263,7 +265,7 @@ local function ModePanel(props: {
 		Row4 = row(4, {
 			Flatten = modeChip("Flatten", "Flatten", 1),
 			Heal = modeChip("Heal", "Heal", 2),
-			Empty2 = emptySlot(3),
+			Convert = modeChip("Convert", "Convert", 3),
 		}),
 	})
 end
@@ -1838,6 +1840,35 @@ local function HealPanel(props: {
 	})
 end
 
+local function ConvertPanel(props: {
+	Settings: Settings.PolyMapSettings,
+	UpdatedSettings: () -> (),
+	LayoutOrder: number?,
+})
+	return e(SubPanel, {
+		Title = "Convert",
+		LayoutOrder = props.LayoutOrder,
+		Padding = UDim.new(0, 4),
+	}, {
+		TopShell = e(HelpGui.WithHelpIcon, {
+			LayoutOrder = 1,
+			Subject = e(Checkbox, {
+				Label = "Only use top shell",
+				Checked = props.Settings.ConvertTopShellOnly,
+				Changed = function(checked: boolean)
+					props.Settings.ConvertTopShellOnly = checked
+					props.UpdatedSettings()
+				end,
+			}),
+			Help = e(HelpGui.BasicTooltip, {
+				HelpRichText = "Only convert polygons whose normal faces at least somewhat upward"
+					.. " — the walkable top surface of a terrain-like mesh — skipping its sides"
+					.. " and underside.",
+			}),
+		}),
+	})
+end
+
 -- Heal mode: optional limits that keep Heal from fusing geometry that merely
 -- sits close together but was never meant to be contiguous.
 local function HealLimitsPanel(props: {
@@ -2030,10 +2061,11 @@ local function PolyMapGui(props: {
 	local showPaint = mode == "Paint"
 	local showGrid = mode == "Generate"
 	local showImport = mode == "Import"
-	local showThickness = mode == "Add" or mode == "Generate" or mode == "Import"
+	local showThickness = mode == "Add" or mode == "Generate" or mode == "Import" or mode == "Convert"
 	local showRelax = mode == "Relax"
 	local showFlatten = mode == "Flatten"
 	local showHeal = mode == "Heal"
+	local showConvert = mode == "Convert"
 
 	return e(PluginGui, {
 		Config = POLYMAP_CONFIG,
@@ -2223,6 +2255,11 @@ local function PolyMapGui(props: {
 				UpdatedSettings = props.UpdatedSettings,
 				LayoutOrder = nextOrder(),
 			}),
+			ConvertPanel = showConvert and e(ConvertPanel, {
+				Settings = currentSettings,
+				UpdatedSettings = props.UpdatedSettings,
+				LayoutOrder = nextOrder(),
+			}),
 			StatusText = e(StatusText, {
 				Settings = currentSettings,
 				Session = session,
@@ -2232,9 +2269,28 @@ local function PolyMapGui(props: {
 				HandleAction = props.HandleAction,
 				LayoutOrder = nextOrder(),
 			}),
-			ConflictToast = (session and session.GetConflictWarning()) and e(ConflictToast, {
-				OnDismiss = session.DismissConflictWarning,
-			}) or nil,
+			-- One toast at a time: a fresh error outranks the standing conflict warning.
+			Toast = session and (function()
+				local errorText = session.GetErrorToast()
+				if errorText then
+					return e(Toast, {
+						Text = errorText,
+						AccentColor = Colors.DARK_RED,
+						OnDismiss = session.DismissErrorToast,
+					})
+				end
+				if session.GetConflictWarning() then
+					return e(Toast, {
+						Text = "<b>PolyMap:</b> Another user just edited this place with PolyMap. If you both"
+							.. " edit the same polygons this may lead to poor results.<br />Reopen PolyMap to"
+							.. " refresh the data or turn on <b>Multiuser Support</b> in the Settings to"
+							.. " automatically avoid conflicts at some perf cost.",
+						AccentColor = Colors.WARNING_YELLOW,
+						OnDismiss = session.DismissConflictWarning,
+					})
+				end
+				return nil
+			end)() or nil,
 		}),
 	})
 end

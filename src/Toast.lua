@@ -15,12 +15,13 @@ local e = React.createElement
 local kToastWidth = 460
 local kSlideInSeconds = 0.35
 
--- Toast shown at the bottom of the viewport when another user makes a PolyMap
--- edit while Multiuser Support is off: the in-memory mesh can't self-heal, so
--- the discovered data may no longer match the world. Portalled into its own
--- ScreenGui so it sits over the viewport whether the plugin UI is floating or
--- docked into a panel. Slides up from below the viewport edge on mount.
-local function ConflictToast(props: {
+-- Dismissible notification shown at the bottom of the viewport (conflict
+-- warnings, conversion errors). Portalled into its own ScreenGui so it sits
+-- over the viewport whether the plugin UI is floating or docked into a panel.
+-- Slides up from below the viewport edge on mount.
+local function Toast(props: {
+	Text: string,
+	AccentColor: Color3?,
 	OnDismiss: () -> (),
 })
 	local frameRef = React.useRef(nil :: Frame?)
@@ -39,7 +40,7 @@ local function ConflictToast(props: {
 	end, {})
 
 	return ReactRoblox.createPortal(e("ScreenGui", {
-		Name = "PolyMapConflictToast",
+		Name = "PolyMapToast",
 		DisplayOrder = 100,
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 	}, {
@@ -56,7 +57,7 @@ local function ConflictToast(props: {
 				CornerRadius = UDim.new(0, 6),
 			}),
 			Stroke = e("UIStroke", {
-				Color = Colors.WARNING_YELLOW,
+				Color = props.AccentColor or Colors.WARNING_YELLOW,
 				Thickness = 1,
 				Transparency = 0.25,
 			}),
@@ -71,10 +72,7 @@ local function ConflictToast(props: {
 				Size = UDim2.new(1, 0, 0, 0),
 				AutomaticSize = Enum.AutomaticSize.Y,
 				RichText = true,
-				Text = "<b>PolyMap:</b> Another user just edited this place with PolyMap. If you both"
-					.. " edit the same polygons this may lead to poor results.<br />Reopen PolyMap to"
-					.. " refresh the data or turn on <b>Multiuser Support</b> in the Settings to"
-					.. " automatically avoid conflicts at some perf cost.",
+				Text = props.Text,
 				TextColor3 = Colors.WHITE,
 				TextWrapped = true,
 				TextXAlignment = Enum.TextXAlignment.Left,
@@ -97,4 +95,4 @@ local function ConflictToast(props: {
 	}), CoreGui)
 end
 
-return ConflictToast
+return Toast

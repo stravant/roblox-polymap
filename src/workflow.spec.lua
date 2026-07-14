@@ -6,6 +6,7 @@
 -- These exercise the full undo machinery (pushUndoSnapshot / recordings /
 -- handleUndo / rediscoverMesh) that the mouse-driven editing relies on.
 
+local AssetService = game:GetService("AssetService")
 local ChangeHistoryService = game:GetService("ChangeHistoryService")
 local ServerStorage = game:GetService("ServerStorage")
 local StudioService = game:GetService("StudioService")
@@ -62,6 +63,7 @@ local function makeSettings(): Settings.PolyMapSettings
 		HealTolerance = 1,
 		HealSameColor = false,
 		HealSameMaterial = false,
+		ConvertTopShellOnly = true,
 		ImportImageId = "",
 		ImportWidth = 50,
 		ImportHeight = 50,
@@ -3685,6 +3687,71 @@ return function(t: TestTypes.TestContext)
 		if marker then
 			marker:Destroy()
 		end
+	end)
+
+	-- A mesh asset owned by the logged-in user (the test mesh from PolyMapTest),
+	-- so CreateEditableMeshAsync is permitted to read its geometry.
+	local kTestMeshId = "rbxassetid://127285797303307"
+
+	local function makeTestMeshPart(): MeshPart
+		local meshPart = AssetService:CreateMeshPartAsync(Content.fromUri(kTestMeshId))
+		meshPart.Anchored = true
+		meshPart.CFrame = CFrame.new(kRegionCenter + Vector3.new(0, 10, 0))
+		meshPart.Parent = workspace
+		return meshPart
+	end
+
+	t.test("Convert: turns a MeshPart's top shell into polygons, undoably", function()
+		withSession(function(session, mesh, settings)
+			settings.Mode = "Convert"
+			local meshPart = makeTestMeshPart()
+
+			session.ConvertMeshPart(meshPart)
+			t.expect(session.GetErrorToast()).toBe(nil)
+
+			-- Top shell only (the default): some faces convert, and every one of
+			-- them faces at least somewhat upward.
+			local shellCount = countDict(mesh.getTriangles())
+			t.expect(shellCount > 0).toBe(true)
+			for _, tri in mesh.getTriangles() do
+				t.expect(tri.normal.Y > 0).toBe(true)
+			end
+
+			-- The conversion is one undoable op.
+			ChangeHistoryService:Undo()
+			settle()
+			t.expect(countDict(mesh.getTriangles())).toBe(0)
+			ChangeHistoryService:Redo()
+			settle()
+			t.expect(countDict(mesh.getTriangles())).toBe(shellCount)
+
+			-- With the top-shell limit off, the whole mesh converts: strictly more
+			-- triangles (the sides and underside come along).
+			ChangeHistoryService:Undo()
+			settle()
+			settings.ConvertTopShellOnly = false
+			session.ConvertMeshPart(meshPart)
+			t.expect(countDict(mesh.getTriangles()) > shellCount).toBe(true)
+		end)
+	end)
+
+	t.test("Convert: an unloadable mesh shows a clean error toast", function()
+		withSession(function(session, mesh, settings)
+			settings.Mode = "Convert"
+			-- A fresh MeshPart has no MeshId, so reading its geometry fails the same
+			-- way an unowned asset does (CreateEditableMeshAsync throws).
+			local meshPart = Instance.new("MeshPart")
+			meshPart.Anchored = true
+			meshPart.CFrame = CFrame.new(kRegionCenter + Vector3.new(0, 10, 0))
+			meshPart.Parent = workspace
+
+			session.ConvertMeshPart(meshPart)
+
+			t.expect(session.GetErrorToast() ~= nil).toBe(true)
+			t.expect(countDict(mesh.getTriangles())).toBe(0)
+			session.DismissErrorToast()
+			t.expect(session.GetErrorToast()).toBe(nil)
+		end)
 	end)
 
 end

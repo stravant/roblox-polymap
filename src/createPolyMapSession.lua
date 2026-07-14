@@ -1,5 +1,6 @@
 --!strict
 
+local AssetService = game:GetService("AssetService")
 local ChangeHistoryService = game:GetService("ChangeHistoryService")
 local Selection = game:GetService("Selection")
 local ServerStorage = game:GetService("ServerStorage")
@@ -372,6 +373,14 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	local mConflictWarning = false
 	local mConflictSeen = false
 	local mMarkerValueCn: RBXScriptConnection? = nil
+
+	-- Error toast (e.g. a Convert that failed): a rich-text message shown at the
+	-- bottom of the viewport until dismissed; a newer error replaces an older one.
+	local mErrorToast: string? = nil
+	local function showErrorToast(richText: string)
+		mErrorToast = richText
+		changeSignal:Fire()
+	end
 
 	local function findEditorMarker(): IntValue?
 		local marker = ServerStorage:FindFirstChild(kLastEditorValueName)
@@ -2590,6 +2599,96 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		mBrushAmounts = {}
 	end
 
+	-- Convert tool: turn a clicked MeshPart into PolyMap triangles by reading its
+	-- geometry through the EditableMesh API. The MeshPart itself is left untouched.
+	-- A face counts as part of the "top shell" when its outward normal points at
+	-- least somewhat upward.
+	local kTopShellMinNormalY = 0.05
+
+	local function convertMeshPart(meshPart: MeshPart)
+		local okCreate, editableOrErr = pcall(function()
+			return AssetService:CreateEditableMeshAsync(Content.fromUri(meshPart.MeshId))
+		end)
+		if not okCreate then
+			-- Reading a mesh's geometry needs edit permission on the asset; Studio
+			-- throws "...no permission to load asset" for meshes the user doesn't own.
+			local msg = tostring(editableOrErr)
+			if string.find(string.lower(msg), "permission", 1, true) then
+				showErrorToast("<b>PolyMap:</b> Can't convert this mesh because you don't have"
+					.. " permission to read its geometry. Only mesh assets owned by you (or your"
+					.. " group) can be converted.")
+			else
+				showErrorToast("<b>PolyMap:</b> Can't convert this mesh because its geometry"
+					.. " failed to load: " .. msg)
+			end
+			return
+		end
+		local editable = editableOrErr :: EditableMesh
+
+		-- Gather world-space triangles: object-space positions scaled by the part's
+		-- stretch (Size / MeshSize), then transformed by its CFrame. The outward
+		-- normal comes from the face winding, computed on the WORLD positions so a
+		-- non-uniform stretch can't skew the top-shell test.
+		local scale = meshPart.Size / meshPart.MeshSize
+		local cf = meshPart.CFrame
+		local topShellOnly = currentSettings.ConvertTopShellOnly
+		local tris: { { p1: Vector3, p2: Vector3, p3: Vector3, hint: Vector3 } } = {}
+		for _, faceId in editable:GetFaces() do
+			local fv = editable:GetFaceVertices(faceId)
+			if #fv == 3 then
+				local p1 = cf:PointToWorldSpace(editable:GetPosition(fv[1]) * scale)
+				local p2 = cf:PointToWorldSpace(editable:GetPosition(fv[2]) * scale)
+				local p3 = cf:PointToWorldSpace(editable:GetPosition(fv[3]) * scale)
+				local normal = (p2 - p1):Cross(p3 - p1)
+				local mag = normal.Magnitude
+				if mag > 0.000001 then -- skip degenerate faces
+					if not topShellOnly or normal.Y / mag > kTopShellMinNormalY then
+						local centroid = (p1 + p2 + p3) / 3
+						table.insert(tris, { p1 = p1, p2 = p2, p3 = p3, hint = centroid + normal / mag })
+					end
+				end
+			end
+		end
+		editable:Destroy()
+
+		if #tris == 0 then
+			if topShellOnly then
+				showErrorToast("<b>PolyMap:</b> This mesh has no upward-facing polygons to convert."
+					.. " Turn off <b>Only use top shell</b> to convert all of its faces.")
+			else
+				showErrorToast("<b>PolyMap:</b> This mesh has no polygons to convert.")
+			end
+			return
+		end
+
+		-- The converted triangles keep the MeshPart's appearance and land in a fresh
+		-- PolyMapMesh folder. Each face's hint point sits off its outward side so the
+		-- built wedges' thickness extends inward, matching the mesh surface.
+		local props: fillTriangle.TriangleProps = {
+			Color = meshPart.Color,
+			Material = meshPart.Material,
+			MaterialVariant = meshPart.MaterialVariant,
+		}
+		local createdIds: { number } = {}
+		runUndoableOperation("PolyMap Convert", function(): boolean
+			-- Resolved inside the recording so an undo removes the folder too.
+			local parent = resolveNewParent(nil)
+			for _, tri in tris do
+				local id = mMesh.addTriangle(
+					tri.p1, tri.p2, tri.p3,
+					currentSettings.Thickness, parent, props, tri.hint
+				)
+				if id then
+					table.insert(createdIds, id)
+				end
+			end
+			return #createdIds > 0
+		end, function(): MoveDelta
+			return buildAddDelta(createdIds)
+		end)
+		changeSignal:Fire()
+	end
+
 	local function handleClick()
 		if mIsOverUI or mIsDraggingHandle then
 			return
@@ -2674,6 +2773,10 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			handleSelectClick(result.Position, hitPart)
 		elseif mode == "Add" then
 			handleAddClick(result.Position, hitPart, result.Normal, cursorScreen)
+		elseif mode == "Convert" then
+			if hitPart and hitPart:IsA("MeshPart") then
+				convertMeshPart(hitPart :: MeshPart)
+			end
 		elseif mode == "Delete" or mode == "Paint" or mode == "Relax" or mode == "Flatten" or mode == "Heal" then
 			startStroke()
 			applyStrokeAtCursor()
@@ -3417,6 +3520,23 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 			mConflictWarning = false
 			changeSignal:Fire()
 		end
+	end
+
+	-- Error toast (e.g. a failed Convert): rich text to show, or nil for none.
+	session.GetErrorToast = function(): string?
+		return mErrorToast
+	end
+	session.DismissErrorToast = function()
+		if mErrorToast then
+			mErrorToast = nil
+			changeSignal:Fire()
+		end
+	end
+
+	-- Convert a MeshPart into PolyMap triangles (the Convert tool's click action;
+	-- also the test entry point).
+	session.ConvertMeshPart = function(meshPart: MeshPart)
+		convertMeshPart(meshPart)
 	end
 
 	-- Accessors for UI/overlay
