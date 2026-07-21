@@ -467,7 +467,14 @@ local function createTriangleMesh(thicknessHint: number?, watchParts: boolean?):
 		local hash = hashEdge(v1.position, v2.position)
 		local existing = mEdgeLookup[hash]
 		if existing then
-			return existing
+			if mEdges[existing] then
+				return existing
+			end
+			-- Stale entry: cleanupEdge can't re-derive the hash when the edge's
+			-- recorded endpoints died first (see cleanupEdge), so the entry for a
+			-- removed edge can linger. Drop it and fall through rather than handing
+			-- back a dead edge id.
+			mEdgeLookup[hash] = nil
 		end
 		local id = mNextEdgeId
 		mNextEdgeId += 1
@@ -557,8 +564,22 @@ local function createTriangleMesh(thicknessHint: number?, watchParts: boolean?):
 	local function cleanupEdge(edgeId: EdgeId)
 		local edge = mEdges[edgeId]
 		if edge and #edge.triangles == 0 then
-			local hash = hashEdge(mVertices[edge.v1].position, mVertices[edge.v2].position)
-			mEdgeLookup[hash] = nil
+			-- The recorded endpoints can be DEAD: getOrCreateEdge keys edges purely by
+			-- position hash, so a second, coincident vertex pair (a torn seam, or any
+			-- pair whose cell-sum collides) shares this edge object while the edge
+			-- records only the first pair's ids. Deleting the recording pair's last
+			-- triangle orphans-and-removes those vertices while the edge lives on for
+			-- the other pair -- so detaching THAT pair later lands here with dangling
+			-- v1/v2. Clear the lookup entry only when it verifiably points at this
+			-- edge (a dead endpoint leaves a stale entry; getOrCreateEdge skips those).
+			local v1 = mVertices[edge.v1]
+			local v2 = mVertices[edge.v2]
+			if v1 and v2 then
+				local hash = hashEdge(v1.position, v2.position)
+				if mEdgeLookup[hash] == edgeId then
+					mEdgeLookup[hash] = nil
+				end
+			end
 			mEdges[edgeId] = nil
 			local e1 = mVertexEdges[edge.v1]
 			if e1 then

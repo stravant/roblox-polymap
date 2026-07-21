@@ -205,6 +205,66 @@ return function(t: TestTypes.TestContext)
 		folder:Destroy()
 	end)
 
+	t.test("removing hash-colliding edges survives the shared edge's dead endpoints", function()
+		local mesh = createTriangleMesh()
+		local folder = Instance.new("Folder")
+		folder.Parent = workspace
+
+		local function countDict(dict: { [any]: any }): number
+			local n = 0
+			for _ in dict do
+				n += 1
+			end
+			return n
+		end
+
+		-- hashEdge is the SUM of the endpoint cell-hashes, so the edge (0,0,0)-(4,0,0)
+		-- and the edge (1,0,0)-(3,0,0) collide (equal midpoint, distinct endpoints) and
+		-- getOrCreateEdge hands both triangles ONE edge object recording only the first
+		-- pair's vertex ids. Removing tri1 then orphans-and-removes those recorded
+		-- vertices while the edge lives on for tri2's pair; removing tri2 then reaches
+		-- cleanupEdge with dangling endpoint ids, which used to crash ("attempt to
+		-- index nil with 'position'").
+		local tri1 = mesh.addTriangle(
+			Vector3.new(0, 0, 0),
+			Vector3.new(4, 0, 0),
+			Vector3.new(2, 4, 0),
+			0.2, folder, nil, Vector3.new(0, 0, 1)
+		)
+		local tri2 = mesh.addTriangle(
+			Vector3.new(1, 0, 0),
+			Vector3.new(3, 0, 0),
+			Vector3.new(2, -4, 0),
+			0.2, folder, nil, Vector3.new(0, 0, 1)
+		)
+		assert(tri1 and tri2)
+
+		-- Precondition: the collision really happened -- 5 edges, not 6. If this
+		-- fails, the edge hashing changed and this test needs new positions.
+		t.expect(countDict(mesh.getEdges())).toBe(5)
+
+		mesh.removeTriangle(tri1)
+		mesh.removeTriangle(tri2)
+
+		t.expect(countDict(mesh.getTriangles())).toBe(0)
+		t.expect(countDict(mesh.getVertices())).toBe(0)
+		t.expect(countDict(mesh.getEdges())).toBe(0)
+
+		-- The un-clearable lookup entry (its endpoints died first) now points at a
+		-- removed edge. Re-adding a triangle on the colliding pair must skip that
+		-- stale entry and mint a fresh edge, not adopt the dead id.
+		local tri3 = mesh.addTriangle(
+			Vector3.new(1, 0, 0),
+			Vector3.new(3, 0, 0),
+			Vector3.new(2, -4, 0),
+			0.2, folder, nil, Vector3.new(0, 0, 1)
+		)
+		t.expect(tri3).toBeTruthy()
+		t.expect(countDict(mesh.getEdges())).toBe(3)
+
+		folder:Destroy()
+	end)
+
 	t.test("getVertexNeighbors returns adjacent vertices", function()
 		local mesh = createTriangleMesh()
 		local folder = Instance.new("Folder")
