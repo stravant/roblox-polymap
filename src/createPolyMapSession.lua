@@ -891,20 +891,45 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		local screenBest = kAddSnapPixels
 		local worldVid: number? = nil
 		local worldBest = kAddSnapRadius
-		for id, vertex in mMesh.getVertices() do
-			local worldDist = (vertex.position - worldPos).Magnitude
-			if worldDist < worldBest then
-				worldBest = worldDist
-				worldVid = id
-			end
-			if camera and cursor2 then
-				local vs = camera:WorldToViewportPoint(vertex.position)
-				if vs.Z > 0 then
-					local screenDist = (Vector2.new(vs.X, vs.Y) - cursor2).Magnitude
+		if camera and cursor2 then
+			-- This scan visits EVERY discovered vertex each hover frame, so the
+			-- screen test uses plain vector math off a one-time camera snapshot,
+			-- replicating WorldToViewportPoint (vertical FOV, viewport origin
+			-- top-left, Z = depth in front): one engine call per vertex dominated
+			-- the Add hover's frame time on a well-discovered map.
+			local cf = camera.CFrame
+			local origin, right, up, look = cf.Position, cf.RightVector, cf.UpVector, cf.LookVector
+			local vp = camera.ViewportSize
+			local vpHalfX, vpHalfY = vp.X / 2, vp.Y / 2
+			local tanHalfH = math.tan(math.rad(camera.FieldOfView) * 0.5)
+			local tanHalfW = tanHalfH * (vp.X / vp.Y)
+			local cursorX, cursorY = cursor2.X, cursor2.Y
+			for id, vertex in mMesh.getVertices() do
+				local pos = vertex.position
+				local worldDist = (pos - worldPos).Magnitude
+				if worldDist < worldBest then
+					worldBest = worldDist
+					worldVid = id
+				end
+				local rel = pos - origin
+				local z = rel:Dot(look)
+				if z > 0 then
+					local sx = vpHalfX * (1 + rel:Dot(right) / (z * tanHalfW))
+					local sy = vpHalfY * (1 - rel:Dot(up) / (z * tanHalfH))
+					local dx, dy = sx - cursorX, sy - cursorY
+					local screenDist = math.sqrt(dx * dx + dy * dy)
 					if screenDist < screenBest then
 						screenBest = screenDist
 						screenVid = id
 					end
+				end
+			end
+		else
+			for id, vertex in mMesh.getVertices() do
+				local worldDist = (vertex.position - worldPos).Magnitude
+				if worldDist < worldBest then
+					worldBest = worldDist
+					worldVid = id
 				end
 			end
 		end

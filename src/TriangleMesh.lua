@@ -135,6 +135,14 @@ local function hashEdge(v1: Vector3, v2: Vector3): EdgeHash
 	return hashVertex(v1) + hashVertex(v2)
 end
 
+-- The "minVertexId_maxVertexId" key getEdges() exposes edges under -- the form
+-- callers build when they want the edge between two known vertices.
+local function vertexPairKey(v1Id: number, v2Id: number): string
+	return if v1Id < v2Id
+		then tostring(v1Id) .. "_" .. tostring(v2Id)
+		else tostring(v2Id) .. "_" .. tostring(v1Id)
+end
+
 -- The three edges of a triangle as ordered vertex-id pairs (1-2, 2-3, 3-1).
 local function triangleEdgePairs(verts: { VertexId }): { { VertexId } }
 	return {
@@ -170,6 +178,12 @@ local function createTriangleMesh(thicknessHint: number?, watchParts: boolean?):
 	local mTriangles = {} :: {[TriangleId]: Triangle}
 	local mVertices = {} :: {[VertexId]: Vertex}
 	local mEdges = {} :: {[EdgeId]: Edge}
+	-- The same edges keyed by vertexPairKey, maintained alongside mEdges and
+	-- returned directly by getEdges(): the Add tool's hover reads getEdges()
+	-- several times per frame, and rebuilding the keyed view on demand (a string
+	-- key per edge) scaled with the whole discovered mesh, not the cursor's
+	-- surroundings.
+	local mEdgesByPair = {} :: {[string]: Edge}
 
 	-- Head of linked list of Triangles for a given part
 	local mPartToTriangles = {} :: {[BasePart]: TriangleId}
@@ -485,6 +499,7 @@ local function createTriangleMesh(thicknessHint: number?, watchParts: boolean?):
 			v2 = v2Id,
 		}
 		mEdges[id] = edge
+		mEdgesByPair[vertexPairKey(v1Id, v2Id)] = edge
 		mEdgeLookup[hash] = id
 		addVertexEdge(v1Id, id)
 		addVertexEdge(v2Id, id)
@@ -579,6 +594,10 @@ local function createTriangleMesh(thicknessHint: number?, watchParts: boolean?):
 				if mEdgeLookup[hash] == edgeId then
 					mEdgeLookup[hash] = nil
 				end
+			end
+			local pairKey = vertexPairKey(edge.v1, edge.v2)
+			if mEdgesByPair[pairKey] == edge then
+				mEdgesByPair[pairKey] = nil
 			end
 			mEdges[edgeId] = nil
 			local e1 = mVertexEdges[edge.v1]
@@ -688,13 +707,10 @@ local function createTriangleMesh(thicknessHint: number?, watchParts: boolean?):
 	-- when they want to look up the edge between two known vertices (e.g.
 	-- findNearestBoundaryEdge, Add-mode edge snapping). The internal mEdges table
 	-- is keyed by numeric EdgeId, which those string lookups would never match.
+	-- This is the live incrementally-maintained view: treat it as read-only,
+	-- like getVertices()/getTriangles().
 	local function getEdges(): {[string]: Edge}
-		local result = {} :: {[string]: Edge}
-		for _, edge in mEdges do
-			local key = tostring(math.min(edge.v1, edge.v2)) .. "_" .. tostring(math.max(edge.v1, edge.v2))
-			result[key] = edge
-		end
-		return result
+		return mEdgesByPair
 	end
 
 	local function getVertex(id: VertexId): Vertex?
@@ -2911,6 +2927,7 @@ local function createTriangleMesh(thicknessHint: number?, watchParts: boolean?):
 		table.clear(mTriangles)
 		table.clear(mVertices)
 		table.clear(mEdges)
+		table.clear(mEdgesByPair)
 		table.clear(mPartToTriangles)
 		table.clear(mSpatialHash)
 		table.clear(mEdgeLookup)

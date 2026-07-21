@@ -259,6 +259,68 @@ return function(t: TestTypes.TestContext)
 		end
 	end)
 
+	t.test("Add-mode hover cost stays independent of total mesh size", function()
+		local cam = workspace.CurrentCamera
+		local savedCF = if cam then cam.CFrame else nil
+		if cam then
+			cam.CFrame = CFrame.lookAt(Vector3.new(7000, 220, 40), kCameraTarget)
+		end
+		sweepRegion()
+
+		local settings = makeSettings(40, 40)
+		local session = createPolyMapSession(t.plugin, settings)
+		local mesh = session.GetMesh()
+
+		local ok, err = pcall(function()
+			session.GenerateGrid()
+			local seeds: { Vector3 } = {}
+			for _, v in mesh.getVertices() do
+				table.insert(seeds, v.position)
+			end
+			mesh.discoverRegion(seeds, math.huge)
+			t.expect(countDict(mesh.getTriangles()) > 2500).toBeTruthy()
+
+			-- getEdges() must be O(1): the Add hover reads it several times per
+			-- frame (edge pick, snap-vs-edge arbitration, overlay render), and it
+			-- used to rebuild a string-keyed table over EVERY edge per call.
+			local t0 = os.clock()
+			for _ = 1, 1000 do
+				local _e = mesh.getEdges()
+			end
+			local edgesMs = (os.clock() - t0) * 1000
+			t.expect(edgesMs < 100).toBeTruthy()
+
+			-- The full Add hover (edge pick + vertex snap + overlay getters), swept
+			-- across the mesh like a real cursor. Same budget as the Move-flow
+			-- hover: the Add tool only inspects the polygon under the cursor, so
+			-- it must not be slower than Move's radius work. snapAddPoint's
+			-- per-vertex WorldToViewportPoint engine calls used to dominate here.
+			settings.Mode = "Add"
+			local camera = workspace.CurrentCamera :: Camera
+			local function screenAt(world: Vector3): Vector2
+				local p = camera:WorldToViewportPoint(world)
+				return Vector2.new(p.X, p.Y)
+			end
+			session.DebugHoverAt(screenAt(kRegionCenter))
+			local N = 20
+			t0 = os.clock()
+			for i = 1, N do
+				session.DebugHoverAt(screenAt(kRegionCenter + Vector3.new((i - N / 2) * 3, 0, 0)))
+			end
+			local hoverMs = (os.clock() - t0) / N * 1000
+			t.expect(hoverMs < 25).toBeTruthy()
+		end)
+
+		session.Destroy()
+		sweepRegion()
+		if cam and savedCF then
+			cam.CFrame = savedCF
+		end
+		if not ok then
+			error(err)
+		end
+	end)
+
 	-- A/B analysis of the part-watching (Team Create staleness) overhead: build one
 	-- large mesh's worth of parts, then discover and bulk-drag them through a raw
 	-- TriangleMesh with watching off vs on, printing where the time goes. The
