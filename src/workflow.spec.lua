@@ -3045,6 +3045,47 @@ return function(t: TestTypes.TestContext)
 		end)
 	end)
 
+	t.test("Add: hovering a huge part keeps the boundary-edge discovery bounded", function()
+		withSession(function(session, mesh, settings)
+			settings.Mode = "Add"
+
+			-- A huge slab whose top face centre sits at the camera target, with a small
+			-- undiscovered wedge triangle touching its far top corner. The Add hover's
+			-- boundary-edge lookup used to discover a region as wide as the hit part's
+			-- bounding diagonal, so hovering the slab walked out to its corners and
+			-- adopted everything there -- on a real place, a many-second hang per frame.
+			local slab = Instance.new("Part")
+			slab.Name = "BigSlab" -- not "Baseplate": that name is refused by discovery
+			slab.Anchored = true
+			slab.Size = Vector3.new(1200, 8, 1200)
+			slab.CFrame = CFrame.new(kRegionCenter - Vector3.new(0, 4, 0))
+			slab.Parent = workspace
+
+			local corner = kRegionCenter + Vector3.new(600, 0, 600)
+			local remoteParts = fillTriangle(
+				corner, corner + Vector3.new(-6, 0, 0), corner + Vector3.new(0, 0, -6),
+				1, workspace)
+
+			local cam = workspace.CurrentCamera
+			assert(cam)
+			local vp = cam:WorldToViewportPoint(kRegionCenter)
+			session.DebugHoverAt(Vector2.new(vp.X, vp.Y))
+
+			-- The slab itself is discovered (its edges are grabbable near the cursor)...
+			t.expect(#mesh.getPartTriangles(slab) > 0).toBe(true)
+			-- ...but the walk must not reach its far corners: the remote wedge, whose
+			-- only connection is a corner shared with the slab, stays undiscovered.
+			for _, p in remoteParts do
+				t.expect(#mesh.getPartTriangles(p)).toBe(0)
+			end
+
+			slab:Destroy()
+			for _, p in remoteParts do
+				p:Destroy()
+			end
+		end)
+	end)
+
 	t.test("workflow: F-to-focus frames the camera on the vertex selection", function()
 		withSession(function(session, mesh, settings)
 			settings.GridWidth = 4

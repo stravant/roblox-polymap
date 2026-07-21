@@ -988,6 +988,21 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		return mMesh.discoverRegion(seeds, radius, cameraViewPoint())
 	end
 
+	-- Discover the part under the cursor plus its neighbours, so its interior edges
+	-- aren't mistaken for boundary and there are fresh vertices to snap to. The
+	-- part's bounding diagonal reaches every corner from any hit point on it, but
+	-- it must be CLAMPED: hovering a huge part (e.g. the ground slab exposed by
+	-- deleting a polygon) otherwise seeds a place-sized region walk -- a
+	-- multi-second hang on a single hover frame. Past the clamp a far edge of a
+	-- large part can misread as boundary; acceptable, since edge grabbing and
+	-- vertex snapping are near-cursor interactions.
+	local kMaxHitPartDiscoverRadius = 50
+	local function discoverHitPartRegion(worldPos: Vector3, hitPart: BasePart)
+		local size = hitPart.Size
+		local extent = math.sqrt(size.X * size.X + size.Y * size.Y + size.Z * size.Z)
+		discoverRegionViewed({ worldPos }, math.min(extent, kMaxHitPartDiscoverRadius))
+	end
+
 	local function discoverAndWalkSurface(seedTriangleId: number, worldPos: Vector3, radius: number)
 		discoverRegionViewed({ worldPos }, radius)
 		return mMesh.walkSurface(seedTriangleId, worldPos, radius)
@@ -998,9 +1013,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 	-- given a hit normal, prefers edges of the camera-facing face over a back face.
 	-- Shared by the Add tool's edge-grab (edge first) and edge-close (apex first).
 	local function boundaryEdgeAt(worldPos: Vector3, hitPart: BasePart, normal: Vector3?): string?
-		local size = hitPart.Size
-		local extent = math.sqrt(size.X * size.X + size.Y * size.Y + size.Z * size.Z)
-		discoverRegionViewed({ worldPos }, extent)
+		discoverHitPartRegion(worldPos, hitPart)
 		local partTriIds = mMesh.getPartTriangles(hitPart)
 		if normal then
 			local filtered = {}
@@ -1188,10 +1201,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		-- discovered; discoverRegion is incremental so re-running it as the cursor
 		-- moves only costs for newly entered geometry.
 		if result and result.Instance:IsA("BasePart") then
-			local hitPart = result.Instance :: BasePart
-			local size = hitPart.Size
-			local extent = math.sqrt(size.X * size.X + size.Y * size.Y + size.Z * size.Z)
-			discoverRegionViewed({ result.Position }, extent)
+			discoverHitPartRegion(result.Position, result.Instance :: BasePart)
 		end
 		local pos: Vector3?
 		if not mGridFirstPoint then
@@ -3960,9 +3970,7 @@ local function createPolyMapSession(plugin: Plugin, currentSettings: Settings.Po
 		-- Mirror gridPlacementPos: discover the clicked part (and its neighbours) so a
 		-- corner can snap to freshly-discovered vertices, not only pre-discovered ones.
 		if hitPart then
-			local size = hitPart.Size
-			local extent = math.sqrt(size.X * size.X + size.Y * size.Y + size.Z * size.Z)
-			discoverRegionViewed({ worldPos }, extent)
+			discoverHitPartRegion(worldPos, hitPart)
 		end
 		local pos, snapVid = snapAddPoint(worldPos)
 		if not mGridFirstPoint then
